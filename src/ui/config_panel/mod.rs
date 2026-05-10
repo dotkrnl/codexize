@@ -73,9 +73,9 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "notifications",
         key: "ntfy.enabled",
-        label: "Enable notifications",
+        label: "Notifications",
         kind: FieldKind::Bool,
-        description: "Enables notification delivery when a topic is configured.",
+        description: "Send ntfy alerts when a topic is set.",
         secret: false,
     },
     FieldMeta {
@@ -83,7 +83,7 @@ const FIELDS: &[FieldMeta] = &[
         key: "ntfy.server",
         label: "Server URL",
         kind: FieldKind::String,
-        description: "Base ntfy server URL. Must start with http:// or https://.",
+        description: "Base ntfy URL. Must start with http:// or https://.",
         secret: false,
     },
     FieldMeta {
@@ -91,15 +91,15 @@ const FIELDS: &[FieldMeta] = &[
         key: "ntfy.topic",
         label: "Topic",
         kind: FieldKind::String,
-        description: "Notification topic. Empty disables delivery; r reveals the full value and R regenerates it.",
+        description: "Ntfy topic. Empty disables alerts; r reveals it, R regenerates it.",
         secret: true,
     },
     FieldMeta {
         section: "notifications",
         key: "ntfy.detail_mode",
-        label: "Notification detail",
+        label: "Detail",
         kind: FieldKind::Enum(NtfyDetailMode::variants()),
-        description: "Controls notification body length. Allowed: detailed, minimal. Default: detailed.",
+        description: "Alert body mode. detailed includes context; minimal is shorter.",
         secret: false,
     },
     FieldMeta {
@@ -107,7 +107,7 @@ const FIELDS: &[FieldMeta] = &[
         key: "ntfy.retry_attempts",
         label: "Retry attempts",
         kind: FieldKind::Integer { min: 1 },
-        description: "Number of notification send attempts. Minimum: 1.",
+        description: "Notification send attempts. Minimum: 1.",
         secret: false,
     },
     FieldMeta {
@@ -115,7 +115,7 @@ const FIELDS: &[FieldMeta] = &[
         key: "ntfy.retry_delay_ms",
         label: "Retry delay (ms)",
         kind: FieldKind::Integer { min: 0 },
-        description: "Delay between notification retries in milliseconds.",
+        description: "Delay between notification retries.",
         secret: false,
     },
     FieldMeta {
@@ -123,71 +123,71 @@ const FIELDS: &[FieldMeta] = &[
         key: "ntfy.http_timeout_secs",
         label: "HTTP timeout (s)",
         kind: FieldKind::Integer { min: 1 },
-        description: "HTTP timeout for ntfy requests. Minimum: 1 second.",
+        description: "Ntfy request timeout. Minimum: 1 second.",
         secret: false,
     },
     FieldMeta {
         section: "notifications",
         key: "ntfy.body_max_bytes",
-        label: "Body limit (bytes)",
+        label: "Body bytes",
         kind: FieldKind::Integer { min: 256 },
-        description: "Maximum notification body size in bytes. Minimum: 256.",
+        description: "Maximum alert body size. Minimum: 256 bytes.",
         secret: false,
     },
     FieldMeta {
         section: "notifications",
         key: "ntfy.excerpt_max_chars",
-        label: "Excerpt limit (chars)",
+        label: "Excerpt chars",
         kind: FieldKind::Integer { min: 32 },
-        description: "Maximum excerpt characters used in notifications. Minimum: 32.",
+        description: "Maximum context excerpt length. Minimum: 32 characters.",
         secret: false,
     },
     FieldMeta {
         section: "system",
         key: "ntfy.created_at",
-        label: "Notification config created",
+        label: "Ntfy created",
         kind: FieldKind::ReadOnly,
-        description: "Metadata timestamp maintained by config mutation paths.",
+        description: "Read-only timestamp set when the topic is first generated.",
         secret: false,
     },
     FieldMeta {
         section: "system",
         key: "ntfy.updated_at",
-        label: "Notification config updated",
+        label: "Ntfy updated",
         kind: FieldKind::ReadOnly,
-        description: "Metadata timestamp maintained by config mutation paths.",
+        description: "Read-only timestamp set when the topic changes.",
         secret: false,
     },
     FieldMeta {
         section: "notifications",
         key: "ntfy.events.phase_wait",
-        label: "Notify on phase wait",
+        label: "Phase-wait alerts",
         kind: FieldKind::Bool,
-        description: "Notify when a phase is waiting.",
+        description: "Alert when a pipeline phase pauses for the operator.",
         secret: false,
     },
     FieldMeta {
         section: "notifications",
         key: "ntfy.events.interactive_wait",
-        label: "Notify on input wait",
+        label: "Input-wait alerts",
         kind: FieldKind::Bool,
-        description: "Notify when an interactive run is waiting for input.",
+        description: "Alert when an interactive run waits for input.",
         secret: false,
     },
     FieldMeta {
         section: "notifications",
         key: "ntfy.events.pipeline_done",
-        label: "Notify on pipeline done",
+        label: "Done alerts",
         kind: FieldKind::Bool,
-        description: "Notify when the pipeline finishes.",
+        description: "Alert when the pipeline finishes.",
         secret: false,
     },
     FieldMeta {
         section: "agents",
         key: "acp.policy.shell_policy",
-        label: "Shell access policy",
+        label: "Shell policy",
         kind: FieldKind::Enum(ShellPolicy::variants()),
-        description: "Default ACP shell policy. Allowed: full-access, allowlist.",
+        description: "Default ACP shell access: full-access or allowlist.",
         secret: false,
     },
     FieldMeta {
@@ -195,15 +195,15 @@ const FIELDS: &[FieldMeta] = &[
         key: "acp.policy.shell_allowlist",
         label: "Shell allowlist",
         kind: FieldKind::List,
-        description: "Read-only list in this panel; use the CLI for item-level edits.",
+        description: "Allowed shell commands. Edit entries with the CLI.",
         secret: false,
     },
     FieldMeta {
         section: "agents",
         key: "acp.policy.enforce_readonly_workspace",
-        label: "Enforce read-only workspace",
+        label: "Read-only workspace",
         kind: FieldKind::Bool,
-        description: "Force ACP runs to treat the workspace as read-only unless write paths are allowed.",
+        description: "Limit ACP writes to the allowed paths.",
         secret: false,
     },
     FieldMeta {
@@ -211,31 +211,31 @@ const FIELDS: &[FieldMeta] = &[
         key: "acp.policy.allowed_write_paths",
         label: "Allowed write paths",
         kind: FieldKind::List,
-        description: "Read-only list in this panel; use the CLI for item-level edits.",
+        description: "Workspace paths ACP agents may write. Edit entries with the CLI.",
         secret: false,
     },
     FieldMeta {
         section: "agents",
         key: "acp.install.claude_acp_root",
-        label: "Claude ACP install path",
+        label: "Claude ACP root",
         kind: FieldKind::String,
-        description: "Claude ACP installation root; $HOME and ~/ are expanded by the loader.",
+        description: "Local Claude ACP install root. $HOME and ~/ expand at load.",
         secret: false,
     },
     FieldMeta {
         section: "agents",
         key: "acp.install.prefer_local_claude_acp",
-        label: "Prefer local Claude ACP",
+        label: "Prefer local Claude",
         kind: FieldKind::Bool,
-        description: "Use the locally installed Claude ACP server before falling back to the global command.",
+        description: "Use the local Claude ACP server before the global command.",
         secret: false,
     },
     FieldMeta {
         section: "general",
         key: "runner.full_review_interval",
-        label: "Review cadence (rounds)",
+        label: "Full review cadence",
         kind: FieldKind::Integer { min: 1 },
-        description: "Run a full alignment review every N review rounds. Minimum: 1.",
+        description: "Run full alignment review every N review rounds. Minimum: 1.",
         secret: false,
     },
     FieldMeta {
@@ -243,7 +243,7 @@ const FIELDS: &[FieldMeta] = &[
         key: "paths.cache_root",
         label: "Cache root",
         kind: FieldKind::String,
-        description: "Root for cache files. $HOME and ~/ are expanded at load.",
+        description: "Cache file root. $HOME and ~/ expand at load.",
         secret: false,
     },
     FieldMeta {
@@ -251,7 +251,7 @@ const FIELDS: &[FieldMeta] = &[
         key: "paths.sessions_root",
         label: "Sessions root",
         kind: FieldKind::String,
-        description: "Root for session artifacts. $HOME and ~/ are expanded at load.",
+        description: "Session artifact root. $HOME and ~/ expand at load.",
         secret: false,
     },
     FieldMeta {
@@ -259,7 +259,7 @@ const FIELDS: &[FieldMeta] = &[
         key: "paths.runs_root",
         label: "Runs root",
         kind: FieldKind::String,
-        description: "Reserved top-level run root; no current subsystem consumes it directly.",
+        description: "Reserved run root. No current subsystem reads it directly.",
         secret: false,
     },
     FieldMeta {
@@ -267,31 +267,31 @@ const FIELDS: &[FieldMeta] = &[
         key: "paths.memory_root",
         label: "Memory root",
         kind: FieldKind::String,
-        description: "Root for project memory files. $HOME and ~/ are expanded at load.",
+        description: "Project memory root. $HOME and ~/ expand at load.",
         secret: false,
     },
     FieldMeta {
         section: "general",
         key: "ui.prefer_split_on_open",
-        label: "Open runs in split view",
+        label: "Open split view",
         kind: FieldKind::Bool,
-        description: "Prefer the split transcript when opening run output.",
+        description: "Open run output in the split transcript.",
         secret: false,
     },
     FieldMeta {
         section: "system",
         key: "ui.colon_palette.show_help",
-        label: "Show palette help row",
+        label: "Palette help row",
         kind: FieldKind::Bool,
-        description: "Show the command palette help row.",
+        description: "Show help text in the command palette.",
         secret: false,
     },
     FieldMeta {
         section: "general",
         key: "ui.footer.show_keys",
-        label: "Show footer key hints",
+        label: "Footer key hints",
         kind: FieldKind::Bool,
-        description: "Show footer key hints.",
+        description: "Show keyboard hints in the footer.",
         secret: false,
     },
     FieldMeta {
@@ -299,15 +299,15 @@ const FIELDS: &[FieldMeta] = &[
         key: "diagnostics.log_level",
         label: "Log level",
         kind: FieldKind::Enum(LogLevel::variants()),
-        description: "Default log level. RUST_LOG still takes precedence.",
+        description: "Default log level; RUST_LOG takes precedence.",
         secret: false,
     },
     FieldMeta {
         section: "system",
         key: "diagnostics.json_logs",
-        label: "Emit JSON logs",
+        label: "JSON logs",
         kind: FieldKind::Bool,
-        description: "Emit JSON logs unless the environment overrides diagnostics.",
+        description: "Write logs as JSON unless the environment overrides diagnostics.",
         secret: false,
     },
     FieldMeta {
@@ -315,31 +315,31 @@ const FIELDS: &[FieldMeta] = &[
         key: "memory.enabled",
         label: "Project memory",
         kind: FieldKind::Bool,
-        description: "Enable project memory prompt context.",
+        description: "Include project memory in prompts.",
         secret: false,
     },
     FieldMeta {
         section: "system",
         key: "memory.max_topics_per_read",
-        label: "Max memory topics",
+        label: "Memory topic limit",
         kind: FieldKind::Integer { min: 1 },
-        description: "Maximum memory topics read into one prompt. Minimum: 1.",
+        description: "Maximum memory topics per prompt. Minimum: 1.",
         secret: false,
     },
     FieldMeta {
         section: "system",
         key: "memory.journal_retention_months",
-        label: "Journal retention (months)",
+        label: "Journal retention",
         kind: FieldKind::Integer { min: 1 },
-        description: "Monthly memory journals older than this are pruned at launch. Minimum: 1.",
+        description: "Months of memory journals to keep. Older journals prune at launch.",
         secret: false,
     },
     FieldMeta {
         section: "agents",
         key: "acp.agents.claude.env",
-        label: "Claude environment",
+        label: "Claude env",
         kind: FieldKind::Map,
-        description: "Read-only map in this panel; use dotted CLI keys for env entries.",
+        description: "Environment variables for Claude ACP. Edit entries with the CLI.",
         secret: false,
     },
 ];
@@ -384,7 +384,7 @@ fn is_providers_section(section: &str) -> bool {
 
 fn section_title(section: &str) -> &'static str {
     match section {
-        "general" => "Common",
+        "general" => "General",
         "models" => "Models",
         "notifications" => "Notifications",
         "agents" => "Agents",
@@ -462,43 +462,43 @@ struct ProviderToggle {
 const PROVIDER_TOGGLES: &[ProviderToggle] = &[
     ProviderToggle {
         label: "Enabled",
-        description: "Whether this entry is offered when picking a model.",
+        description: "Offer this provider when picking a model.",
         field: ToggleField::Enabled,
         baked_locked: false,
     },
     ProviderToggle {
         label: "Official",
-        description: "Marks the provider as the vendor's official endpoint.",
+        description: "Mark as the vendor's official route.",
         field: ToggleField::Official,
         baked_locked: false,
     },
     ProviderToggle {
         label: "Free",
-        description: "Treat as free-tier for selection (always 100% quota weight).",
+        description: "Treat as free-tier with 100% quota weight.",
         field: ToggleField::Free,
         baked_locked: false,
     },
     ProviderToggle {
         label: "Ignore quota",
-        description: "Skip quota accounting when scheduling this entry.",
+        description: "Skip quota checks when scheduling this provider.",
         field: ToggleField::QuotaDisabled,
         baked_locked: false,
     },
     ProviderToggle {
-        label: "Cheap eligible",
-        description: "Eligible for the [CHEAP] mode model rotation.",
+        label: "Cheap mode",
+        description: "Use this provider in cheap-mode rotation.",
         field: ToggleField::Cheap,
         baked_locked: false,
     },
     ProviderToggle {
-        label: "Tough eligible",
-        description: "Eligible for harder reasoning loops.",
+        label: "Tough mode",
+        description: "Use this provider for tough reasoning loops.",
         field: ToggleField::Tough,
         baked_locked: false,
     },
     ProviderToggle {
-        label: "Effort eligible",
-        description: "Eligible for fixed-effort modes.",
+        label: "Set effort",
+        description: "Pass the configured effort value at launch.",
         field: ToggleField::Effort,
         baked_locked: false,
     },
@@ -3505,19 +3505,19 @@ mod tests {
     }
 
     #[test]
-    fn redesigned_panel_opens_on_common_settings_with_friendly_tabs() {
+    fn redesigned_panel_opens_on_general_settings_with_friendly_tabs() {
         let state = state_with_overrides();
         assert_eq!(state.current_section_name(), "general");
 
         let text = render_to_text(&state, 100, 18);
-        assert!(text.contains("Common"));
+        assert!(text.contains("General"));
         assert!(text.contains("Models"));
         assert!(text.contains("Notifications"));
         assert!(text.contains("Agents"));
         assert!(text.contains("System"));
         assert!(
-            text.contains("Review cadence"),
-            "common settings should use friendly labels: {text}"
+            text.contains("Full review cadence"),
+            "general settings should use friendly labels: {text}"
         );
         assert!(
             !text.contains("full_review_interval"),
@@ -3660,7 +3660,7 @@ mod tests {
         state.selected_section = SECTIONS.iter().position(|s| *s == "system").unwrap();
         state.select_first_field_in_current_section();
         let text = render_to_text(&state, 60, 16);
-        assert!(text.contains("Common"));
+        assert!(text.contains("General"));
         assert!(text.contains("System"));
         insta::assert_snapshot!(text);
     }
@@ -3904,7 +3904,7 @@ mod tests {
             "missing override dot on topic row: {text}"
         );
         assert!(
-            text.contains(" ● Notification detail"),
+            text.contains(" ● Detail"),
             "missing override dot on detail_mode row: {text}"
         );
         assert!(

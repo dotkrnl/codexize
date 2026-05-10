@@ -1,21 +1,21 @@
 ---
 source: src/ui/config_panel/mod.rs
-assertion_line: 3646
+assertion_line: 3665
 expression: text
 ---
 "⚙ Settings──────────────────────────/tmp/example/config.toml"
-" Common  Models  Notifications ●  Agents  [System] ●        "
+" General  Models  Notifications ●  Agents  [System] ●       "
 "────────────────────────────────────────────────────────────"
 " ⊕ System (1 override)                                      "
-"▌  Notification config created  │                           "
-"   Notification config updated  │                           "
+"▌  Ntfy created                 │                           "
+"   Ntfy updated                 │                           "
 "   Cache root                   │ .codexize/cache           "
 " ● Sessions root                │ $HOME/.codex… (overridden)"
 "   Runs root                    │ .codexize/runs            "
 "   Memory root                  │ .codexize/memory          "
-"   Show palette help row        │ ✓ on                      "
-"   Emit JSON logs               │ ✗ off                     "
-"   Max memory topics            │ 6                         "
+"   Palette help row             │ ✓ on                      "
+"   JSON logs                    │ ✗ off                     "
+"   Memory topic limit           │ 6                         "
 "────────────────────────────────────────────────────────────"
-"Metadata timestamp maintained by config mutat… │ config open"
+"Read-only timestamp set when the topic is fir… │ config open"
 "←→ section · ↑↓ navigate  │              ^S save · Esc close"

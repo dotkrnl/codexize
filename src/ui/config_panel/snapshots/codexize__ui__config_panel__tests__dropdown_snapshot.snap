@@ -1,23 +1,23 @@
 ---
 source: src/ui/config_panel/mod.rs
-assertion_line: 3870
+assertion_line: 3889
 expression: "render_to_text(&state, 80, 18)"
 ---
 "⚙ Settings──────────────────────────────────────────────/tmp/example/config.toml"
-" Common  Models  [Notifications] ●  Agents  System ●                            "
+" General  Models  [Notifications] ●  Agents  System ●                           "
 "────────────────────────────────────────────────────────────────────────────────"
 " 🔔 Notifications (2 overrides)                                                 " Hidden by multi-width symbols: [(2, " ")]
-"   Enable notifications         │ ✓ on                                          "
+"   Notifications                │ ✓ on                                          "
 "   Server URL                   │ https://ntfy.sh                               "
 " ● Topic                        │ 0123456…89abcdef (overridden)                 "
-"▌● Notification detail          │┌──────────┐erridden)                          "
+"▌● Detail                       │┌──────────┐erridden)                          "
 "   Retry attempts               ││  detailed│                                   "
 "   Retry delay (ms)             ││▌ minimal │                                   "
 "   HTTP timeout (s)             │└──────────┘                                   "
-"   Body limit (bytes)           │ 4096                                          "
-"   Excerpt limit (chars)        │ 600                                           "
-"   Notify on phase wait         │ ✓ on                                          "
-"   Notify on input wait         │ ✓ on                                          "
+"   Body bytes                   │ 4096                                          "
+"   Excerpt chars                │ 600                                           "
+"   Phase-wait alerts            │ ✓ on                                          "
+"   Input-wait alerts            │ ✓ on                                          "
 "────────────────────────────────────────────────────────────────────────────────"
-"Controls notification body length. Allowed: detailed,… │ choose ntfy.detail_mode"
+"Alert body mode. detailed includes context; minimal i… │ choose ntfy.detail_mode"
 "↑↓ select · Enter commit  │                                           Esc cancel"

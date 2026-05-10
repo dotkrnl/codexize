@@ -238,7 +238,7 @@ impl App {
         }
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
-        session_state::transitions::record_builder_verdict(
+        session_state::record_builder_verdict(
             &mut self.state,
             format!("{:?}", verdict.status).to_lowercase(),
         );
@@ -275,7 +275,7 @@ impl App {
             review::ReviewStatus::Refine => {
                 // Approve the current task and stash feedback for
                 // the next coder. No re-review of this round.
-                session_state::transitions::append_refine_feedback(
+                session_state::append_refine_feedback(
                     &mut self.state,
                     verdict.feedback.iter().cloned(),
                 );
@@ -284,7 +284,7 @@ impl App {
             review::ReviewStatus::Revise => {
                 if let Some(task_id) = self.state.builder.current_task_id() {
                     if verdict.new_tasks.is_empty() {
-                        let _ = session_state::transitions::mark_task_status(
+                        let _ = session_state::mark_task_status(
                             &mut self.state,
                             task_id,
                             PipelineItemStatus::Revise,
@@ -311,7 +311,7 @@ impl App {
                             &verdict.new_tasks,
                             &assigned_ids,
                         )?;
-                        session_state::transitions::apply_revise_with_new_tasks(
+                        session_state::apply_revise_with_new_tasks(
                             &mut self.state,
                             task_id,
                             new_tasks,
@@ -338,7 +338,7 @@ impl App {
                     }
                 };
                 if let Some(task_id) = self.state.builder.current_task_id() {
-                    let _ = session_state::transitions::mark_task_status(
+                    let _ = session_state::mark_task_status(
                         &mut self.state,
                         task_id,
                         verdict_status,
@@ -360,7 +360,7 @@ impl App {
 
     fn approve_current_review_task_and_continue(&mut self, round: u32, yolo: bool) -> Result<()> {
         if let Some(task_id) = self.state.builder.current_task_id() {
-            let _ = session_state::transitions::mark_task_status(
+            let _ = session_state::mark_task_status(
                 &mut self.state,
                 task_id,
                 PipelineItemStatus::Approved,
@@ -382,7 +382,9 @@ mod tests {
     use crate::app::TestLaunchOutcome;
     use crate::app::test_support::{mk_app, with_temp_root};
     use crate::runner::{RunnerConfig, select_full_alignment};
-    use crate::selection::{CachedModel, IpbrPhaseScores, ScoreSource, SubscriptionKind};
+    use crate::selection::{
+        CachedModel, Candidate, CliKind, IpbrPhaseScores, ScoreSource, SubscriptionKind,
+    };
     use crate::state::{
         self as session_state, BuilderState, Phase, PipelineItem, PipelineItemStatus, SessionState,
     };
@@ -412,6 +414,23 @@ mod tests {
     }
 
     fn cached_review_model() -> CachedModel {
+        let candidate = Candidate {
+            subscription: SubscriptionKind::Codex,
+            cli: CliKind::Codex,
+            launch_name: "review-model".to_string(),
+            quota_percent: Some(100),
+            quota_resets_at: None,
+            display_order: 0,
+            enabled: true,
+            free: false,
+            official: true,
+            quota_disabled: false,
+            cheap_eligible: true,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_mapping: crate::data::config::schema::EffortMapping::default(),
+            quota_failed: false,
+        };
         CachedModel {
             subscription: SubscriptionKind::Codex,
             name: "review-model".to_string(),
@@ -420,8 +439,8 @@ mod tests {
                 ..IpbrPhaseScores::default()
             },
             score_source: ScoreSource::Ipbr,
-            candidates: Vec::new(),
-            selected_candidate: None,
+            candidates: vec![candidate],
+            selected_candidate: Some(0),
             quota_percent: Some(100),
             quota_resets_at: None,
             display_order: 0,

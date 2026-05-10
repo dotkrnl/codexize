@@ -22,44 +22,9 @@ fn make_builder_with_tasks(task_ids: &[u32]) -> BuilderState {
 }
 
 #[test]
-fn legacy_queue_deserialize_hydrates_pipeline_items() {
+fn pipeline_items_deserialize_from_current_shape() {
     let builder: BuilderState = toml::from_str(
         r#"
-pending = [3, 4]
-done = [1]
-current_task = 2
-iteration = 7
-"#,
-    )
-    .expect("legacy builder state should deserialize");
-
-    let task_ids = builder
-        .pipeline_items
-        .iter()
-        .map(|item| (item.task_id, item.status, item.round))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        task_ids,
-        vec![
-            (Some(1), PipelineItemStatus::Approved, None),
-            (Some(2), PipelineItemStatus::Running, Some(7)),
-            (Some(3), PipelineItemStatus::Pending, None),
-            (Some(4), PipelineItemStatus::Pending, None),
-        ]
-    );
-    assert_eq!(builder.done_task_ids(), vec![1]);
-    assert_eq!(builder.current_task_id(), Some(2));
-    assert_eq!(builder.pending_task_ids(), vec![3, 4]);
-}
-
-#[test]
-fn pipeline_items_deserialize_overwrites_stale_legacy_views() {
-    let builder: BuilderState = toml::from_str(
-        r#"
-pending = [99]
-done = [98]
-current_task = 97
-
 [[pipeline_items]]
 id = 1
 stage = "coder"

@@ -310,7 +310,7 @@ fn mode_default_is_full_table() {
     assert_eq!(ModelsAreaMode::default(), ModelsAreaMode::FullTable);
 }
 
-// ----- migrated model_strip_* tests -----
+// ----- model_strip_* tests -----
 
 #[test]
 fn full_table_bolds_only_phase_rank_one_when_percentages_round_together() {

@@ -53,9 +53,9 @@ fn json_artifacts_are_rejected_by_toml_parsers() {
 }
 
 #[test]
-fn review_scope_ignores_dirty_after_for_legacy_files() {
-    let decoded: ReviewScopeArtifact =
-        toml::from_str("base_sha = \"abc123\"\ndirty_after = true\n")
-            .expect("decode legacy review scope");
-    assert_eq!(decoded.base_sha, "abc123");
+fn review_scope_rejects_unknown_fields() {
+    let error =
+        toml::from_str::<ReviewScopeArtifact>("base_sha = \"abc123\"\ndirty_after = true\n")
+            .expect_err("unknown review-scope fields must fail");
+    assert!(error.to_string().contains("unknown field"));
 }

@@ -138,7 +138,7 @@ impl App {
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
         let parsed = tasks::validate(&tasks_path)
             .with_context(|| format!("invalid {}", tasks_path.display()))?;
-        session_state::transitions::initialize_task_pipeline(
+        session_state::initialize_task_pipeline(
             &mut self.state,
             parsed
                 .tasks

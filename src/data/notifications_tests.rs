@@ -65,8 +65,9 @@ fn formatter_uses_prose_and_attaches_last_agent_response_for_interactive_wait() 
         NotificationReason::InteractiveRunWait,
         crate::state::Phase::BrainstormRunning,
     );
-    event.context.last_agent_response =
-        Some("Should I keep going on the migration plan, or focus on tests first?".to_string());
+    event.context.last_agent_response = Some(
+        "Should I keep going on the implementation plan, or focus on tests first?".to_string(),
+    );
     event.context.last_live_summary = Some("Should not surface here".to_string());
 
     let detailed = format_ntfy_message(&event, NtfyDetailMode::Detailed, 4096, 600);
@@ -81,7 +82,7 @@ fn formatter_uses_prose_and_attaches_last_agent_response_for_interactive_wait() 
     assert!(
         detailed
             .body
-            .contains("Should I keep going on the migration plan")
+            .contains("Should I keep going on the implementation plan")
     );
     assert!(
         !detailed.body.contains("Last activity:"),

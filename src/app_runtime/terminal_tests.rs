@@ -44,10 +44,10 @@ fn confirm_quit_running_agent_routes_termination_through_data_without_app_mutati
 
 #[test]
 fn confirm_app_owned_quit_modal_routes_termination_through_runtime() {
-    // Regression: production `:quit` opens the legacy App-owned modal
-    // (sets only `view.modal`), so a subsequent Enter must still route
-    // termination through the runtime even when `modal_override` is
-    // None. Drives the production command path via `command_from_event`
+    // Regression: production `:quit` opens the App-owned modal (sets only
+    // `view.modal`), so a subsequent Enter must still route termination
+    // through the runtime even when `modal_override` is None. Drives the
+    // production command path via `command_from_event`
     // + `route_command_with_dispatch` rather than `App::handle_key`.
     let mut runtime = TerminalRuntime::default();
     let mut view = running_view();

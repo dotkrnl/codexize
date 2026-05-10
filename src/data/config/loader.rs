@@ -1415,7 +1415,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_free_models_block_is_rejected() {
+    fn removed_free_models_block_is_rejected() {
         let toml = "[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"opencode\"\nmodel_name = \"dsk-4-flash\"\n";
         let err = load_str(toml).unwrap_err();
         let msg = err.to_string();
@@ -1430,20 +1430,20 @@ mod tests {
     }
 
     #[test]
-    fn providers_legacy_keys_rejected() {
-        for legacy in [
+    fn providers_removed_keys_rejected() {
+        for removed_key in [
             "vendor = \"claude\"",
             "cli = \"claude\"",
             "launch_name = \"x\"",
         ] {
             let toml = format!(
-                "[[providers]]\nlaunch = \"claude/claude-opus-4.7\"\nmodel = \"claude-opus-4.7\"\nsubscription = \"claude\"\n{legacy}\n"
+                "[[providers]]\nlaunch = \"claude/claude-opus-4.7\"\nmodel = \"claude-opus-4.7\"\nsubscription = \"claude\"\n{removed_key}\n"
             );
             let err = load_str(&toml).unwrap_err();
             let msg = err.to_string();
             assert!(
                 msg.to_lowercase().contains("unknown"),
-                "expected UnknownKey for {legacy}, got: {msg}"
+                "expected UnknownKey for {removed_key}, got: {msg}"
             );
         }
     }

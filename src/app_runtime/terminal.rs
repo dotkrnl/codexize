@@ -15,14 +15,14 @@ pub(crate) enum TerminalCommandOutcome {
     HandledContinue,
     /// Runtime handled the command and should exit the app loop.
     HandledExit,
-    /// Command is still owned by the legacy App bridge.
-    Legacy(AppCommand),
+    /// Command is still owned by `App`.
+    AppOwned(AppCommand),
 }
-/// Runtime-owned production state that is not part of the legacy `App`.
+/// Runtime-owned production state that is not part of `App`.
 ///
-/// This keeps the migrated quit-confirmation path outside `App`: the UI emits
-/// commands, app_runtime owns modal state and side-effect dispatch, and App is
-/// only asked to handle commands that have not yet moved across the seam.
+/// This keeps quit-confirmation state outside `App`: the UI emits commands,
+/// app_runtime owns modal state and side-effect dispatch, and App is only asked
+/// to handle commands that have not moved across the seam.
 #[derive(Default)]
 pub(crate) struct TerminalRuntime {
     modal_override: Option<ModalKind>,
@@ -65,11 +65,11 @@ impl TerminalRuntime {
                 TerminalCommandOutcome::HandledContinue
             }
             // Quit confirmation must converge whether the modal was opened
-            // by the runtime (`AppCommand::Quit`) or the legacy App-owned
-            // `:quit` command path (which sets only `view.modal`). Both
-            // emit `ConfirmModal` from the UI; the runtime owns the
-            // termination dispatch in either case so App never has to
-            // round-trip back through the runtime.
+            // by the runtime (`AppCommand::Quit`) or the App-owned `:quit`
+            // command path (which sets only `view.modal`). Both emit
+            // `ConfirmModal` from the UI; the runtime owns the termination
+            // dispatch in either case so App never has to round-trip back
+            // through the runtime.
             AppCommand::ConfirmModal
                 if matches!(
                     self.modal_override.or(view.modal),
@@ -91,7 +91,7 @@ impl TerminalRuntime {
                 self.modal_override = None;
                 TerminalCommandOutcome::HandledContinue
             }
-            other => TerminalCommandOutcome::Legacy(other),
+            other => TerminalCommandOutcome::AppOwned(other),
         }
     }
 }
@@ -133,7 +133,7 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
                     app.drain_notifications_for_shutdown();
                     return Ok(());
                 }
-                TerminalCommandOutcome::Legacy(command) => {
+                TerminalCommandOutcome::AppOwned(command) => {
                     if app.handle_app_command(command) {
                         app.runner_supervisor.shutdown_all_runs();
                         app.drain_notifications_for_shutdown();

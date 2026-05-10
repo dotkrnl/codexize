@@ -6,7 +6,7 @@
 // (`crate::app::App`) reaches the per-stage helpers as plain methods because
 // the impl blocks all extend `App` — physical location moved out of
 // `src/app/launch/` so a future server-mode binary can drive `app_runtime`
-// directly without pulling the legacy `app::launch` namespace.
+// directly.
 //
 // Shared bookkeeping (model picking, run tracking, retry routing) stays in
 // this `mod.rs` so per-stage files remain reviewable in isolation.
@@ -225,7 +225,7 @@ impl App {
             interactive = modes.interactive
         );
         let _stage_enter = stage_span.enter();
-        let run_id = session_state::transitions::start_agent_run_with_id(
+        let run_id = session_state::start_agent_run_with_id(
             &mut self.state,
             run_id,
             stage.to_string(),

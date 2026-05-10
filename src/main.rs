@@ -238,8 +238,8 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
     }
     let paths_view = config.paths_view();
     // Honor an explicit `paths.sessions_root` operator override; otherwise
-    // keep the legacy `state::codexize_root()`-derived path so existing
-    // installs and tests that rely on `CODEXIZE_ROOT` keep working.
+    // use the project-local `state::codexize_root()` path that runner stages
+    // and tests share.
     let sessions_root = if config.paths.sessions_root.is_explicit() {
         paths_view.sessions_root.clone()
     } else {
@@ -299,7 +299,7 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
         }
     }
     let mut state = state::SessionState::load(&session_id)?;
-    let _ = state::resume::resume_session(&mut state);
+    let _ = state::resume_session(&mut state);
     let mut app = app::App::new_with_startup_origin_and_config(state, startup_origin, config);
     let mut terminal = terminal_guard.into_terminal();
     let result = app_runtime::run_terminal_app(&mut app, &mut terminal);

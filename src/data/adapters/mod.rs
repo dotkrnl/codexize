@@ -49,10 +49,7 @@ pub fn short_model(model: &str) -> String {
 /// Compute the launch-time effort suffix (e.g. `:xhigh`, `:max`) from the
 /// selected candidate's per-tuple `effort_mapping` + `effort_eligible`
 /// fields. Returns an empty string when the candidate is not effort-capable
-/// or `effort` is `Normal`. Replaces the legacy vendor-keyed helpers
-/// retired in the baked-providers refactor — see
-/// `baked-providers-refactor-design.md` §"Effort suffix at the launch
-/// site" for the design rationale.
+/// or `effort` is `Normal`.
 pub fn launch_effort_suffix(
     effort: EffortLevel,
     effort_eligible: bool,

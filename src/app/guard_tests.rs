@@ -113,20 +113,6 @@ fn verify_non_coder_hard_error_when_dirty_baseline_changes() {
 
 #[test]
 #[serial_test::serial(process_cwd)]
-fn snapshot_deserializes_without_mode_as_auto_reset() {
-    // Pre-existing on-disk snapshots predate the `mode` field and must
-    // load as AutoReset to preserve today's behavior on resume.
-    let toml_text = r#"
-head = "abc123"
-git_status = ""
-"#;
-    let snap: Snapshot = toml::from_str(toml_text).expect("deserialize legacy snapshot");
-    assert_eq!(snap.mode, GuardMode::AutoReset);
-    assert_eq!(snap.head, "abc123");
-}
-
-#[test]
-#[serial_test::serial(process_cwd)]
 fn guard_mode_round_trips_through_toml() {
     let snap = Snapshot {
         head: "deadbeef".to_string(),

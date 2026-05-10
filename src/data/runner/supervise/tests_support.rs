@@ -102,7 +102,7 @@ pub fn register_test_run_id(window_name: &str, run_id: RunId) {
             eprintln!(
                 "register_test_run_id: replacing existing RunHandle at run_id {run_id} \
                  (window_name={window_name}); shared process-global fixture coupling - \
-                 chunked harness migration pending"
+                 chunked harness isolation pending"
             );
         }
         test_supervisor().inner.runs.insert(run_id, run);

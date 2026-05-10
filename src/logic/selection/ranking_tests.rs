@@ -1,4 +1,5 @@
 use super::*;
+use crate::selection::{Candidate, CliKind};
 
 fn sample_cached_model() -> CachedModel {
     CachedModel {
@@ -15,6 +16,23 @@ fn sample_cached_model() -> CachedModel {
 }
 
 fn ipbr_model(name: &str, score: f64, quota_percent: Option<u8>) -> CachedModel {
+    let candidate = Candidate {
+        subscription: SubscriptionKind::Codex,
+        cli: CliKind::Codex,
+        launch_name: name.to_string(),
+        quota_percent,
+        quota_resets_at: None,
+        display_order: 0,
+        enabled: true,
+        free: false,
+        official: true,
+        quota_disabled: false,
+        cheap_eligible: true,
+        tough_eligible: true,
+        effort_eligible: true,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        quota_failed: false,
+    };
     CachedModel {
         name: name.to_string(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores {
@@ -24,6 +42,8 @@ fn ipbr_model(name: &str, score: f64, quota_percent: Option<u8>) -> CachedModel 
             review: Some(score + 3.0),
         },
         score_source: crate::selection::ScoreSource::Ipbr,
+        candidates: vec![candidate],
+        selected_candidate: Some(0),
         quota_percent,
         ..sample_cached_model()
     }
@@ -129,37 +149,4 @@ fn candidate_pool_weights_all_unknown_quota_has_uniform_quota_factor() {
 
     assert!((weights[0] - weights[1]).abs() < 1e-9);
     assert!(weights.iter().all(|weight| *weight > 0.0));
-}
-
-#[test]
-fn phase_score_for_legacy_callers_returns_ipbr_phase_score() {
-    let mut high_variance_old_flash = ipbr_model("gemini-2.5-flash", 90.0, Some(80));
-    high_variance_old_flash.subscription = SubscriptionKind::Gemini;
-    let low_variance_pro = CachedModel {
-        subscription: SubscriptionKind::Gemini,
-        name: "gemini-2.5-pro".to_string(),
-        ..ipbr_model("gemini-2.5-pro", 80.0, Some(80))
-    };
-
-    let flash_score =
-        phase_score_for_legacy_callers(&high_variance_old_flash, SelectionPhase::Build);
-    let pro_score = phase_score_for_legacy_callers(&low_variance_pro, SelectionPhase::Build);
-
-    assert_eq!(flash_score, 90.0);
-    assert_eq!(pro_score, 80.0);
-}
-
-#[test]
-fn phase_score_for_legacy_callers_excludes_zero_quota_and_unranked_models() {
-    let exhausted = ipbr_model("exhausted", 90.0, Some(0));
-    let unranked = sample_cached_model();
-
-    assert_eq!(
-        phase_score_for_legacy_callers(&exhausted, SelectionPhase::Build),
-        0.0
-    );
-    assert_eq!(
-        phase_score_for_legacy_callers(&unranked, SelectionPhase::Build),
-        0.0
-    );
 }

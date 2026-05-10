@@ -6,9 +6,8 @@
 //! state and a UI layer only reads via this view, then converts the values
 //! into its own (ratatui, web, headless, …) presentation shape.
 //!
-//! The production TUI now consumes `AppView` for the seams that have been
-//! migrated (top-rule mode badges read [`AppView::modes`], the terminal
-//! loop publishes the view each tick) while a few legacy surfaces still
+//! The production TUI consumes `AppView` for top-rule mode badges and the
+//! terminal loop publishes the view each tick. Some focus-local surfaces still
 //! read state directly from [`crate::app::App`]. The view types remain
 //! authoritative for the runtime/UI seam.
 use crate::logic::pipeline::Phase;
@@ -34,8 +33,8 @@ pub struct StatusMessage {
 /// Distinct from [`Phase`] because phases include intermediate states
 /// (`*Paused`, `*Running`, recovery sub-phases) that the UI does not need
 /// to disambiguate when surfacing a stage-error modal or routing a retry
-/// command. Mirrors the `super::StageId` enum in the legacy `app` module
-/// so that the migration can collapse them once the TUI consumes views.
+/// command. Mirrors the app-layer stage identifiers used by focus-local
+/// handlers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StageId {
     Brainstorm,

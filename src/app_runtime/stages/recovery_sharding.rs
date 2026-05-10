@@ -76,7 +76,7 @@ impl App {
             self.record_agent_error(err.to_string());
             return false;
         }
-        session_state::transitions::mark_latest_pipeline_stage_running(&mut self.state, "sharding");
+        session_state::mark_latest_pipeline_stage_running(&mut self.state, "sharding");
         let run = AgentRun {
             model: model.clone(),
             cli,

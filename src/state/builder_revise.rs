@@ -1,9 +1,9 @@
 use super::BuilderState;
 use crate::state::{PipelineItem, PipelineItemStatus};
 impl BuilderState {
-    /// Return the highest task ID ever seen across pipeline items, legacy
-    /// queues, task_titles, and recovery snapshots. Used to generate
-    /// collision-free IDs when inserting new tasks from a revise verdict.
+    /// Return the highest task ID ever seen across pipeline items, task titles,
+    /// and recovery snapshots. Used to generate collision-free IDs when
+    /// inserting new tasks from a revise verdict.
     pub fn max_task_id(&self) -> u32 {
         let from_pipeline = self
             .pipeline_items

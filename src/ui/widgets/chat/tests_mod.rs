@@ -417,7 +417,7 @@ fn agent_text_renders_markdown_lists_and_fenced_code() {
 }
 
 #[test]
-fn message_lines_drops_legacy_working_label() {
+fn message_lines_uses_caller_running_tail() {
     let msgs = vec![make_msg(MessageKind::Started, "agent started")];
     let run = make_run(RunStatus::Running);
     let offset = FixedOffset::east_opt(0).unwrap();
@@ -426,7 +426,7 @@ fn message_lines_drops_legacy_working_label() {
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(
             !text.contains("working..."),
-            "running tail must come from caller, not the legacy 'working...' line"
+            "running tail must come from caller, not the default 'working...' line"
         );
     }
 }

@@ -204,7 +204,7 @@ impl App {
                 } else {
                     // Insert the recovery-mode plan review pipeline item before
                     // transitioning so the UI shows it as the next pending stage.
-                    session_state::transitions::queue_recovery_plan_review(&mut self.state, round);
+                    session_state::queue_recovery_plan_review(&mut self.state, round);
                     self.transition_to_phase(Phase::BuilderRecoveryPlanReview(round))?;
                 }
             }

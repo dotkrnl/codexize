@@ -6,25 +6,11 @@ use serde::{Deserialize, Serialize};
 fn pending_guard_decision_defaults_to_none_when_absent() {
     let toml_text = r#"
 session_id = "abc"
-schema_version = 2
+schema_version = 3
 current_phase = "IdeaInput"
 "#;
-    let state: SessionState =
-        toml::from_str(toml_text).expect("legacy v2 session state must deserialize");
+    let state: SessionState = toml::from_str(toml_text).expect("session state should deserialize");
     assert!(state.pending_guard_decision.is_none());
-}
-
-#[test]
-fn session_modes_default_to_off_when_absent() {
-    let toml_text = r#"
-session_id = "abc"
-schema_version = 2
-current_phase = "IdeaInput"
-"#;
-    let state: SessionState =
-        toml::from_str(toml_text).expect("legacy v2 session state must deserialize");
-    assert_eq!(state.modes, Modes::default());
-    assert_eq!(state.launch_modes(), LaunchModes::default());
 }
 
 #[test]
@@ -319,8 +305,7 @@ fn test_session_state_schema_v3() {
 #[test]
 fn test_session_state_v2_rejected_after_v3_bump() {
     with_temp_root(|| {
-        // A well-formed v2 file must now be rejected — the schema is hard-versioned
-        // and there is no v2->v3 migration.
+        // A well-formed non-current file must be rejected.
         let dir = session_dir("test-v2-rejected");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("session.toml");
@@ -338,8 +323,8 @@ current_phase = "IdeaInput"
         assert!(result.is_err());
         let err_msg = format!("{:#}", result.unwrap_err());
         assert!(
-            err_msg.contains("schema v2") || err_msg.contains("archive"),
-            "v2 rejection message must mention version or archive: {err_msg}"
+            err_msg.contains("schema v2"),
+            "v2 rejection message must mention version: {err_msg}"
         );
     });
 }
@@ -487,29 +472,6 @@ fn test_for_stage_covers_all_run_record_stages() {
              site would fall back to Implementation and persist the wrong origin",
         );
     }
-}
-
-#[test]
-fn test_session_state_v1_rejection() {
-    with_temp_root(|| {
-        // Manually write a v1 session file (no schema_version field)
-        let dir = session_dir("test-v1-session");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("session.toml");
-        std::fs::write(
-            &path,
-            r#"
-session_id = "test-v1-session"
-current_phase = "IdeaInput"
-"#,
-        )
-        .unwrap();
-
-        let result = SessionState::load("test-v1-session");
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(err_msg.contains("schema v1") || err_msg.contains("archive"));
-    });
 }
 
 #[test]
@@ -720,21 +682,6 @@ fn test_noninteractive_text_filter_only_hides_agent_text() {
     assert!(MessageKind::Summary.visible_with_agent_text_filter(false));
     assert!(MessageKind::SummaryWarn.visible_with_agent_text_filter(false));
     assert!(MessageKind::End.visible_with_agent_text_filter(false));
-}
-
-#[test]
-fn test_load_messages_rejects_old_jsonl() {
-    with_temp_root(|| {
-        let state = SessionState::new("test-corrupt-msg".to_string());
-        state.save().unwrap();
-
-        let dir = session_dir("test-corrupt-msg");
-        let path = dir.join("messages.jsonl");
-        std::fs::write(&path, r#"{"text":"old"}"#).unwrap();
-
-        let err = SessionState::load_messages("test-corrupt-msg").unwrap_err();
-        assert!(format!("{err:#}").contains("unsupported old JSON/JSONL"));
-    });
 }
 
 #[test]
@@ -1698,33 +1645,6 @@ fn test_resume_same_host_identity_preserves_running() {
 }
 
 #[test]
-fn test_run_record_backward_compat_missing_effort() {
-    let json = r#"{
-            "id": 42,
-            "stage": "coder",
-            "task_id": 1,
-            "round": 1,
-            "attempt": 1,
-            "model": "claude-opus-4.7",
-            "vendor": "anthropic",
-            "window_name": "[Coder r1]",
-            "started_at": "2025-01-01T00:00:00Z",
-            "ended_at": null,
-            "status": "Running",
-            "error": null
-        }"#;
-    let record: RunRecord = serde_json::from_str(json).expect("should deserialize");
-    assert_eq!(record.effort, EffortLevel::Normal);
-    assert_eq!(record.modes, LaunchModes::default());
-
-    let round_tripped = serde_json::to_string(&record).expect("should serialize");
-    let record2: RunRecord = serde_json::from_str(&round_tripped).expect("should round-trip");
-    assert_eq!(record2.effort, EffortLevel::Normal);
-    assert_eq!(record2.modes, LaunchModes::default());
-    assert_eq!(record2.id, 42);
-}
-
-#[test]
 fn next_iteration_for_recovery_roundtrips_through_toml() {
     use crate::state::SessionState;
     let mut state = SessionState::new("iter-bump-roundtrip".to_string());
@@ -1732,16 +1652,6 @@ fn next_iteration_for_recovery_roundtrips_through_toml() {
     let serialized = toml::to_string(&state).expect("serialize");
     let back: SessionState = toml::from_str(&serialized).expect("deserialize");
     assert_eq!(back.builder.next_iteration_for_recovery, Some(7));
-}
-
-#[test]
-fn next_iteration_for_recovery_defaults_to_none_for_legacy_session() {
-    let toml = r#"session_id = "legacy"
-schema_version = 3
-current_phase = "IdeaInput"
-"#;
-    let state: crate::state::SessionState = toml::from_str(toml).expect("deserialize");
-    assert_eq!(state.builder.next_iteration_for_recovery, None);
 }
 
 #[test]
@@ -1764,23 +1674,6 @@ fn section_part_roundtrips_through_toml() {
     .expect("serialize");
     let back: Wrap = toml::from_str(&serialized).expect("deserialize");
     assert_eq!(back.path, parts);
-}
-
-#[test]
-fn run_record_section_path_defaults_to_none_for_legacy_runs() {
-    let toml = r#"id = 1
-stage = "coder"
-task_id = 4
-round = 9
-attempt = 1
-model = "claude-opus-4.7"
-vendor = "claude"
-window_name = "[Round 9 Coder]"
-started_at = "2026-05-04T16:22:57.127045Z"
-status = "Done"
-"#;
-    let run: crate::state::RunRecord = toml::from_str(toml).expect("deserialize legacy run");
-    assert!(run.section_path.is_none());
 }
 
 #[test]

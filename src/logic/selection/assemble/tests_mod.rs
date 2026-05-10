@@ -834,10 +834,6 @@ fn merge_clears_failure_marker_when_subscription_recovers() {
 
 #[test]
 fn merge_drops_unknown_vendor_keys() {
-    // After Task 6 the merge is strict: unparseable subscription keys
-    // (e.g. legacy "free" rows from a previous schema, or this
-    // "aliens" sentinel) are dropped on the next refresh round so the
-    // cache cannot accumulate stale, untracked entries forever.
     let mut cached = QuotaPayload::default();
     cached.insert(
         "aliens".to_string(),
@@ -851,18 +847,17 @@ fn merge_drops_unknown_vendor_keys() {
 
 #[test]
 fn merge_quota_payload_drops_unparseable_subscription() {
-    // A legacy cache that still has a "free" row (the schema dropped
-    // SubscriptionKind::Free in Task 1) must lose that row on the
-    // first refresh; tracked subscription strings are preserved.
     let mut cached = QuotaPayload::default();
-    cached.values.insert("free".to_string(), BTreeMap::new());
+    cached
+        .values
+        .insert("not-a-subscription".to_string(), BTreeMap::new());
     cached.values.insert("claude".to_string(), BTreeMap::new());
 
     let merged = merge_quota_payload(&cached, BTreeMap::new(), &BTreeSet::new());
 
     assert!(
-        !merged.values.contains_key("free"),
-        "stale 'free' key must drop"
+        !merged.values.contains_key("not-a-subscription"),
+        "unknown subscription key must drop"
     );
     assert!(
         merged.values.contains_key("claude"),

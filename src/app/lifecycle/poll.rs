@@ -82,7 +82,7 @@ impl App {
         }
         if !stamp_present && deadline_elapsed && run.stage != "coder" {
             // Reviewer note: fallback warning is emitted once at barrier release
-            // so non-coder runs keep legacy verdict behavior but remain diagnosable.
+            // so non-coder runs keep their verdict behavior but remain diagnosable.
             self.append_system_message(
                 run.id,
                 MessageKind::SummaryWarn,

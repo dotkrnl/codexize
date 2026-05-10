@@ -111,7 +111,7 @@ pub(crate) fn validate_stage_toml_writes(
     stage: &str,
     round: u32,
 ) -> anyhow::Result<()> {
-    let Some(io) = session_state::transitions::stage_io(stage) else {
+    let Some(io) = session_state::stage_io(stage) else {
         return Ok(());
     };
     let round_token = format!("{round:03}");

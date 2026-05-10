@@ -22,14 +22,9 @@ impl App {
     /// Resolve the session directory from the loaded `[paths]` config.
     /// Mirrors the picker fallback in `main.rs`: only honor the
     /// `paths.sessions_root` view when the operator set the value
-    /// explicitly. Otherwise stay on the legacy
-    /// `state::codexize_root().join("sessions")` so the App reads from the
-    /// same project-local `.codexize/sessions` tree the runner stages and
-    /// `state::session_dir(...)` write to. Without the fallback, the baked
-    /// `$HOME/.codexize/sessions` default makes `finish_stamp_path_for`
-    /// probe a path that the wrapper never writes — every run reports
-    /// "missing finish stamp" while the real stamp sits under the project
-    /// directory.
+    /// explicitly. Otherwise use `state::codexize_root().join("sessions")`
+    /// so the App reads from the same project-local `.codexize/sessions`
+    /// tree the runner stages and `state::session_dir(...)` write to.
     pub(crate) fn session_dir(&self) -> std::path::PathBuf {
         let root = if self.config.paths.sessions_root.is_explicit() {
             self.paths.sessions_root.clone()
@@ -361,7 +356,7 @@ impl App {
         self.set_cheap_mode(!self.state.modes.cheap, source);
     }
     pub(crate) fn set_cheap_mode(&mut self, value: bool, source: &str) {
-        session_state::transitions::set_cheap_mode(&mut self.state, value);
+        session_state::set_cheap_mode(&mut self.state, value);
         if let Err(err) = self.state.save() {
             self.record_agent_error(format!("failed to save cheap mode: {err:#}"));
             return;
@@ -381,8 +376,7 @@ impl App {
         );
     }
     pub(crate) fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
-        let task_id =
-            session_state::transitions::ensure_builder_task_for_round(&mut self.state, round)?;
+        let task_id = session_state::ensure_builder_task_for_round(&mut self.state, round)?;
         let round_dir = self
             .session_dir()
             .join("rounds")
@@ -398,7 +392,7 @@ impl App {
     ) {
         self.watchdog.remove(run_id);
         let Some(finished) =
-            session_state::transitions::finish_run_record(&mut self.state, run_id, success, error)
+            session_state::finish_run_record(&mut self.state, run_id, success, error)
         else {
             return;
         };
@@ -469,7 +463,7 @@ impl App {
             self.transition_to_phase(Phase::Done)?;
             return Ok(());
         }
-        let _ = session_state::transitions::enter_simplification(&mut self.state, round)?;
+        let _ = session_state::enter_simplification(&mut self.state, round)?;
         Ok(())
     }
     pub(crate) fn append_goal_gap_tasks(
@@ -491,7 +485,7 @@ impl App {
             .max()
             .unwrap_or(1)
             + 1;
-        session_state::transitions::append_final_validation_gap_tasks(
+        session_state::append_final_validation_gap_tasks(
             &mut self.state,
             new_tasks.iter().map(|task| (task.id, task.title.clone())),
             next_iteration,

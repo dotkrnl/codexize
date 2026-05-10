@@ -324,9 +324,8 @@ fn select_for_review_from_eligible<'a>(
     // over a fresh sonnet/Kimi when no fresh eligible model is available.
     pool_pick(eligible, SelectionPhase::Review, sample_seed)
 }
-/// Select a model excluding a list of models. The `last_failed_vendor`
-/// diversity boost from the legacy probability chain is intentionally
-/// dropped: spec §5.3 / §6 forbid post-softmax policy multipliers.
+/// Select a model excluding a list of models. `last_failed_vendor` does not
+/// affect weights: spec §5.3 / §6 forbid post-softmax policy multipliers.
 #[cfg(test)]
 pub fn select_excluding<'a>(
     models: &'a [CachedModel],

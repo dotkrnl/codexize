@@ -333,7 +333,7 @@ fn interactive_wait_event_carries_last_agent_response() {
                 model: "codex-latest".to_string(),
                 subscription_label: "openai".to_string(),
             },
-            text: "Should I keep going on the migration plan?".to_string(),
+            text: "Should I keep going on the implementation plan?".to_string(),
         });
         crate::runner::request_run_label_interactive_input_for_test(WINDOW);
 
@@ -344,7 +344,7 @@ fn interactive_wait_event_carries_last_agent_response() {
         assert_eq!(events[0].reason, NotificationReason::InteractiveRunWait);
         assert_eq!(
             events[0].context.last_agent_response.as_deref(),
-            Some("Should I keep going on the migration plan?")
+            Some("Should I keep going on the implementation plan?")
         );
         assert!(
             events[0].context.last_live_summary.is_none(),

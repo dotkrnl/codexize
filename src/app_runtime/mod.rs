@@ -1,11 +1,10 @@
 //! Thin application runtime seam.
 //!
 //! The production terminal event pump now enters through
-//! [`terminal::run_terminal_app`]. The loop still delegates legacy rendering
-//! and focus-local command handling to [`crate::app::App`], but terminal
-//! polling and orchestration live on this canonical runtime path. The module
-//! also reifies the runtime/UI seam as two value-typed enums plus a pair of
-//! channels:
+//! [`terminal::run_terminal_app`]. Terminal polling and orchestration live on
+//! this canonical runtime path, with focus-local command handling still owned
+//! by [`crate::app::App`]. The module also reifies the runtime/UI seam as two
+//! value-typed enums plus a pair of channels:
 //!
 //! ```text
 //! ui  --AppCommand-->  app_runtime  --DataRequest-->  data

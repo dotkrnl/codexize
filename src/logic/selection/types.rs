@@ -131,8 +131,8 @@ impl Candidate {
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelRow {
-    /// Compatibility mirror of the selected candidate's subscription for
-    /// legacy picker and stage code. Candidate data is authoritative.
+    /// Display subscription for the selected candidate. Candidate data is
+    /// authoritative for launch-time decisions.
     pub subscription: SubscriptionKind,
     pub name: String,
     /// Per-phase ipbr rank scores. `None` per phase means the matched

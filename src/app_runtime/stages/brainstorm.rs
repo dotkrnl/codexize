@@ -144,7 +144,7 @@ impl App {
         };
         match launch_result {
             Ok(()) => {
-                session_state::transitions::record_brainstorm_launch(
+                session_state::record_brainstorm_launch(
                     &mut self.state,
                     idea.clone(),
                     model.clone(),
@@ -209,7 +209,7 @@ impl App {
             .join(ArtifactKind::SessionSummary.filename());
         match crate::artifacts::SessionSummaryArtifact::read_from_path(&summary_path) {
             Ok(Some(summary)) => {
-                session_state::transitions::record_session_title(
+                session_state::record_session_title(
                     &mut self.state,
                     summary.title.trim().to_string(),
                 );
@@ -225,11 +225,7 @@ impl App {
         self.clear_agent_error();
         match proposal {
             Some(p) if p.proposed => {
-                session_state::transitions::record_skip_to_impl_proposal(
-                    &mut self.state,
-                    p.rationale,
-                    p.status,
-                );
+                session_state::record_skip_to_impl_proposal(&mut self.state, p.rationale, p.status);
                 self.transition_to_phase(Phase::SkipToImplPending)?;
             }
             _ => {

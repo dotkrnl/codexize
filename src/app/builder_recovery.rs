@@ -33,8 +33,7 @@ impl App {
                 (ids, max)
             })
             .unwrap_or_default();
-        let recovery_cycle_count =
-            session_state::transitions::increment_recovery_cycle_count(&mut self.state);
+        let recovery_cycle_count = session_state::increment_recovery_cycle_count(&mut self.state);
         let effective_trigger = if recovery_cycle_count >= 3 && trigger != "human_blocked" {
             let loop_msg = format!(
                 "recovery loop: {} consecutive recovery cycles without approval — escalating to human_blocked",
@@ -59,19 +58,16 @@ impl App {
         } else {
             trigger
         };
-        session_state::transitions::record_builder_recovery_context(
+        session_state::record_builder_recovery_context(
             &mut self.state,
             trigger_task_id,
             prev_max,
             prev_task_ids,
             trigger_summary,
         );
-        session_state::transitions::mark_current_task_for_recovery(
-            &mut self.state,
-            triggering_round,
-        );
+        session_state::mark_current_task_for_recovery(&mut self.state, triggering_round);
         let interactive = effective_trigger == "human_blocked";
-        session_state::transitions::queue_recovery_stage(
+        session_state::queue_recovery_stage(
             &mut self.state,
             triggering_round,
             effective_trigger.to_string(),
@@ -247,8 +243,8 @@ impl App {
         }
         let recovery_iteration = self.recovery_outer_iteration();
         self.replace_pipeline_from_recovery(&parsed, recovery_iteration);
-        session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "recovery");
-        session_state::transitions::set_retry_reset_run_id_cutoff(&mut self.state, recovery_run_id);
+        session_state::mark_latest_pipeline_stage_done(&mut self.state, "recovery");
+        session_state::set_retry_reset_run_id_cutoff(&mut self.state, recovery_run_id);
         self.clear_builder_recovery_context();
         Ok(())
     }
@@ -259,7 +255,7 @@ impl App {
     ) -> Result<()> {
         let session_dir = self.session_dir();
         let plan_review_path = session_dir.join("artifacts").join("plan_review.toml");
-        session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "plan-review");
+        session_state::mark_latest_pipeline_stage_done(&mut self.state, "plan-review");
         let verdict = match review::validate(&plan_review_path) {
             Ok(v) => v,
             Err(err) => {
@@ -307,7 +303,7 @@ impl App {
         self.clear_agent_error();
         match verdict.status {
             review::ReviewStatus::Approved | review::ReviewStatus::Refine => {
-                session_state::transitions::reset_recovery_cycle_count(&mut self.state);
+                session_state::reset_recovery_cycle_count(&mut self.state);
                 self.queue_recovery_sharding_pipeline_item(round);
                 self.transition_to_phase(Phase::BuilderRecoverySharding(round))?;
             }
@@ -379,11 +375,7 @@ impl App {
                 });
             }
         }
-        session_state::transitions::replace_recovery_pipeline(
-            &mut self.state,
-            next_items,
-            recovered_titles,
-        );
+        session_state::replace_recovery_pipeline(&mut self.state, next_items, recovered_titles);
     }
     pub(crate) fn handle_recovery_sharding_completed(
         &mut self,
@@ -392,7 +384,7 @@ impl App {
     ) -> Result<()> {
         let session_dir = self.session_dir();
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
-        session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "sharding");
+        session_state::mark_latest_pipeline_stage_done(&mut self.state, "sharding");
         let parsed = match tasks::validate(&tasks_path) {
             Ok(p) => p,
             Err(err) => {

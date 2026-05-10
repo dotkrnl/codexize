@@ -3,11 +3,10 @@ use std::{
     sync::{Condvar, Mutex},
     time::Duration,
 };
-/// Run an async IO primitive from a sync compatibility surface.
+/// Run an async IO primitive from a synchronous caller.
 ///
-/// New runtime-owned paths should prefer the async function directly. This
-/// bridge exists for legacy sync call sites that still sit above the data
-/// layer while the IO implementation underneath is tokio-native.
+/// Runtime-owned async paths should prefer the async function directly; this
+/// bridge is for synchronous UI and test callers above tokio-native IO.
 ///
 /// When called from a multi-thread Tokio worker this uses `block_in_place`.
 /// Current-thread runtimes cannot be re-entered from a sync bridge, so they
@@ -33,7 +32,7 @@ where
 }
 /// Block the current thread for `duration` without re-entering Tokio.
 ///
-/// This helper is used from legacy sync code and from `spawn_blocking`
+/// This helper is used from synchronous callers and from `spawn_blocking`
 /// closures. A plain condvar wait avoids depending on `block_in_place` from
 /// non-runtime blocking-pool threads.
 pub(crate) fn sleep_blocking(duration: Duration) {

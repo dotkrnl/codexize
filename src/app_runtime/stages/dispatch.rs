@@ -2,10 +2,9 @@
 //
 // Maps a `Phase`, `RetryLaunch` descriptor, `StageId`, or persisted run
 // stage string to the corresponding per-stage launch entry point. Owning
-// these tables here is what makes `src/app/` a compatibility shim rather
-// than the home of stage orchestration: the legacy lifecycle / events /
-// finalization modules now hand off through `app_runtime::stages` instead
-// of matching on stage strings themselves.
+// these tables here keeps stage orchestration in `app_runtime`: lifecycle,
+// events, and finalization modules hand off through `app_runtime::stages`
+// instead of matching on stage strings themselves.
 use crate::{
     app::{App, AppStartupOrigin, RetryLaunch, StageId},
     selection::CachedModel,

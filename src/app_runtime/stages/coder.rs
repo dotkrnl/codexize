@@ -81,7 +81,7 @@ impl App {
         let refine_carryover: Vec<String> = if resume {
             Vec::new()
         } else {
-            session_state::transitions::take_pending_refine_feedback(&mut self.state)
+            session_state::take_pending_refine_feedback(&mut self.state)
         };
         let prompt = coder_prompt(CoderPromptInputs {
             session_dir: &session_dir,

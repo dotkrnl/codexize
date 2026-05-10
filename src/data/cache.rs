@@ -9,9 +9,8 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub const TTL: Duration = Duration::from_secs(30 * 60);
-/// Bumped to 10 because dashboard rows no longer persist raw upstream
-/// vendor strings or legacy IPBR match metadata. Cached dashboard rows
-/// must refresh into the exact provider/IPBR canonical shape.
+/// Current cache schema version. Cached dashboard rows must refresh into the
+/// exact provider/IPBR canonical shape.
 pub const CACHE_VERSION: u32 = 10;
 pub const DASHBOARD_TTL: Duration = Duration::from_secs(30 * 60);
 pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
@@ -134,12 +133,8 @@ pub fn load(dir: &Path) -> LoadedCache {
         Ok(p) => p,
         Err(_) => return empty,
     };
-    // Dashboard payload is dropped on any version mismatch so old
-    // aistupidlevel-shaped entries cannot be read as ipbr phase
-    // authority. Quota payloads change shape at v7 (struct with
-    // `failed_subscriptions`); pre-v7 quota maps decode as plain
-    // BTreeMap and would silently lose the failure set, so they are
-    // dropped alongside the dashboard. Quota-reset shape is stable.
+    // Dashboard and quota payloads are only trusted when the cache file is the
+    // current schema version. Quota-reset shape is stable.
     let dashboard_section = if parsed.version == CACHE_VERSION {
         parsed
             .dashboard
@@ -221,9 +216,8 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
         Ok(p) => p,
         Err(_) => return empty,
     };
-    // Same per-section policy as `load_at`: drop the dashboard payload on
-    // version mismatch but preserve quota / quota-reset sections so a
-    // dashboard schema bump never invalidates valid quota cache data.
+    // Same per-section policy as `load`: only current-version dashboard and
+    // quota payloads are trusted. Quota-reset shape is stable.
     let dashboard = if parsed.version == CACHE_VERSION {
         parsed
             .dashboard

@@ -226,9 +226,8 @@ pub fn launch_noninteractive_with_policy(
 ///
 /// Sync wrapper preserved for [`crate::data::providers::kimi::resolve_api_key`]
 /// — the only remaining sync caller in product code. The supervisor's own
-/// run-tail moved to [`run_child_with_timeout_async`] in this round; the
-/// kimi/quota chain (`selection_quota::load_quota_maps_for`) is the next
-/// async-migration boundary, after which this wrapper goes away.
+/// run-tail uses [`run_child_with_timeout_async`]; the kimi/quota chain
+/// (`selection_quota::load_quota_maps_for`) still calls this wrapper.
 pub fn run_child_with_timeout(
     launch: &ChildLaunch,
     timeout: Duration,

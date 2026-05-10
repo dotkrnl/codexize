@@ -422,7 +422,7 @@ fn malformed_toml_fails() {
 }
 
 // ------------------------------------------------------------------
-// Normalization (pure logic, exercised here for legacy continuity)
+// Normalization (pure logic)
 // ------------------------------------------------------------------
 
 #[test]

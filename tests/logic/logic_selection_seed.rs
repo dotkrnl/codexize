@@ -1,10 +1,27 @@
 use codexize::logic::selection::{
     SelectionPhase,
     selection::pick_for_phase_with_seed,
-    types::{CachedModel, IpbrPhaseScores, ScoreSource, SubscriptionKind},
+    types::{CachedModel, Candidate, CliKind, IpbrPhaseScores, ScoreSource, SubscriptionKind},
 };
 
 fn sample_model(vendor: SubscriptionKind, name: &str, quota: u8) -> CachedModel {
+    let candidate = Candidate {
+        subscription: vendor,
+        cli: vendor.direct_cli().unwrap_or(CliKind::Codex),
+        launch_name: name.to_string(),
+        quota_percent: Some(quota),
+        quota_resets_at: None,
+        display_order: 0,
+        enabled: true,
+        free: false,
+        official: true,
+        quota_disabled: false,
+        cheap_eligible: true,
+        tough_eligible: true,
+        effort_eligible: true,
+        effort_mapping: codexize::data::config::schema::EffortMapping::default(),
+        quota_failed: false,
+    };
     CachedModel {
         subscription: vendor,
         name: name.to_string(),
@@ -15,8 +32,8 @@ fn sample_model(vendor: SubscriptionKind, name: &str, quota: u8) -> CachedModel 
             review: Some(85.0),
         },
         score_source: ScoreSource::Ipbr,
-        candidates: Vec::new(),
-        selected_candidate: None,
+        candidates: vec![candidate],
+        selected_candidate: Some(0),
         quota_percent: Some(quota),
         quota_resets_at: None,
         display_order: 0,

@@ -238,13 +238,6 @@ fn select_excluding_excludes_listed_models() {
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
-// Removed: `select_excluding_applies_diversity_bonus` covered the legacy
-// 1.3× last-failed-vendor multiplier, which was a post-softmax modifier
-// forbidden by spec §5.3 / §6. `select_excluding` now ignores
-// `last_failed_vendor`; verifying the absent behavior would have to fight
-// the global TEST_SAMPLE_SEED, so the contract is documented in source
-// (`src/selection/selection.rs::select_excluding`) instead.
-
 #[test]
 fn select_excluding_returns_none_when_all_excluded() {
     let models = vec![sample_model(SubscriptionKind::Claude, "model-1", 80)];

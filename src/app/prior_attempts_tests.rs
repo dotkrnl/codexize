@@ -84,7 +84,7 @@ fn writes_one_section_per_attempt_in_order() {
         msg(1, MessageKind::AgentText, "got it. what schema?"),
         msg(2, MessageKind::UserInput, "two tables"),
         msg(2, MessageKind::AgentText, "tables: users, posts"),
-        msg(3, MessageKind::AgentThought, "considering migration"),
+        msg(3, MessageKind::AgentThought, "considering implementation"),
     ];
     let path = write_prior_attempts_transcript(dir.path(), &messages, &runs, "brainstorm", 1)
         .expect("transcript should be written");
@@ -105,7 +105,7 @@ fn writes_one_section_per_attempt_in_order() {
     assert!(body.contains("**operator:** use sqlite"));
     assert!(body.contains("**agent:** got it. what schema?"));
     assert!(body.contains("**operator:** two tables"));
-    assert!(body.contains("**agent (thought):** considering migration"));
+    assert!(body.contains("**agent (thought):** considering implementation"));
     assert!(body.contains("failed: missing artifact"));
     assert!(body.contains("failed: exit code 1"));
     assert!(body.contains("failed: aborted by user"));

@@ -70,7 +70,7 @@ fn production_prefix_stops_before_cfg_test_module_with_attributes() {
 }
 
 #[test]
-fn runtime_state_mutations_go_through_transitions_module() {
+fn runtime_state_mutations_go_through_state_mutators() {
     let forbidden_mutator_patterns = [
         ".state.create_run_record(",
         ".state.transition_to(",
@@ -133,7 +133,7 @@ fn runtime_state_mutations_go_through_transitions_module() {
 
     assert!(
         violations.is_empty(),
-        "runtime SessionState mutations outside src/state must call state::transitions:\n{}",
+        "runtime SessionState mutations outside src/state must call state mutators:\n{}",
         violations.join("\n")
     );
 }

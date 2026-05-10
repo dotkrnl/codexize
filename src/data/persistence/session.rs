@@ -17,16 +17,6 @@ impl SessionState {
         let path = session_dir(session_id).join("session.toml");
         let text = fs::read_to_string(&path)
             .with_context(|| format!("failed to read session state from {}", path.display()))?;
-        // Reject v1 files (no schema_version field)
-        let raw: toml::Value = toml::from_str(&text)
-            .with_context(|| format!("failed to parse session state from {}", path.display()))?;
-        if raw.get("schema_version").is_none() {
-            anyhow::bail!(
-                "session {} uses schema v1; archive with `codexize archive {}` and start fresh.",
-                session_id,
-                session_id
-            );
-        }
         let state: SessionState = toml::from_str(&text)
             .with_context(|| format!("failed to parse session state from {}", path.display()))?;
         if state.schema_version != 3 {
@@ -53,7 +43,6 @@ impl SessionState {
     pub fn log_event(&self, message: impl Into<String>) -> Result<()> {
         let dir = session_dir(&self.session_id);
         fs::create_dir_all(&dir)?;
-        reject_old_artifact(&dir.join("events.jsonl"))?;
         let path = dir.join("events.toml");
         let event = Event {
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -75,7 +64,6 @@ impl SessionState {
     pub fn append_message(&self, message: &Message) -> Result<()> {
         let dir = session_dir(&self.session_id);
         fs::create_dir_all(&dir)?;
-        reject_old_artifact(&dir.join("messages.jsonl"))?;
         let path = dir.join("messages.toml");
         let mut file = read_messages_file(&path)?;
         file.messages.push(message.clone());
@@ -92,7 +80,6 @@ impl SessionState {
     ) -> Result<bool> {
         let dir = session_dir(&self.session_id);
         fs::create_dir_all(&dir)?;
-        reject_old_artifact(&dir.join("messages.jsonl"))?;
         let path = dir.join("messages.toml");
         let mut file = read_messages_file(&path)?;
         let Some(message) = file.messages.iter_mut().find(|message| message.ts == ts) else {
@@ -110,7 +97,6 @@ impl SessionState {
     /// Load all messages for a session from messages.toml.
     pub fn load_messages(session_id: &str) -> Result<Vec<Message>> {
         let dir = session_dir(session_id);
-        reject_old_artifact(&dir.join("messages.jsonl"))?;
         let path = dir.join("messages.toml");
         if !path.exists() {
             return Ok(Vec::new());
@@ -127,7 +113,6 @@ impl SessionState {
         }
         let dir = session_dir(&self.session_id);
         fs::create_dir_all(&dir)?;
-        reject_old_artifact(&dir.join("messages.jsonl"))?;
         let path = dir.join("messages.toml");
         if !path.exists() {
             return Ok(());
@@ -349,15 +334,6 @@ fn capture_mount_device_id_for_path(path: &std::path::Path) -> Option<u64> {
         let _ = path;
         None
     }
-}
-fn reject_old_artifact(path: &std::path::Path) -> Result<()> {
-    if path.exists() {
-        anyhow::bail!(
-            "unsupported old JSON/JSONL session artifact {}; start a fresh TOML session",
-            path.display()
-        );
-    }
-    Ok(())
 }
 fn read_events_file(path: &std::path::Path) -> Result<EventsFile> {
     if !path.exists() {

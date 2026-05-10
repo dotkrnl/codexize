@@ -187,7 +187,9 @@ mod tests {
     use crate::adapters::EffortLevel;
     use crate::app::test_support::{key, mk_app};
     use crate::app::{ModalKind, StageId, TestLaunchHarness, TestLaunchOutcome};
-    use crate::selection::{CachedModel, IpbrPhaseScores, ScoreSource, SubscriptionKind};
+    use crate::selection::{
+        CachedModel, Candidate, CliKind, IpbrPhaseScores, ScoreSource, SubscriptionKind,
+    };
     use crate::state::{
         self as session_state, DreamingDecision, DreamingDecisionKind, LaunchModes, Phase,
         RunRecord, RunStatus, SessionState,
@@ -210,6 +212,23 @@ mod tests {
     }
 
     fn cached_model() -> CachedModel {
+        let candidate = Candidate {
+            subscription: SubscriptionKind::Codex,
+            cli: CliKind::Codex,
+            launch_name: "dream-model".to_string(),
+            quota_percent: Some(100),
+            quota_resets_at: None,
+            display_order: 0,
+            enabled: true,
+            free: false,
+            official: true,
+            quota_disabled: false,
+            cheap_eligible: true,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_mapping: crate::data::config::schema::EffortMapping::default(),
+            quota_failed: false,
+        };
         CachedModel {
             subscription: SubscriptionKind::Codex,
             name: "dream-model".to_string(),
@@ -218,8 +237,8 @@ mod tests {
                 ..IpbrPhaseScores::default()
             },
             score_source: ScoreSource::Ipbr,
-            candidates: Vec::new(),
-            selected_candidate: None,
+            candidates: vec![candidate],
+            selected_candidate: Some(0),
             quota_percent: Some(100),
             quota_resets_at: None,
             display_order: 0,

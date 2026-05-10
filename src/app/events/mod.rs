@@ -416,12 +416,12 @@ impl App {
             AppCommand::CancelModal => {
                 // Currently emitted only for the quit-confirmation modal; other
                 // modals' Esc semantics still flow through `handle_modal_key`
-                // via the legacy `KeyPress` bridge.
+                // via the `KeyPress` bridge.
                 self.pending_quit_confirmation_run_id = None;
                 false
             }
             // The remaining command variants are exercised by the stubbed
-            // runtime seam; legacy production handlers will claim them as the
+            // runtime seam; production handlers claim them until the
             // surrounding modal/palette split moves out of `App`.
             _ => false,
         }

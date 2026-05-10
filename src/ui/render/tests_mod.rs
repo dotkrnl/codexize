@@ -408,7 +408,7 @@ fn noninteractive_main_panel_shows_summaries_and_hides_agent_text() {
         !lines
             .iter()
             .any(|line| line.contains("raw noninteractive text")),
-        "legacy `:texts` toggle must not leak ACP output into the main panel"
+        "`:texts` toggle must not leak ACP output into the main panel"
     );
 }
 
@@ -933,7 +933,7 @@ fn running_leaf_row_renders_live_agent_message_and_history_in_main_panel() {
 
     assert!(
         !lines.iter().any(|l| l.contains("working...")),
-        "running leaf must not emit the legacy 'working...' line"
+        "running leaf must not emit the default 'working...' line"
     );
     assert!(
         lines.iter().any(|l| l.contains("Drafting plan")),
@@ -1136,7 +1136,7 @@ fn completed_run_renders_history_without_running_tail_in_main_panel() {
 #[test]
 fn container_row_running_tail_keeps_tree_shape_spinner() {
     // Container with visible children: the root row's body (if any) keeps
-    // the legacy tree-shape spinner while children render their own
+    // the old tree-shape spinner while children render their own
     // live-agent-message tails.
     let nodes = vec![node(
         "Root",
@@ -1184,7 +1184,7 @@ fn container_row_running_tail_keeps_tree_shape_spinner() {
     );
     assert!(
         !text.contains("working..."),
-        "container tail must not regress to the legacy cyan 'working...' line"
+        "container tail must not regress to the default cyan 'working...' line"
     );
 }
 
@@ -1355,7 +1355,7 @@ fn palette_overlay_does_not_exceed_width() {
 #[test]
 fn palette_overlay_grows_beyond_two_rows_when_room() {
     // With a roomy terminal and an empty buffer, the overlay should grow
-    // past the legacy 2-row shape and surface multiple suggestions.
+    // past the old 2-row shape and surface multiple suggestions.
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
     app.palette.open();
     let lines = render_full_frame(&mut app, 80, 30);

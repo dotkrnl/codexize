@@ -11,7 +11,7 @@ impl App {
         self.set_yolo_mode(!self.state.modes.yolo, source);
     }
     pub(crate) fn set_yolo_mode(&mut self, value: bool, source: &str) {
-        session_state::transitions::set_yolo_mode(&mut self.state, value);
+        session_state::set_yolo_mode(&mut self.state, value);
         if let Err(err) = self.state.save() {
             self.record_agent_error(format!("failed to save yolo mode: {err:#}"));
             return;
@@ -48,7 +48,7 @@ impl App {
             .log_event(format!("yolo_auto_approved: gate={gate}"));
     }
     pub(crate) fn queue_recovery_sharding_pipeline_item(&mut self, round: u32) {
-        session_state::transitions::queue_recovery_sharding(&mut self.state, round);
+        session_state::queue_recovery_sharding(&mut self.state, round);
     }
     pub(crate) fn yolo_exit_stage_artifacts(&self, run: &RunRecord) -> Vec<std::path::PathBuf> {
         let session_dir = self.session_dir();

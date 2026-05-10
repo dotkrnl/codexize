@@ -120,34 +120,22 @@ pub struct RunRecord {
     pub attempt: u32,
     pub model: String,
     /// Subscription label string (from `subscription_kind_to_str`) carried
-    /// through to the run record. The on-disk JSON field is kept as
-    /// `"vendor"` via `#[serde(rename)]` so existing session.toml files
-    /// continue to load.
+    /// through to the run record. The on-disk key is `vendor` for compact
+    /// session files and operator readability.
     #[serde(rename = "vendor")]
     pub subscription_label: String,
-    /// Persisted key retained for schema compatibility with existing runs.
     pub window_name: String,
     pub started_at: chrono::DateTime<chrono::Utc>,
     pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
     pub status: RunStatus,
     pub error: Option<String>,
-    #[serde(default)]
     pub effort: EffortLevel,
     /// Per-tuple effort token table mirrored from the selected `Candidate`
     /// at launch time so resumed runs and tree rendering can derive the
-    /// suffix without consulting any vendor-keyed table. Defaulted on
-    /// loads of pre-task-9 session.toml files (cheap/medium/high), which
-    /// matches the legacy "no suffix" path when paired with a default
-    /// `effort_eligible == false`.
-    #[serde(default)]
+    /// suffix without consulting any vendor-keyed table.
     pub effort_mapping: EffortMapping,
     /// Whether the run's selected candidate was effort-capable.
-    /// Defaults to `false` when absent so resumed-from-disk runs render
-    /// without an effort suffix — matching pre-refactor behavior for any
-    /// row that was already non-effort.
-    #[serde(default)]
     pub effort_eligible: bool,
-    #[serde(default)]
     pub modes: LaunchModes,
     #[serde(default)]
     pub hostname: Option<String>,

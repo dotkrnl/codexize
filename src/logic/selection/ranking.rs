@@ -20,11 +20,10 @@ pub fn phase_rank_score(model: &CachedModel, phase: SelectionPhase) -> Option<f6
 /// Return pool-scoped sampling weights in the same order as `candidates`.
 ///
 /// Per spec §"Selection algorithm" (operator decision, 2026-05-09): the
-/// sampler weights combine the dashboard ipbr phase score with the
-/// row's *max `effective_quota_for_tiebreak` across enabled providers*,
-/// not the legacy `model.quota_percent`. Free / quota_disabled
-/// providers therefore push the row to 100% headroom in the sampler
-/// even when no fetched quota exists, while a row with only fetched
+/// sampler weights combine the dashboard ipbr phase score with the row's
+/// *max `effective_quota_for_tiebreak` across enabled providers*. Free /
+/// quota_disabled providers therefore push the row to 100% headroom in the
+/// sampler even when no fetched quota exists, while a row with only fetched
 /// providers carries their actual remaining quota.
 pub fn candidate_pool_weights(candidates: &[CandidateRef<'_>], phase: SelectionPhase) -> Vec<f64> {
     // Keep output parallel to the input slice; ineligible candidates are "dropped" as zero weights.
@@ -70,16 +69,10 @@ pub fn candidate_pool_weights(candidates: &[CandidateRef<'_>], phase: SelectionP
 /// - `Some(value)` otherwise, where `value` is the spec's
 ///   "max over enabled providers of `effective_quota_for_tiebreak`,
 ///   unknown → 0". Free and `quota_disabled` providers pin this to 100;
-///   subscriptions that failed their quota fetch contribute 50; rows
-///   without a per-tuple candidate list (legacy fixtures) fall back to
-///   `model.quota_percent` with the existing unknown→30 baseline.
+///   subscriptions that failed their quota fetch contribute 50.
 pub fn effective_row_quota(model: &CachedModel) -> Option<u8> {
     if model.candidates.is_empty() {
-        return match model.quota_percent {
-            Some(0) => None,
-            Some(quota) => Some(quota),
-            None => Some(UNKNOWN_QUOTA_PERCENT),
-        };
+        return None;
     }
     let mut max_quota: Option<u8> = None;
     let mut has_unknown = false;
@@ -108,17 +101,6 @@ fn relative_quota_factor(deficit: u8) -> f64 {
     let t = ((f64::from(deficit) - 20.0) / 20.0).clamp(0.0, 1.0);
     let smooth = t * t * (3.0 - 2.0 * t);
     1.0 - 0.90 * smooth
-}
-/// Single-model phase score for legacy callers (dashboard fixture diff
-/// tooling, mainly). Returns the raw 0–100 ipbr phase score, NOT a
-/// normalized probability — callers that need the row's pool share must use
-/// [`candidate_pool_weights`] directly. Models with `Some(0)` quota or no
-/// ipbr score for the phase return `0.0`.
-pub fn phase_score_for_legacy_callers(model: &CachedModel, phase: SelectionPhase) -> f64 {
-    if model.quota_percent == Some(0) {
-        return 0.0;
-    }
-    phase_rank_score(model, phase).unwrap_or(0.0)
 }
 #[cfg(test)]
 #[path = "ranking_tests.rs"]

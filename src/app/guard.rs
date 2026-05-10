@@ -40,10 +40,7 @@ pub struct Snapshot {
     /// used to locate and pop the entry during verify.
     #[serde(default)]
     pub baseline_stash: Option<String>,
-    /// How the guard should react to a HEAD-advance violation. Defaulted so
-    /// snapshot files written before this field existed deserialize as
-    /// `AutoReset`.
-    #[serde(default)]
+    /// How the guard should react to a HEAD-advance violation.
     pub mode: GuardMode,
     /// Reviewer-only working-tree baseline when dirty changes are in scope.
     #[serde(default)]

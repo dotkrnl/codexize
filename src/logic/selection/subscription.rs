@@ -2,8 +2,7 @@ use super::types::{CachedModel, SubscriptionKind};
 /// True when the row's *selected* provider tuple is flagged as
 /// tough-eligible in the baked defaults table (or by a user
 /// `[[providers]]` override). Returns `false` for rows with no selected
-/// candidate, mirroring the legacy "no candidate ⇒ not eligible"
-/// behavior.
+/// candidate.
 pub fn is_tough_eligible(model: &CachedModel) -> bool {
     model
         .selected_candidate()

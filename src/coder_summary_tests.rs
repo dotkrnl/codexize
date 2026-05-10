@@ -22,7 +22,7 @@ rebuttal = ["[Round 1, Item 2] Already addressed in the latest diff."]
 }
 
 #[test]
-fn coder_summary_legacy_dirty_fields_parse() {
+fn coder_summary_rejects_unknown_dirty_fields() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = write_summary(
         &dir,
@@ -33,9 +33,8 @@ dirty_after = true
 rebuttal = ["[Round 1, Item 2] Already addressed in the latest diff."]
 "#,
     );
-    let summary = validate(&path).unwrap();
-    assert_eq!(summary.status, CoderStatus::Done);
-    assert_eq!(summary.rebuttal.len(), 1);
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("unknown field"));
 }
 
 #[test]

@@ -36,7 +36,6 @@ impl SelectionPhase {
         matches!(self, SelectionPhase::Idea | SelectionPhase::Planning)
     }
     pub fn name(self) -> &'static str {
-        // Kept for backward compatibility until callers migrate.
         self.into()
     }
     pub const ALL: [SelectionPhase; 4] = [

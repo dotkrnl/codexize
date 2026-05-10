@@ -1,6 +1,24 @@
 use super::*;
+use crate::selection::{Candidate, CliKind};
 
 fn ipbr_model(vendor: SubscriptionKind, name: &str, score: f64, quota: Option<u8>) -> CachedModel {
+    let candidate = Candidate {
+        subscription: vendor,
+        cli: vendor.direct_cli().unwrap_or(CliKind::Codex),
+        launch_name: name.to_string(),
+        quota_percent: quota,
+        quota_resets_at: None,
+        display_order: 0,
+        enabled: true,
+        free: false,
+        official: true,
+        quota_disabled: false,
+        cheap_eligible: true,
+        tough_eligible: true,
+        effort_eligible: true,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        quota_failed: false,
+    };
     CachedModel {
         subscription: vendor,
         name: name.to_string(),
@@ -11,8 +29,8 @@ fn ipbr_model(vendor: SubscriptionKind, name: &str, score: f64, quota: Option<u8
             review: Some(score),
         },
         score_source: crate::selection::ScoreSource::Ipbr,
-        candidates: Vec::new(),
-        selected_candidate: None,
+        candidates: vec![candidate],
+        selected_candidate: Some(0),
         quota_percent: quota,
         quota_resets_at: None,
         display_order: 0,
@@ -20,13 +38,30 @@ fn ipbr_model(vendor: SubscriptionKind, name: &str, score: f64, quota: Option<u8
 }
 
 fn unscored_model(vendor: SubscriptionKind, name: &str, display_order: usize) -> CachedModel {
+    let candidate = Candidate {
+        subscription: vendor,
+        cli: vendor.direct_cli().unwrap_or(CliKind::Codex),
+        launch_name: name.to_string(),
+        quota_percent: Some(80),
+        quota_resets_at: None,
+        display_order,
+        enabled: true,
+        free: false,
+        official: true,
+        quota_disabled: false,
+        cheap_eligible: true,
+        tough_eligible: true,
+        effort_eligible: true,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        quota_failed: false,
+    };
     CachedModel {
         subscription: vendor,
         name: name.to_string(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
-        candidates: Vec::new(),
-        selected_candidate: None,
+        candidates: vec![candidate],
+        selected_candidate: Some(0),
         quota_percent: Some(80),
         quota_resets_at: None,
         display_order,

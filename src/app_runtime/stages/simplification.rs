@@ -109,7 +109,7 @@ impl App {
         let refine_carryover: Vec<String> = if resume {
             Vec::new()
         } else {
-            session_state::transitions::take_pending_refine_feedback(&mut self.state)
+            session_state::take_pending_refine_feedback(&mut self.state)
         };
         let prompt = simplifier_prompt(
             &session_dir,
@@ -213,7 +213,7 @@ impl App {
     ) -> Result<()> {
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
-        let _ = session_state::transitions::enter_final_validation(&mut self.state, round)?;
+        let _ = session_state::enter_final_validation(&mut self.state, round)?;
         Ok(())
     }
 }

@@ -55,9 +55,9 @@ pub struct SessionPicker {
     config_panel: Option<crate::ui::config_panel::ConfigPanelState>,
     /// Directory containing per-session subdirectories. Resolved from
     /// the loaded `Config` (`paths.sessions_root` when explicitly set;
-    /// otherwise the legacy `state::codexize_root().join("sessions")`)
-    /// so a CLI override flows through to `scan_sessions` and to any
-    /// session created inline by the picker.
+    /// otherwise `state::codexize_root().join("sessions")`) so a CLI
+    /// override flows through to `scan_sessions` and to any session
+    /// created inline by the picker.
     sessions_root: PathBuf,
     /// `Some` when the operator explicitly set `paths.memory_root`. The
     /// inline `create_session` flow consults this when bootstrapping
@@ -251,7 +251,7 @@ impl SessionPicker {
                     ConfirmKind::Archive => {
                         if let Some(entry) = self.selected_entry() {
                             let mut state = SessionState::load(&entry.session_id)?;
-                            session_state::transitions::archive_session(&mut state);
+                            session_state::archive_session(&mut state);
                             state.save()?;
                             self.refresh()?;
                             self.status_line.push(
@@ -490,7 +490,7 @@ impl SessionPicker {
             && entry.archived
         {
             let mut state = SessionState::load(&entry.session_id)?;
-            session_state::transitions::restore_archived_session(&mut state);
+            session_state::restore_archived_session(&mut state);
             state.save()?;
             self.refresh()?;
             self.status_line.push(
@@ -526,7 +526,7 @@ pub fn create_session(
 ) -> Result<String> {
     let session_id = generate_session_id();
     let mut state = SessionState::new(session_id.clone());
-    session_state::transitions::prepare_new_session_for_brainstorm(&mut state, idea, modes);
+    session_state::prepare_new_session_for_brainstorm(&mut state, idea, modes);
     state.save()?;
     let memory_root = match memory_root_override {
         Some(root) => root.to_path_buf(),

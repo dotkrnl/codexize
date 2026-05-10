@@ -147,7 +147,7 @@ impl App {
         self.run_launched = false;
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
-        session_state::transitions::set_phase_for_operator_retry(
+        session_state::set_phase_for_operator_retry(
             &mut self.state,
             Phase::ImplementationRound(retry_round),
         );
@@ -187,7 +187,7 @@ impl App {
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
         if let Some(phase) = retry_phase_for_stage(stage) {
-            session_state::transitions::set_phase_for_operator_retry(&mut self.state, phase);
+            session_state::set_phase_for_operator_retry(&mut self.state, phase);
         }
         let _ = self.state.log_event(format!(
             "palette_retry: stage={stage} prior_runs={}",
@@ -337,7 +337,7 @@ impl App {
                     if self.state.skip_to_impl_rationale.is_some() {
                         Phase::BrainstormRunning
                     } else {
-                        session_state::transitions::reset_builder_after_rewind(&mut self.state);
+                        session_state::reset_builder_after_rewind(&mut self.state);
                         Phase::ShardingRunning
                     }
                 } else {
@@ -370,7 +370,7 @@ impl App {
             Phase::SkipToImplPending => {
                 self.cancel_run_label("[Skip Confirm]");
                 let _ = fs::remove_file(artifacts.join(ArtifactKind::SkipToImpl.filename()));
-                session_state::transitions::clear_skip_to_impl_proposal(&mut self.state);
+                session_state::clear_skip_to_impl_proposal(&mut self.state);
                 self.clear_agent_error();
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
             }

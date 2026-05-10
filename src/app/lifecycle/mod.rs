@@ -260,7 +260,7 @@ impl App {
         }
     }
     pub(crate) fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
-        session_state::transitions::execute_transition(&mut self.state, next_phase)?;
+        session_state::execute_transition(&mut self.state, next_phase)?;
         // Pin the round's review scope at round entry — including the
         // skip-to-impl path that has no reviewer stage and goal-gap re-runs
         // that create a fresh implementation round — so the simplifier can
@@ -305,13 +305,13 @@ impl App {
         self.transition_to_phase(Phase::BlockedNeedsUser)
     }
     pub(crate) fn record_agent_error(&mut self, message: impl Into<String>) {
-        session_state::transitions::record_agent_error(&mut self.state, message);
+        session_state::record_agent_error(&mut self.state, message);
     }
     pub(crate) fn clear_agent_error(&mut self) {
-        session_state::transitions::clear_agent_error(&mut self.state);
+        session_state::clear_agent_error(&mut self.state);
     }
     pub(crate) fn clear_builder_recovery_context(&mut self) {
-        session_state::transitions::clear_builder_recovery_context(&mut self.state);
+        session_state::clear_builder_recovery_context(&mut self.state);
     }
     pub fn accept_skip_to_implementation(&mut self) -> Result<()> {
         use crate::artifacts::SkipToImplKind;
@@ -337,7 +337,7 @@ impl App {
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
         let parsed_tasks = tasks::validate(&tasks_path)
             .with_context(|| format!("invalid {}", tasks_path.display()))?;
-        session_state::transitions::initialize_task_pipeline(
+        session_state::initialize_task_pipeline(
             &mut self.state,
             parsed_tasks
                 .tasks
@@ -351,7 +351,7 @@ impl App {
     pub fn decline_skip_to_implementation(&mut self) -> Result<()> {
         use crate::artifacts::SkipToImplKind;
         let kind = self.state.skip_to_impl_kind;
-        session_state::transitions::clear_skip_to_impl_proposal(&mut self.state);
+        session_state::clear_skip_to_impl_proposal(&mut self.state);
         let target = if kind == Some(SkipToImplKind::NothingToDo) {
             Phase::BrainstormRunning
         } else {
@@ -388,10 +388,8 @@ impl App {
         Ok(())
     }
     pub fn accept_guard_reset(&mut self) -> Result<()> {
-        let decision = session_state::transitions::take_pending_guard_decision(
-            &mut self.state,
-            "accept_guard_reset",
-        )?;
+        let decision =
+            session_state::take_pending_guard_decision(&mut self.state, "accept_guard_reset")?;
         for w in &decision.warnings {
             self.append_system_message(decision.run_id, MessageKind::SummaryWarn, w.clone());
         }
@@ -409,10 +407,8 @@ impl App {
         self.complete_run_finalization(&run, Some(Reason::ForbiddenHeadAdvance.to_string()))
     }
     pub fn accept_guard_keep(&mut self) -> Result<()> {
-        let decision = session_state::transitions::take_pending_guard_decision(
-            &mut self.state,
-            "accept_guard_keep",
-        )?;
+        let decision =
+            session_state::take_pending_guard_decision(&mut self.state, "accept_guard_keep")?;
         for w in &decision.warnings {
             self.append_system_message(decision.run_id, MessageKind::SummaryWarn, w.clone());
         }
@@ -440,7 +436,7 @@ impl App {
             "recovery" => Phase::BuilderRecovery(decision.round),
             other => anyhow::bail!("accept_guard_keep: unexpected stage '{other}'"),
         };
-        session_state::transitions::restore_guard_originating_phase(&mut self.state, originating);
+        session_state::restore_guard_originating_phase(&mut self.state, originating);
         self.complete_run_finalization(&run, None)
     }
     pub(crate) fn editable_artifact(&self) -> Option<std::path::PathBuf> {

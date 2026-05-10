@@ -356,10 +356,9 @@ pub fn merge_quota_payload(
     let succeeded: HashSet<SubscriptionKind> = fresh.keys().copied().collect();
     let mut merged = QuotaPayload::default();
     for (subscription_str, models) in &cached.values {
-        // Drop cache entries whose subscription string no longer parses
-        // (e.g. legacy "free" rows from a previous schema). Tracked
-        // subscriptions either get refreshed-in below or carry forward
-        // their cached value.
+        // Drop cache entries whose subscription string is not part of the
+        // current schema. Tracked subscriptions either get refreshed-in below
+        // or carry forward their cached value.
         let preserve = match parse_subscription_str(subscription_str) {
             Some(kind) => !succeeded.contains(&kind),
             None => false,

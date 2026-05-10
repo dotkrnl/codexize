@@ -8,17 +8,16 @@
 //! resulting [`crate::data::events::DataRequest`].
 //!
 //! The production TUI now translates a subset of `KeyEvent`s into
-//! `AppCommand`s before they reach the legacy [`crate::app::App`] event
-//! pump (e.g. Esc on the quit-running-agent modal becomes
+//! `AppCommand`s before they reach the [`crate::app::App`] event pump
+//! (e.g. Esc on the quit-running-agent modal becomes
 //! [`AppCommand::CancelModal`]). Remaining focus-local key handling still
-//! lives in `app/` and migrates out as each surface is split into a
-//! narrower domain variant.
+//! lives in `app/`.
 use super::view::StageId;
 /// UI-neutral key action emitted by terminal input collection.
 ///
 /// This intentionally mirrors only operator-visible key intent, not the
-/// concrete crossterm event type. The legacy `App` still resolves these
-/// against its current focus while key dispatch migrates out of `app`.
+/// concrete crossterm event type. `App` resolves these against its current
+/// focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UiKey {
     pub code: UiKeyCode,

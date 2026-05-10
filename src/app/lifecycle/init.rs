@@ -58,7 +58,7 @@ impl App {
                 .join("artifacts")
                 .join("tasks.toml");
             if let Ok(parsed) = tasks::validate(&tasks_path) {
-                session_state::transitions::load_task_titles_if_empty(
+                session_state::load_task_titles_if_empty(
                     &mut state,
                     parsed.tasks.into_iter().map(|t| (t.id, t.title)),
                 );
@@ -185,7 +185,7 @@ impl App {
                 app.model_refresh = ModelRefreshState::Idle(Instant::now());
             }
         }
-        if let Ok(run_id) = session_state::transitions::resume_running_runs(&mut app.state) {
+        if let Ok(run_id) = session_state::resume_running_runs(&mut app.state) {
             app.current_run_id = run_id;
             app.run_launched = run_id.is_some();
             if let Some(rid) = run_id {
@@ -214,7 +214,7 @@ impl App {
                 "warning: clearing stale pending_guard_decision (phase mismatch on resume)"
                     .to_string(),
             );
-            session_state::transitions::clear_pending_guard_decision(&mut app.state);
+            session_state::clear_pending_guard_decision(&mut app.state);
             let _ = app.state.save();
         }
         // Orphan sweep: remove stale live_summary.*.txt files that do not

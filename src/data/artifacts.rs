@@ -34,9 +34,8 @@ impl SkipToImplProposal {
             return Ok((None, vec![]));
         }
         let content = std::fs::read_to_string(path)?;
-        let mut proposal: Self = toml::from_str(&content).map_err(|err| {
-            anyhow::anyhow!("unsupported old JSON/JSONL artifact or malformed TOML: {err}")
-        })?;
+        let mut proposal: Self =
+            toml::from_str(&content).map_err(|err| anyhow::anyhow!("malformed TOML: {err}"))?;
         let warnings = proposal.validate_and_fixup()?;
         Ok((Some(proposal), warnings))
     }
@@ -138,6 +137,7 @@ pub struct TasksArtifact {
     pub tasks: Vec<TaskArtifact>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReviewScopeArtifact {
     pub base_sha: String,
 }

@@ -9,6 +9,7 @@ pub enum CoderStatus {
     Partial,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct CoderSummary {
     pub status: CoderStatus,
     pub summary: String,

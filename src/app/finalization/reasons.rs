@@ -267,7 +267,7 @@ impl App {
                     current_head,
                     warnings,
                 } => {
-                    session_state::transitions::record_pending_guard_decision(
+                    session_state::record_pending_guard_decision(
                         &mut self.state,
                         PendingGuardDecision {
                             stage: run.stage.clone(),

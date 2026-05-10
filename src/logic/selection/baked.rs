@@ -55,14 +55,16 @@ pub struct BakedProvider {
 /// Sentinel display order for user-additions with no baked counterpart.
 pub const ADDITION_DISPLAY_ORDER: u16 = u16::MAX;
 
-/// Static baked-defaults table — 26 hand-curated rows mirroring the
-/// ipbr scoreboard: 17 direct-subscription rows (Claude opus/sonnet,
-/// Codex gpt-5.x, Gemini variants, Kimi k2.6) plus 9 opencode-go rows
-/// (deepseek, glm, mimo, minimax, qwen) sharing the
-/// `"opencode-shared"` quota pool. Models that the live `opencode`
-/// CLI does not advertise (verified via `opencode models`) are not
-/// baked here even if they appear on the IPBR scoreboard, since
-/// launching them errors with `ProviderModelNotFoundError`.
+/// Static baked-defaults table — 29 hand-curated provider entries
+/// mirroring the ipbr scoreboard: 17 direct-subscription routes
+/// (Claude opus/sonnet, Codex gpt-5.x, Gemini variants, Kimi k2.6 via
+/// the Moonshot route) plus 12 opencode-go routes (deepseek, glm,
+/// kimi-k2.5, kimi-k2.6, mimo, minimax, qwen) sharing the
+/// `"opencode-shared"` quota pool. kimi-k2.6 stacks both the direct
+/// Moonshot route and an opencode-go alternate. Models that the live
+/// `opencode` CLI does not advertise (verified via `opencode models`)
+/// are not baked here even if they appear on the IPBR scoreboard,
+/// since launching them errors with `ProviderModelNotFoundError`.
 pub const BAKED_TABLE: &[BakedRow] = &[
     // --- Claude opus (4 rows): tough_eligible=true, cheap_eligible=false, effort_tough="max" ---
     BakedRow {
@@ -340,25 +342,60 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             quota_lookup_key: None,
         }],
     },
-    // --- Kimi (1 row): model=kimi-k2.6, launch_name=kimi-latest, shared pool ---
+    // --- Kimi (2 rows): direct Moonshot route via Kimi CLI on kimi-latest,
+    // plus an opencode-go route on each kimi model the live `opencode models`
+    // command advertises.
     BakedRow {
-        model: "kimi-k2.6",
+        model: "kimi-k2.5",
         providers: &[BakedProvider {
-            cli: CliKind::Kimi,
-            launch_name: "kimi-latest",
-            subscription: SubscriptionKind::Kimi,
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/kimi-k2.5",
+            subscription: SubscriptionKind::OpencodeGo,
             free: false,
-            official: true,
+            official: false,
             cheap_eligible: true,
             tough_eligible: false,
             effort_eligible: false,
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "high",
-            quota_lookup_key: Some("kimi-shared"),
+            quota_lookup_key: Some("opencode-shared"),
         }],
     },
-    // --- Opencode-go (9 rows): qualified launch_name, quota_lookup_key="opencode-shared" ---
+    BakedRow {
+        model: "kimi-k2.6",
+        providers: &[
+            BakedProvider {
+                cli: CliKind::Kimi,
+                launch_name: "kimi-latest",
+                subscription: SubscriptionKind::Kimi,
+                free: false,
+                official: true,
+                cheap_eligible: true,
+                tough_eligible: false,
+                effort_eligible: false,
+                effort_cheap: "low",
+                effort_normal: "medium",
+                effort_tough: "high",
+                quota_lookup_key: Some("kimi-shared"),
+            },
+            BakedProvider {
+                cli: CliKind::Opencode,
+                launch_name: "opencode-go/kimi-k2.6",
+                subscription: SubscriptionKind::OpencodeGo,
+                free: false,
+                official: false,
+                cheap_eligible: true,
+                tough_eligible: false,
+                effort_eligible: false,
+                effort_cheap: "low",
+                effort_normal: "medium",
+                effort_tough: "high",
+                quota_lookup_key: Some("opencode-shared"),
+            },
+        ],
+    },
+    // --- Opencode-go (11 rows): qualified launch_name, quota_lookup_key="opencode-shared" ---
     BakedRow {
         model: "deepseek-v4-flash",
         providers: &[BakedProvider {
@@ -415,6 +452,23 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
             launch_name: "opencode-go/minimax-m2.7",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "qwen3.5-plus",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/qwen3.5-plus",
             subscription: SubscriptionKind::OpencodeGo,
             free: false,
             official: false,
@@ -648,6 +702,23 @@ mod tests {
     }
 
     #[test]
+    fn baked_table_seeds_kimi_via_opencode_go_for_k25_and_k26() {
+        // `opencode models` advertises both kimi-k2.5 and kimi-k2.6, so
+        // both must be reachable via the opencode-go route. kimi-k2.6
+        // additionally keeps its direct Moonshot route — see the
+        // multi-provider entry above.
+        let k25 = baked_for("kimi-k2.5", CliKind::Opencode, "opencode-go/kimi-k2.5")
+            .expect("kimi-k2.5 via opencode-go");
+        assert_eq!(k25.subscription, SubscriptionKind::OpencodeGo);
+        assert_eq!(k25.quota_lookup_key.as_deref(), Some("opencode-shared"));
+
+        let k26 = baked_for("kimi-k2.6", CliKind::Opencode, "opencode-go/kimi-k2.6")
+            .expect("kimi-k2.6 via opencode-go");
+        assert_eq!(k26.subscription, SubscriptionKind::OpencodeGo);
+        assert!(!k26.official, "opencode-go is the unofficial alt route");
+    }
+
+    #[test]
     fn baked_table_seeds_opencode_go_with_shared_quota_key() {
         let entry = baked_for(
             "deepseek-v4-flash",
@@ -661,10 +732,14 @@ mod tests {
     }
 
     #[test]
-    fn baked_table_has_twenty_six_rows() {
+    fn baked_table_has_twenty_nine_provider_entries() {
+        // 16 direct-route entries (Claude/GPT/Gemini) + 1 direct kimi-k2.6
+        // via Moonshot + 11 opencode-go entries + 1 alt opencode-go route
+        // stacked on kimi-k2.6 = 29 total. Verified against
+        // `opencode models` 2026-05.
         assert_eq!(
             BAKED_TABLE.iter().map(|r| r.providers.len()).sum::<usize>(),
-            26
+            29
         );
     }
 

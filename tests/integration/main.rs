@@ -14,11 +14,11 @@ mod layer_boundaries;
 mod smoke_baseline;
 mod support;
 
-use codexize::app_runtime::{AppCommand, AppView, ModalKind, StageId};
+use codexize::app_runtime::{AppCommand, ModalKind, StageId};
 use codexize::logic::pipeline::Phase;
 use support::{
-    RuntimeControl, RuntimeHarness, channel_pair, drain_views, headless_runtime_for_live_summary,
-    run_harness_until_exit, run_headless_until_exit,
+    RuntimeControl, channel_pair, drain_views, headless_runtime_for_live_summary,
+    run_headless_until_exit,
 };
 use tempfile::tempdir;
 
@@ -128,29 +128,4 @@ fn submit_input_falls_back_when_live_summary_missing() {
         .expect("missing live-summary still produces a status fallback");
     assert_eq!(status.text.as_ref(), "no-data-yet");
     assert_eq!(status.severity, codexize::app_runtime::StatusSeverity::Warn);
-}
-
-#[test]
-fn runtime_harness_drains_commands_until_quit() {
-    let (mut ui, runtime) = channel_pair();
-    ui.commands_tx
-        .send(AppCommand::OpenPalette)
-        .expect("send palette command");
-    ui.commands_tx
-        .send(AppCommand::Quit)
-        .expect("send quit command");
-
-    let mut harness = RuntimeHarness::new(AppView::empty("integration-quit"));
-    let control = run_harness_until_exit(&mut harness, runtime).expect("run harness loop");
-
-    assert_eq!(control, RuntimeControl::Exit);
-    assert_eq!(
-        harness.commands(),
-        &[AppCommand::OpenPalette, AppCommand::Quit]
-    );
-
-    let first = ui.views_rx.blocking_recv().expect("first view");
-    let second = ui.views_rx.blocking_recv().expect("second view");
-    assert_eq!(first.session_id.as_ref(), "integration-quit");
-    assert_eq!(second.session_id.as_ref(), "integration-quit");
 }

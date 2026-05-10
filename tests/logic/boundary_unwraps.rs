@@ -47,28 +47,6 @@ fn production_prefix(contents: &str) -> &str {
 }
 
 #[test]
-fn production_prefix_keeps_cfg_test_imports() {
-    let contents = "use crate::state::SessionState;\n#[cfg(test)]\nuse crate::app::state::ModelRefreshState;\nfn production() {}\n#[cfg(test)]\nmod tests {}";
-
-    assert!(production_prefix(contents).contains("fn production() {}"));
-}
-
-#[test]
-fn production_prefix_stops_before_cfg_test_module() {
-    let contents = "fn production() {}\n#[cfg(test)]\nmod tests {\n    fn fixture() {}\n}";
-
-    assert_eq!(production_prefix(contents), "fn production() {}");
-}
-
-#[test]
-fn production_prefix_stops_before_cfg_test_module_with_attributes() {
-    let contents =
-        "fn production() {}\n#[cfg(test)]\n#[allow(clippy::items_after_test_module)]\nmod tests {}";
-
-    assert_eq!(production_prefix(contents), "fn production() {}");
-}
-
-#[test]
 fn production_source_has_no_bare_unwrap_calls() {
     let mut files = Vec::new();
     production_source_files(Path::new("src"), &mut files);

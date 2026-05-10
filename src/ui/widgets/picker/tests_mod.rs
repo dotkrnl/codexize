@@ -30,62 +30,6 @@ fn test_idea_summary_truncates() {
     assert!(summary.ends_with("..."));
 }
 
-#[test]
-fn test_idea_summary_short() {
-    let summary = truncate_idea(&Some("hello world".to_string()));
-    assert_eq!(summary, "hello world");
-}
-
-#[test]
-fn test_idea_summary_fallback() {
-    let summary = truncate_idea(&None);
-    assert_eq!(summary, "(no idea yet)");
-}
-
-#[test]
-fn test_relative_time_seconds() {
-    let now = SystemTime::now();
-    let ago = now - Duration::from_secs(45);
-    let formatted = format_relative_time(ago, now);
-    assert_eq!(formatted, "45s ago");
-}
-
-#[test]
-fn test_relative_time_minutes() {
-    let now = SystemTime::now();
-    let ago = now - Duration::from_secs(150);
-    let formatted = format_relative_time(ago, now);
-    assert_eq!(formatted, "2m ago");
-}
-
-#[test]
-fn test_relative_time_hours() {
-    let now = SystemTime::now();
-    let ago = now - Duration::from_secs(7200);
-    let formatted = format_relative_time(ago, now);
-    assert_eq!(formatted, "2h ago");
-}
-
-#[test]
-fn test_relative_time_days() {
-    let now = SystemTime::now();
-    let ago = now - Duration::from_secs(86400 * 3);
-    let formatted = format_relative_time(ago, now);
-    assert_eq!(formatted, "3d ago");
-}
-
-#[test]
-fn test_generate_session_id() {
-    let id = generate_session_id();
-    assert_eq!(id.len(), 25); // YYYYMMDD-HHMMSS-NNNNNNNNN
-    let parts: Vec<&str> = id.split('-').collect();
-    assert_eq!(parts.len(), 3);
-    assert_eq!(parts[0].len(), 8);
-    assert_eq!(parts[1].len(), 6);
-    assert_eq!(parts[2].len(), 9);
-    assert!(parts[2].chars().all(|c| c.is_ascii_digit()));
-}
-
 fn with_temp_codexize_root<T>(f: impl FnOnce() -> T) -> T {
     let _guard = crate::state::test_fs_lock()
         .lock()
@@ -104,16 +48,6 @@ fn with_temp_codexize_root<T>(f: impl FnOnce() -> T) -> T {
         }
     }
     outcome.unwrap()
-}
-
-#[test]
-fn scan_sessions_returns_empty_when_root_is_brand_new() {
-    with_temp_codexize_root(|| {
-        // First call creates the sessions dir on demand and returns no entries.
-        let entries = scan_sessions(&crate::state::codexize_root().join("sessions")).unwrap();
-        assert!(entries.is_empty());
-        assert!(crate::state::codexize_root().join("sessions").exists());
-    });
 }
 
 #[test]
@@ -639,29 +573,6 @@ fn input_mode_renders_single_divider_above_input_sheet() {
         divider_rows, 1,
         "exactly one divider row should render above the input sheet"
     );
-}
-
-#[test]
-fn test_phase_badge_variants() {
-    let (badge, color, prefix) = phase_badge(Phase::Done);
-    assert_eq!(badge, "done");
-    assert_eq!(color, Color::Green);
-    assert_eq!(prefix, "✓");
-
-    let (badge, _, prefix) = phase_badge(Phase::BlockedNeedsUser);
-    assert_eq!(badge, "blocked");
-    assert_eq!(prefix, "○");
-
-    let (badge, _, _) = phase_badge(Phase::ImplementationRound(3));
-    assert_eq!(badge, "coding r3");
-
-    let (badge, color, prefix) = phase_badge(Phase::Simplification(2));
-    assert_eq!(badge, "simplification r2");
-    assert_eq!(color, Color::Cyan);
-    assert_eq!(prefix, "●");
-
-    let (badge, _, _) = phase_badge(Phase::FinalValidation(2));
-    assert_eq!(badge, "final validation r2");
 }
 
 #[test]

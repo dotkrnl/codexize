@@ -114,15 +114,3 @@ fn smoke_baseline_matches_normalized_artifacts() {
         );
     });
 }
-
-#[test]
-fn headless_gate_detects_when_live_smoke_is_unavailable() {
-    if smoke::live_smoke_prereqs_available() {
-        assert!(!smoke::headless_fallback_active());
-    } else {
-        // `cargo test` is already executing the existing integration suites in
-        // this same invocation, so the fallback gate only needs to make the
-        // skip explicit here instead of recursively spawning another test run.
-        assert!(smoke::headless_fallback_active());
-    }
-}

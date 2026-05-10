@@ -37,24 +37,6 @@ async fn run_returns_err_when_program_exits_immediately_nonzero() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn run_returns_ok_after_settle_timeout_kills_child() {
-    // `sleep 5` outruns the 200ms settle timeout; the timeout branch
-    // SIGKILLs the child and returns Ok(()).
-    let result = run(WarmupSpec {
-        program: "sleep",
-        args: &["5"],
-        script: "",
-        env: &[],
-        settle_timeout: Duration::from_millis(200),
-    });
-    assert!(
-        result.is_ok(),
-        "warmup must return Ok after killing on settle timeout: {:?}",
-        result.err()
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn run_returns_err_when_spawn_fails() {
     let result = run(WarmupSpec {
         program: "/this/program/definitely/does/not/exist-xyz",

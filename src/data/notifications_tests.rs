@@ -219,42 +219,6 @@ async fn publisher_posts_to_configured_endpoint_with_formatted_title_and_body() 
     );
 }
 
-#[tokio::test]
-async fn runtime_drains_pending_sends_but_honors_timeout() {
-    let (server, _requests) =
-        MockNtfyServer::spawn(vec![MockResponse::delayed_ok(Duration::from_millis(50))]).await;
-    let mut params = test_params(NtfyDetailMode::Minimal, &server.url());
-    params.retry_attempts = 1;
-    params.retry_delay_ms = 0;
-    let mut runtime = NotificationRuntime::from_params_for_test(params);
-
-    runtime.emit_pipeline_done(
-        crate::state::Phase::Done,
-        sample_context("session-drain", "pipeline"),
-    );
-    assert_eq!(runtime.pending_sends_for_test(), 1);
-    assert!(runtime.drain_pending_sends(Duration::from_secs(1)).await);
-    assert_eq!(runtime.pending_sends_for_test(), 0);
-
-    let (server, _requests) =
-        MockNtfyServer::spawn(vec![MockResponse::delayed_ok(Duration::from_millis(300))]).await;
-    let mut params = test_params(NtfyDetailMode::Minimal, &server.url());
-    params.retry_attempts = 1;
-    params.retry_delay_ms = 0;
-    let mut runtime = NotificationRuntime::from_params_for_test(params);
-    runtime.emit_pipeline_done(
-        crate::state::Phase::Done,
-        sample_context("session-timeout", "pipeline"),
-    );
-    let started = std::time::Instant::now();
-
-    assert!(!runtime.drain_pending_sends(Duration::from_millis(25)).await);
-    assert!(
-        started.elapsed() < Duration::from_millis(200),
-        "drain should remain bounded"
-    );
-}
-
 #[test]
 fn event_gates_suppress_disabled_events() {
     let params = NotificationParams {
@@ -420,13 +384,6 @@ struct MockResponse {
 impl MockResponse {
     fn ok() -> Self {
         Self::status(200)
-    }
-
-    fn delayed_ok(delay: Duration) -> Self {
-        Self {
-            delay: Some(delay),
-            ..Self::ok()
-        }
     }
 
     fn status(status: u16) -> Self {

@@ -122,7 +122,7 @@ pub(crate) fn format_line(
     line: &ProvidersLine,
     selected: bool,
     prop_selected: usize,
-    width: usize,
+    _width: usize,
 ) -> String {
     match line {
         ProvidersLine::GroupHeader {
@@ -222,15 +222,12 @@ pub(crate) fn format_line(
                 effort_str.to_string()
             };
 
-            let mut text = format!(
+            let text = format!(
                 "{marker} {enabled}  {}  {}  {source} · {official} · {free} · {quota} · {cheap}, {tough}, {effort}",
                 entry.cli.as_str(),
                 entry.launch_name,
             );
 
-            if text.len() > width {
-                text.truncate(width);
-            }
             format!("  {text}")
         }
         ProvidersLine::AddAction => {

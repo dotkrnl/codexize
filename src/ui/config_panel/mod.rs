@@ -2699,6 +2699,25 @@ mod tests {
     }
 
     #[test]
+    fn providers_section_render_does_not_panic_at_multibyte_boundaries() {
+        let config = Config::baked_defaults();
+        let state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("models"),
+        );
+
+        for width in MIN_WIDTH..=140 {
+            let result = std::panic::catch_unwind(|| render_to_text(&state, width, 24));
+            assert!(
+                result.is_ok(),
+                "models page render panicked at width {width}"
+            );
+        }
+    }
+
+    #[test]
     fn add_provider_modal_populates_models_from_baked_universe() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(

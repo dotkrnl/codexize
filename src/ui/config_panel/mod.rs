@@ -2206,7 +2206,7 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
         spans.push(focus_span(focused));
         spans.push(Span::raw(" "));
         let check_style = if locked {
-            Style::default().fg(COLOR_DIM)
+            Style::default().fg(COLOR_READONLY)
         } else if on {
             Style::default().fg(COLOR_OK).add_modifier(Modifier::BOLD)
         } else {
@@ -2217,7 +2217,7 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
         let label_style = if focused {
             Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
         } else if locked {
-            Style::default().fg(COLOR_DIM)
+            Style::default().fg(COLOR_READONLY)
         } else {
             Style::default()
         };
@@ -2225,7 +2225,7 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
         if locked {
             spans.push(Span::styled(
                 "  built-in".to_string(),
-                Style::default().fg(COLOR_DIM),
+                Style::default().fg(COLOR_READONLY),
             ));
         }
         body.push(Line::from(spans));

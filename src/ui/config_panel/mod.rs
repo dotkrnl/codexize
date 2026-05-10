@@ -92,7 +92,7 @@ const FIELDS: &[FieldMeta] = &[
         key: "ntfy.topic",
         label: "Topic",
         kind: FieldKind::String,
-        description: "Notification topic. Empty disables delivery; r reveals the full value and q regenerates it.",
+        description: "Notification topic. Empty disables delivery; r reveals the full value and R regenerates it.",
         secret: true,
     },
     FieldMeta {
@@ -651,8 +651,8 @@ impl ConfigPanelState {
             if self.read_only {
                 // Defensive: `Enter` is gated so editing should not be set in
                 // read-only mode through the normal flow. If a caller forces
-                // `editing = Some(...)`, refuse to mutate; only Esc unwinds.
-                if matches!(key.code, KeyCode::Esc) {
+                // `editing = Some(...)`, refuse to mutate; only Esc/q unwind.
+                if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
                     self.editing = None;
                 }
                 return PanelOutcome::KeepOpen;
@@ -661,7 +661,10 @@ impl ConfigPanelState {
             return PanelOutcome::KeepOpen;
         }
         match key.code {
-            KeyCode::Esc => {
+            // `q` mirrors Esc in nav mode so vim-style "quit" works without
+            // hunting for the Esc key. Text-input contexts (search, inline
+            // edit, AddProvider's launch_name) still treat `q` as a literal.
+            KeyCode::Esc | KeyCode::Char('q') => {
                 if self.dirty {
                     self.conflict = Some(ConflictBanner::DiscardPrompt);
                     self.status = "discard unsaved changes? y/n".to_string();
@@ -752,7 +755,7 @@ impl ConfigPanelState {
                 };
                 PanelOutcome::KeepOpen
             }
-            KeyCode::Char('q') if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") => {
+            KeyCode::Char('R') if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") => {
                 if !self.read_only {
                     self.conflict = Some(ConflictBanner::RegenerateTopicPrompt);
                     self.status = "regenerate topic? y/n".to_string();
@@ -921,7 +924,7 @@ impl ConfigPanelState {
                     self.save(true);
                     Some(PanelOutcome::KeepOpen)
                 }
-                KeyCode::Esc => {
+                KeyCode::Esc | KeyCode::Char('q') => {
                     self.conflict = None;
                     self.status = "kept editing".to_string();
                     Some(PanelOutcome::KeepOpen)
@@ -934,7 +937,10 @@ impl ConfigPanelState {
                     self.conflict = None;
                     Some(PanelOutcome::Close)
                 }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                KeyCode::Char('n')
+                | KeyCode::Char('N')
+                | KeyCode::Char('q')
+                | KeyCode::Esc => {
                     self.conflict = None;
                     self.status = "kept editing".to_string();
                     Some(PanelOutcome::KeepOpen)
@@ -953,7 +959,10 @@ impl ConfigPanelState {
                     self.conflict = None;
                     Some(PanelOutcome::KeepOpen)
                 }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                KeyCode::Char('n')
+                | KeyCode::Char('N')
+                | KeyCode::Char('q')
+                | KeyCode::Esc => {
                     self.conflict = None;
                     self.status = "unchanged".to_string();
                     Some(PanelOutcome::KeepOpen)
@@ -1074,7 +1083,8 @@ impl ConfigPanelState {
             return;
         };
         match key.code {
-            KeyCode::Esc => {
+            // `q` mirrors Esc in pickers — see the main nav match.
+            KeyCode::Esc | KeyCode::Char('q') => {
                 self.editing = None;
                 self.status = "edit cancelled".to_string();
             }
@@ -1267,7 +1277,7 @@ impl ConfigPanelState {
             Some(providers::ProvidersLine::Provider { is_baked: true, .. })
         );
         match key.code {
-            KeyCode::Esc => {
+            KeyCode::Esc | KeyCode::Char('q') => {
                 self.editing = None;
                 self.status = "closed details".to_string();
             }
@@ -2410,29 +2420,29 @@ fn footer_line(state: &ConfigPanelState, width: usize) -> Line<'static> {
             ("Tab", "page"),
             ("/", "search"),
             ("e", "edit"),
-            ("Esc", "close"),
+            ("q/Esc", "close"),
         ]
     } else {
         match &state.editing {
             Some(Editing::Choice { .. }) => &[
                 ("↑↓", "select"),
                 ("Enter", "commit"),
-                ("Esc", "cancel"),
+                ("q/Esc", "cancel"),
             ],
             Some(Editing::Integer | Editing::String) => {
                 &[("Enter", "commit"), ("Esc", "cancel")]
             }
             Some(Editing::AddProvider(_)) => &[
-                ("↑↓", "model"),
+                ("Tab", "field"),
+                ("↑↓", "cycle"),
                 ("Enter", "add"),
-                ("Ctrl-C", "CLI"),
                 ("Esc", "cancel"),
             ],
             Some(Editing::ProviderDetail { .. }) => &[
                 ("↑↓", "option"),
                 ("Space", "toggle"),
                 ("x", "delete"),
-                ("Esc", "close"),
+                ("q/Esc", "close"),
             ],
             None if is_providers_section(state.current_section()) => &[
                 ("↑↓", "model"),
@@ -2440,7 +2450,7 @@ fn footer_line(state: &ConfigPanelState, width: usize) -> Line<'static> {
                 ("a", "add"),
                 ("x", "remove"),
                 ("Ctrl-S", "save"),
-                ("Esc", "close"),
+                ("q/Esc", "close"),
             ],
             None => &[
                 ("Tab", "page"),
@@ -2449,7 +2459,7 @@ fn footer_line(state: &ConfigPanelState, width: usize) -> Line<'static> {
                 ("d", "default"),
                 ("/", "search"),
                 ("Ctrl-S", "save"),
-                ("Esc", "close"),
+                ("q/Esc", "close"),
             ],
         }
     };
@@ -3719,6 +3729,74 @@ mod tests {
 
     const SUBSCRIPTION_OPTIONS_COUNT: usize = 6; // SubscriptionKind variants
     const CLI_OPTIONS_COUNT: usize = 5;
+
+    #[test]
+    fn q_aliases_esc_in_nav_and_picker_modes_but_not_in_text_input() {
+        // Nav mode: q closes the panel, just like Esc.
+        let config = Config::baked_defaults();
+        let mut state =
+            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), false, None);
+        let outcome = state.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(matches!(outcome, PanelOutcome::Close));
+
+        // Choice picker: q cancels the dropdown without committing.
+        let mut state =
+            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), false, None);
+        focus_field(&mut state, "ntfy.detail_mode");
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(state.editing, Some(Editing::Choice { .. })));
+        state.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(state.editing.is_none(), "q should close the choice dropdown");
+
+        // Provider detail drawer: q closes.
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("models"),
+        );
+        state.providers_cursor = providers::get_lines(&state.config)
+            .iter()
+            .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
+            .unwrap();
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(state.editing, Some(Editing::ProviderDetail { .. })));
+        state.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(state.editing.is_none(), "q should close the detail drawer");
+
+        // Inline text edit: q is a literal character in the buffer, not Esc.
+        let mut state =
+            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), false, None);
+        focus_field(&mut state, "ntfy.server");
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(state.editing, Some(Editing::String)));
+        let before_len = state.edit_buffer.len();
+        state.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(matches!(state.editing, Some(Editing::String)),
+            "q in string edit must be a literal — editing must remain open");
+        assert_eq!(
+            state.edit_buffer.len(),
+            before_len + 1,
+            "q should append to the edit buffer in text-input mode"
+        );
+    }
+
+    #[test]
+    fn shift_r_regenerates_topic_now_that_q_is_an_esc_alias() {
+        // ntfy.topic regenerate moved off `q` (now an Esc alias) onto `R`.
+        let config = Config::baked_defaults();
+        let mut state =
+            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), false, None);
+        focus_field(&mut state, "ntfy.topic");
+        state.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::NONE));
+        assert!(
+            matches!(state.conflict, Some(ConflictBanner::RegenerateTopicPrompt)),
+            "Shift-R on ntfy.topic should open the regenerate prompt"
+        );
+        // q on the prompt cancels it (Esc alias).
+        state.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(state.conflict.is_none(), "q should dismiss the prompt");
+    }
 
     #[test]
     fn save_detects_mtime_conflict_and_overwrite_writes_sparse_file() {

@@ -730,14 +730,14 @@ mod tests {
         c.providers = Override::explicit(vec![
             provider_for(
                 CliKind::Claude,
-                "claude-opus-4-7",
-                "claude-opus-4-7",
+                "claude-opus-4.7",
+                "claude-opus-4.7",
                 SubscriptionKind::Claude,
             ),
             provider_for(
                 CliKind::Claude,
-                "claude-opus-4-7",
-                "claude-opus-4-7",
+                "claude-opus-4.7",
+                "claude-opus-4.7",
                 SubscriptionKind::Claude,
             ),
         ]);
@@ -751,14 +751,14 @@ mod tests {
         c.providers = Override::explicit(vec![
             provider_for(
                 CliKind::Claude,
-                "claude-opus-4-7",
-                "claude-opus-4-7",
+                "claude-opus-4.7",
+                "claude-opus-4.7",
                 SubscriptionKind::Claude,
             ),
             provider_for(
                 CliKind::Claude,
-                "claude-opus-4-7",
-                "claude-opus-4-6",
+                "claude-opus-4.7",
+                "claude-opus-4.6",
                 SubscriptionKind::Claude,
             ),
         ]);
@@ -772,7 +772,7 @@ mod tests {
         c.providers = Override::explicit(vec![provider_for(
             CliKind::Claude,
             "",
-            "claude-opus-4-7",
+            "claude-opus-4.7",
             SubscriptionKind::Claude,
         )]);
         let err = c.validate().unwrap_err();
@@ -783,20 +783,20 @@ mod tests {
     fn provider_identity_disambiguates_by_cli_and_launch_name() {
         let a = provider_for(
             CliKind::Claude,
-            "claude-opus-4-7",
-            "claude-opus-4-7",
+            "claude-opus-4.7",
+            "claude-opus-4.7",
             SubscriptionKind::Claude,
         );
         let b = provider_for(
             CliKind::Opencode,
-            "claude-opus-4-7",
-            "claude-opus-4-7",
+            "opencode-go/claude-opus-4.7",
+            "claude-opus-4.7",
             SubscriptionKind::OpencodeGo,
         );
         let c = provider_for(
             CliKind::Claude,
-            "claude-opus-4-7-thinking",
-            "claude-opus-4-7",
+            "claude-opus-4.7-thinking",
+            "claude-opus-4.7",
             SubscriptionKind::Claude,
         );
         assert_ne!(a.identity(), b.identity());

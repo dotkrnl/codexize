@@ -31,13 +31,11 @@ const OFFICIAL_QUOTA_FLOOR: u8 = 21;
 ///
 /// `providers` carries the operator's `[[providers]]` list. Assembly
 /// resolves it against the baked defaults via
-/// [`baked::merge_with_overrides`] and uses the result to:
-///   - override per-tuple flags (`enabled`, `free`, `official`,
-///     `quota_disabled`, eligibility, mapping) on each dashboard-row
-///     candidate that matches a provider entry by `(cli, launch_name)`;
-///   - append user-added candidates whose `model` matches a dashboard
-///     row but whose `(cli, launch_name)` differs from the row's
-///     natural candidate.
+/// [`baked::merge_with_overrides`] and treats the resulting provider
+/// list as the launch inventory. A dashboard/IPBR row is materialized
+/// only when at least one resolved provider has an exact
+/// `ProviderEntry.model == DashboardEntry.name`; provider `launch_name`
+/// is the CLI argument and is not used as a row key.
 ///
 /// Returns `(models, warnings)` where `warnings` is currently always
 /// empty; the slot is preserved to minimize churn at call sites.
@@ -69,11 +67,10 @@ pub fn assemble_universe(
         })
         .collect();
 
-    // Resolve baked + user `[[providers]]` and index by the dashboard's
-    // (subscription, model) key so per-row lookups are linear in the
-    // size of the resolved list once. `provider_index_for` returns
-    // entries in baked-then-additions order, preserving display_order
-    // intent for additions that are appended below.
+    // Resolve baked + user `[[providers]]` and index by canonical
+    // provider model so per-row lookups are linear in the size of the
+    // resolved list once. The provider list is the ground truth launch
+    // inventory; IPBR supplies scores for matching canonical row names.
     let resolved_providers = baked::merge_with_overrides(providers);
     let providers_by_row = group_providers_by_row(&resolved_providers);
 
@@ -81,48 +78,13 @@ pub fn assemble_universe(
     let mut consumed_providers: BTreeSet<(SubscriptionKind, String, CliKind, String)> =
         BTreeSet::new();
     for entry in dashboard_entries {
-        let Some(row_key) = row_key_for_entry(&entry) else {
+        if !providers_by_row.contains_key(&entry.name) {
             continue;
-        };
-        let dashboard_subscription = subscription_for_dashboard(&entry);
-        let candidate = dashboard_subscription.and_then(|subscription| {
-            build_candidate(
-                subscription,
-                &entry,
-                entry.display_order,
-                &parsed_quotas,
-                &parsed_resets,
-                &failed_subscriptions,
-                available_clis,
-                &providers_by_row,
-            )
-        });
-        let row = rows
-            .entry(row_key)
-            .or_insert_with(|| row_from_entry(entry.name.clone(), &entry));
-        if let Some(candidate) = candidate {
-            // With `subscription_for_dashboard` keyed off the baked
-            // table, multiple dashboard rows for the same model can
-            // resolve to the same subscription (e.g. an opencode
-            // dashboard row whose model is baked-owned by Claude).
-            // Dedupe on the candidate identity so the row collects one
-            // candidate per `(subscription, cli, launch_name)`.
-            let key = (
-                candidate.subscription,
-                entry.name.clone(),
-                candidate.cli,
-                candidate.launch_name.clone(),
-            );
-            if consumed_providers.insert(key) {
-                row.candidates.push(candidate);
-            }
         }
-        // Append user-added providers keyed by this row's model whose
-        // `(cli, launch_name)` differs from the natural dashboard
-        // candidate. These never reach `build_candidate` — they
-        // originate from `[[providers]]`, not from a dashboard entry —
-        // so we materialise them here off the resolved list.
-        append_provider_additions(
+        let row = rows
+            .entry(entry.name.clone())
+            .or_insert_with(|| row_from_entry(entry.name.clone(), &entry));
+        append_provider_candidates(
             row,
             &entry.name,
             &providers_by_row,
@@ -151,19 +113,6 @@ pub fn assemble_universe(
     (models, free_model_warnings)
 }
 
-fn row_key_for_entry(entry: &DashboardEntry) -> Option<String> {
-    if entry.ipbr_row_matched {
-        Some(
-            entry
-                .ipbr_match_key
-                .clone()
-                .unwrap_or_else(|| entry.name.clone()),
-        )
-    } else {
-        subscription_for_dashboard(entry).map(|_| entry.name.clone())
-    }
-}
-
 fn row_from_entry(name: String, entry: &DashboardEntry) -> CachedModel {
     CachedModel {
         subscription: SubscriptionKind::Direct,
@@ -180,18 +129,6 @@ fn row_from_entry(name: String, entry: &DashboardEntry) -> CachedModel {
     }
 }
 
-/// Resolve the subscription that "owns" a dashboard row. The baked table
-/// is consulted first so curated overrides (e.g. ipbr-aliased Kimi names
-/// that the dashboard surfaces under `moonshotai`) honour our hand-picked
-/// primary subscription. When the row is not in the baked table we fall
-/// back to parsing the dashboard's own vendor string.
-pub fn subscription_for_dashboard(entry: &DashboardEntry) -> Option<SubscriptionKind> {
-    if let Some(sub) = baked::primary_subscription_for_model(&entry.name) {
-        return Some(sub);
-    }
-    parse_subscription_str(&entry.dashboard_vendor)
-}
-
 /// Index of resolved providers (baked ⊕ user) keyed by `model`. Each
 /// key maps to the providers that belong on that row, in the order
 /// produced by [`baked::merge_with_overrides`] (baked first, additions
@@ -205,55 +142,6 @@ fn group_providers_by_row(providers: &[ProviderEntry]) -> ProvidersByRow<'_> {
         by_row.entry(entry.model.clone()).or_default().push(entry);
     }
     by_row
-}
-
-#[allow(clippy::too_many_arguments)]
-fn build_candidate(
-    subscription: SubscriptionKind,
-    dashboard_entry: &DashboardEntry,
-    display_order: usize,
-    parsed_quotas: &BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>>,
-    parsed_resets: &BTreeMap<
-        SubscriptionKind,
-        BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>,
-    >,
-    failed_subscriptions: &BTreeSet<SubscriptionKind>,
-    available_clis: &BTreeSet<CliKind>,
-    providers_by_row: &ProvidersByRow<'_>,
-) -> Option<Candidate> {
-    let cli = match subscription {
-        SubscriptionKind::OpencodeGo => CliKind::Opencode,
-        SubscriptionKind::Direct => return None,
-        direct => direct.direct_cli()?,
-    };
-    if !available_clis.contains(&cli) {
-        return None;
-    }
-    let dashboard_name = dashboard_entry.name.as_str();
-    let launch_name = dashboard_name;
-    // Strict baked-only path: a dashboard row produces no candidate
-    // unless the resolved (baked ⊕ user) provider list has an entry
-    // matching `(cli, launch_name)` keyed by this row's model. Without a
-    // hit we drop the candidate — there is no synthesized fallback.
-    let resolved = providers_by_row
-        .get(&dashboard_name.to_string())
-        .and_then(|entries| {
-            entries
-                .iter()
-                .copied()
-                .find(|entry| entry.cli == cli && entry.launch_name == launch_name)
-        })
-        .cloned()?;
-    Some(make_candidate(
-        subscription,
-        cli,
-        launch_name,
-        display_order,
-        &resolved,
-        parsed_quotas,
-        parsed_resets,
-        failed_subscriptions,
-    ))
 }
 
 /// Materialise a `Candidate` with quota/reset lookups applied. The
@@ -307,11 +195,10 @@ fn make_candidate(
     }
 }
 
-/// Append candidates for any provider entries on this row whose
-/// `(cli, launch_name)` doesn't match the row's natural dashboard
-/// candidate. The entry's own `subscription` field drives quota lookups.
+/// Append candidates for every resolved provider entry on this canonical
+/// model row. The entry's own `subscription` field drives quota lookups.
 #[allow(clippy::too_many_arguments)]
-fn append_provider_additions(
+fn append_provider_candidates(
     row: &mut CachedModel,
     dashboard_model: &str,
     providers_by_row: &ProvidersByRow<'_>,

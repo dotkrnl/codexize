@@ -1437,7 +1437,7 @@ mod tests {
             "launch_name = \"x\"",
         ] {
             let toml = format!(
-                "[[providers]]\nlaunch = \"claude/claude-opus-4-7\"\nmodel = \"claude-opus-4-7\"\nsubscription = \"claude\"\n{legacy}\n"
+                "[[providers]]\nlaunch = \"claude/claude-opus-4.7\"\nmodel = \"claude-opus-4.7\"\nsubscription = \"claude\"\n{legacy}\n"
             );
             let err = load_str(&toml).unwrap_err();
             let msg = err.to_string();

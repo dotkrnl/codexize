@@ -23,8 +23,8 @@ fn candidate(
         display_order,
         enabled: true,
         free: false,
-        // Mirror the production fallback in `build_candidate`: anything
-        // routed through OpencodeGo is non-official.
+        // Mirror the baked/provider table convention: anything routed
+        // through OpencodeGo is non-official unless a fixture flips it.
         official: !matches!(subscription, SubscriptionKind::OpencodeGo),
         quota_disabled: false,
         cheap_eligible: false,
@@ -198,9 +198,9 @@ fn assemble_universe_builds_one_row_per_ipbr_name_with_all_candidates() {
         ("claude", "claude-shared", Some(70)),
         ("opencode-go", "claude-opus-4.7", Some(95)),
     ]);
-    // The baked table only carries the Claude provider for
-    // claude-opus-4-7; the operator's `[[providers]]` list adds the
-    // opencode-routed alternative so both candidates land on the row.
+    // The baked table carries the canonical Claude provider; the
+    // operator's `[[providers]]` list adds an opencode-routed
+    // alternative whose `model` still matches the canonical row.
     let providers = vec![ProviderEntry {
         cli: CliKind::Opencode,
         launch_name: "claude-opus-4.7".to_string(),
@@ -278,7 +278,7 @@ fn ipbr_matched_row_name_uses_display_canonical_not_normalized_key() {
     let dashboard = vec![make_ipbr_entry(
         "claude-opus-4.6",
         "anthropic",
-        "claude-opus-4-6",
+        "claude-opus-4.6",
     )];
     let quotas = make_quota_payload(&[("claude", "claude-shared", Some(80))]);
 
@@ -287,7 +287,7 @@ fn ipbr_matched_row_name_uses_display_canonical_not_normalized_key() {
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].name, "claude-opus-4.6");
-    assert_eq!(models[0].ipbr_match_key.as_deref(), Some("claude-opus-4-6"));
+    assert_eq!(models[0].ipbr_match_key.as_deref(), Some("claude-opus-4.6"));
 }
 
 fn opencode_available() -> BTreeSet<CliKind> {
@@ -455,7 +455,7 @@ fn assemble_collapsed_kimi_selection_uses_ipbr_phase_scores() {
     use crate::selection::config::SelectionPhase;
     use crate::selection::ranking::phase_rank_score;
 
-    let mut entry = make_entry_with_order("kimi-k2", "moonshotai", 0);
+    let mut entry = make_entry_with_order("kimi-k2.6", "moonshotai", 0);
     entry.score_source = crate::selection::ScoreSource::Ipbr;
     entry.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
         build: Some(82.0),
@@ -464,13 +464,13 @@ fn assemble_collapsed_kimi_selection_uses_ipbr_phase_scores() {
     };
 
     let dashboard = vec![entry];
-    let quotas = make_quota_payload(&[("moonshotai", "kimi-k2", Some(90))]);
+    let quotas = make_quota_payload(&[("moonshotai", "kimi-shared", Some(90))]);
 
     let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
 
     assert_eq!(models.len(), 1);
     let kimi = &models[0];
-    assert_eq!(kimi.name, "kimi-k2");
+    assert_eq!(kimi.name, "kimi-k2.6");
     // Build and Review auto-selection must see the ipbr phase scores
     // from the collapsed model.
     assert_eq!(phase_rank_score(kimi, SelectionPhase::Build), Some(82.0));
@@ -605,36 +605,47 @@ fn dedup_keeps_direct_below_floor_when_opencode_does_not_win() {
 }
 
 fn run_dedup(direct_quota: Option<u8>, opencode_quota: Option<u8>) -> CachedModel {
+    use crate::data::config::schema::{EffortMapping, ProviderEntry};
     let direct = make_ipbr_entry("claude-opus-4.7", "claude", "claude-opus-4.7");
-    let mut routed = direct.clone();
-    routed.name = "opencode/claude-opus-4-7".to_string();
-    routed.dashboard_vendor = "opencode".to_string();
     let quotas = make_quota_payload(&[
         ("claude", "claude-shared", direct_quota),
-        ("opencode", "opencode/claude-opus-4-7", opencode_quota),
+        ("opencode-go", "opencode-go/claude-opus-4.7", opencode_quota),
     ]);
+    let providers = vec![ProviderEntry {
+        cli: CliKind::Opencode,
+        launch_name: "opencode-go/claude-opus-4.7".to_string(),
+        model: "claude-opus-4.7".to_string(),
+        subscription: SubscriptionKind::OpencodeGo,
+        enabled: true,
+        free: false,
+        official: false,
+        quota_disabled: false,
+        cheap_eligible: false,
+        tough_eligible: true,
+        effort_eligible: false,
+        effort_mapping: EffortMapping::default(),
+        quota_lookup_key: None,
+        display_order: 1,
+    }];
     let (models, _warnings) = assemble_universe(
-        vec![direct, routed],
+        vec![direct],
         quotas,
         BTreeMap::new(),
         &opencode_available(),
-        &[],
+        &providers,
     );
     assert_eq!(models.len(), 1);
     models.into_iter().next().unwrap()
 }
 
 #[test]
-fn opencode_ipbr_matched_inventory_renders_with_unknown_quota() {
+fn provider_launch_name_can_differ_from_canonical_model_name() {
     use crate::data::config::schema::{EffortMapping, ProviderEntry};
-    let routed = make_ipbr_entry("opencode/claude-opus-4-7", "opencode", "claude-opus-4.7");
-    // The unbaked dashboard row needs an explicit provider entry now
-    // that synthesis is gone; the operator-supplied route is what
-    // turns into the candidate.
+    let dashboard = make_ipbr_entry("claude-opus-4.7", "anthropic", "claude-opus-4.7");
     let providers = vec![ProviderEntry {
         cli: CliKind::Opencode,
-        launch_name: "opencode/claude-opus-4-7".to_string(),
-        model: "opencode/claude-opus-4-7".to_string(),
+        launch_name: "opencode-go/claude-opus-4.7".to_string(),
+        model: "claude-opus-4.7".to_string(),
         subscription: SubscriptionKind::OpencodeGo,
         enabled: true,
         free: false,
@@ -649,15 +660,20 @@ fn opencode_ipbr_matched_inventory_renders_with_unknown_quota() {
     }];
 
     let (models, _warnings) = assemble_universe(
-        vec![routed],
+        vec![dashboard],
         QuotaPayload::default(),
         BTreeMap::new(),
-        &opencode_available(),
+        &BTreeSet::from([CliKind::Opencode]),
         &providers,
     );
 
     assert_eq!(models.len(), 1);
+    assert_eq!(models[0].name, "claude-opus-4.7");
     assert_eq!(models[0].subscription, SubscriptionKind::OpencodeGo);
+    assert_eq!(
+        models[0].selected_candidate().unwrap().launch_name,
+        "opencode-go/claude-opus-4.7"
+    );
     assert_eq!(models[0].quota_percent, None);
     assert_eq!(models[0].ipbr_match_key.as_deref(), Some("claude-opus-4.7"));
 }
@@ -848,14 +864,13 @@ fn reset_coverage_gaps_require_matching_model_keys() {
 
 #[test]
 fn dashboard_warnings_are_exposed_as_refresh_diagnostics() {
-    let errors =
-        dashboard_warnings_to_quota_errors(vec!["ipbr normalized key 'x' collided".into()]);
+    let errors = dashboard_warnings_to_quota_errors(vec!["ipbr display_name 'x' collided".into()]);
 
     assert_eq!(errors.len(), 1);
     assert_eq!(errors[0].subscription, SubscriptionKind::Claude);
     assert_eq!(
         errors[0].message,
-        "dashboard warning: ipbr normalized key 'x' collided"
+        "dashboard warning: ipbr display_name 'x' collided"
     );
 }
 

@@ -107,7 +107,11 @@ fn release(path: &Path) -> Result<()> {
 fn is_process_alive(pid: i32) -> bool {
     use nix::sys::signal;
     use nix::unistd::Pid;
-    signal::kill(Pid::from_raw(pid), None).is_ok()
+    process_alive_from_kill_result(signal::kill(Pid::from_raw(pid), None))
+}
+fn process_alive_from_kill_result(result: Result<(), nix::errno::Errno>) -> bool {
+    use nix::errno::Errno;
+    matches!(result, Ok(()) | Err(Errno::EPERM))
 }
 fn now_secs() -> u64 {
     std::time::SystemTime::now()

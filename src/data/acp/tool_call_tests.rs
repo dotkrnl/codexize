@@ -249,6 +249,13 @@ fn truncate_returns_input_when_within_cap() {
 }
 
 #[test]
+fn truncate_respects_caps_smaller_than_ellipsis() {
+    assert_eq!(truncate_with_ellipsis("abcdef", 0), "");
+    assert_eq!(truncate_with_ellipsis("abcdef", 1), ".");
+    assert_eq!(truncate_with_ellipsis("abcdef", 2), "..");
+}
+
+#[test]
 fn snippet_uses_formatted_then_aggregated_then_stdout() {
     let state = state_from_payload(&json!({
         "status": "completed",

@@ -113,10 +113,11 @@ pub(super) fn sanitize_snippet(input: &str) -> String {
     }
     out.trim().to_string()
 }
-/// Truncate to `max` chars, appending `...` if any chars dropped.
+/// Truncate to `max` chars, reserving room for `...` when the cap allows it.
 #[rustfmt::skip]
 pub(super) fn truncate_with_ellipsis(text: &str, max: usize) -> String {
     if text.chars().count() <= max { return text.to_string(); }
+    if max <= 3 { return ".".repeat(max); }
     let cutoff = text.char_indices().nth(max.saturating_sub(3)).map_or(text.len(), |(i, _)| i);
     format!("{}...", &text[..cutoff])
 }

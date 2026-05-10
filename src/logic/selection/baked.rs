@@ -358,7 +358,7 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             quota_lookup_key: Some("kimi-shared"),
         }],
     },
-    // --- Opencode-go (13 rows): qualified launch_name, quota_lookup_key="opencode-shared" ---
+    // --- Opencode-go (9 rows): qualified launch_name, quota_lookup_key="opencode-shared" ---
     BakedRow {
         model: "deepseek-v4-flash",
         providers: &[BakedProvider {

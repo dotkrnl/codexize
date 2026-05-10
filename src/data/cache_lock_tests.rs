@@ -76,6 +76,13 @@ fn malformed_lock_file_is_broken() {
 }
 
 #[test]
+fn eperm_from_signal_probe_counts_as_live_process() {
+    assert!(super::process_alive_from_kill_result(Err(
+        nix::errno::Errno::EPERM
+    )));
+}
+
+#[test]
 fn release_only_removes_own_lock() {
     let dir = TempDir::new().unwrap();
     let path = lock_path(&dir);

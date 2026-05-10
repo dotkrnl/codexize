@@ -201,6 +201,8 @@ fn command_from_key_event(key: KeyEvent, view: &AppView) -> Option<AppCommand> {
         KeyCode::Down => UiKeyCode::Down,
         KeyCode::PageUp => UiKeyCode::PageUp,
         KeyCode::PageDown => UiKeyCode::PageDown,
+        KeyCode::Tab => UiKeyCode::Tab,
+        KeyCode::BackTab => UiKeyCode::BackTab,
         KeyCode::Char(c) => UiKeyCode::Char(c),
         _ => UiKeyCode::Unknown,
     };

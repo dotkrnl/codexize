@@ -462,6 +462,8 @@ fn key_event_from_ui_key(key: UiKey) -> KeyEvent {
         UiKeyCode::Down => KeyCode::Down,
         UiKeyCode::PageUp => KeyCode::PageUp,
         UiKeyCode::PageDown => KeyCode::PageDown,
+        UiKeyCode::Tab => KeyCode::Tab,
+        UiKeyCode::BackTab => KeyCode::BackTab,
         UiKeyCode::Char(c) => KeyCode::Char(c),
         UiKeyCode::Unknown => KeyCode::Null,
     };

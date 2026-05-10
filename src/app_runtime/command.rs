@@ -39,6 +39,8 @@ pub enum UiKeyCode {
     Down,
     PageUp,
     PageDown,
+    Tab,
+    BackTab,
     Char(char),
     Unknown,
 }

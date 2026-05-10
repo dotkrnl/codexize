@@ -38,6 +38,31 @@ fn quit_running_agent_modal_keys_become_domain_commands() {
 }
 
 #[test]
+fn tab_keys_survive_terminal_command_bridge() {
+    let view = AppView::empty("ui-command-test");
+
+    let tab = Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    let back_tab = Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+
+    assert_eq!(
+        command_from_event(tab, &view),
+        Some(AppCommand::KeyPress(UiKey {
+            code: UiKeyCode::Tab,
+            ctrl: false,
+            alt: false,
+        }))
+    );
+    assert_eq!(
+        command_from_event(back_tab, &view),
+        Some(AppCommand::KeyPress(UiKey {
+            code: UiKeyCode::BackTab,
+            ctrl: false,
+            alt: false,
+        }))
+    );
+}
+
+#[test]
 fn wrap_text_preserves_explicit_newlines() {
     let lines = wrap_text("first\nsecond", 100);
     assert_eq!(lines, vec!["first".to_string(), "second".to_string()]);

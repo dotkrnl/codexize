@@ -340,3 +340,34 @@ fn palette_config_refuses_too_narrow_terminal() {
         .to_string();
     assert!(status.contains(crate::ui::config_panel::terminal_too_narrow_message()));
 }
+
+#[test]
+fn bridged_tab_keeps_config_panel_open_and_switches_page() {
+    let state = SessionState::new("config-tab-bridge".to_string());
+    let mut app = mk_app(state);
+    app.execute_palette_input("config");
+    assert_eq!(
+        app.config_panel
+            .as_ref()
+            .expect("panel open")
+            .current_section_name(),
+        "general"
+    );
+
+    let quit = app.handle_app_command(crate::app_runtime::AppCommand::KeyPress(
+        crate::app_runtime::UiKey {
+            code: crate::app_runtime::UiKeyCode::Tab,
+            ctrl: false,
+            alt: false,
+        },
+    ));
+
+    assert!(!quit, "tab inside config panel must not quit the app");
+    assert_eq!(
+        app.config_panel
+            .as_ref()
+            .expect("panel still open")
+            .current_section_name(),
+        "models"
+    );
+}

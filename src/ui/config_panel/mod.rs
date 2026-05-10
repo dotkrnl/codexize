@@ -1915,6 +1915,28 @@ fn dim(text: impl Into<String>) -> Span<'static> {
     Span::styled(text.into(), Style::default().fg(COLOR_DIM))
 }
 
+fn overlay_keymap_line(bindings: &[(&str, &str)]) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
+    for (i, (key, action)) in bindings.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(
+                " · ".to_string(),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        spans.push(Span::styled(
+            key.to_string(),
+            Style::default().fg(Color::White),
+        ));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            action.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    Line::from(spans)
+}
+
 fn focus_span(focused: bool) -> Span<'static> {
     if focused {
         Span::styled(
@@ -2014,7 +2036,11 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
         render_row(providers::AddProviderField::Cli, "CLI"),
         render_row(providers::AddProviderField::LaunchName, "Launch name"),
         Line::from(""),
-        Line::from(dim("  Tab cycles fields · Enter opens/commits · Esc cancels")),
+        overlay_keymap_line(&[
+            ("Tab", "field"),
+            ("Enter", "open/commit"),
+            ("Esc", "cancel"),
+        ]),
     ];
 
     Paragraph::new(lines)
@@ -2205,9 +2231,12 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
         .map(|t| t.description)
         .unwrap_or_default();
     body.push(Line::from(dim(format!(" {active_desc}"))));
-    body.push(Line::from(dim(
-        " Space toggle · ↑↓ navigate · x delete · Esc close",
-    )));
+    body.push(overlay_keymap_line(&[
+        ("↑↓", "navigate"),
+        ("Space", "toggle"),
+        ("x", "delete"),
+        ("Esc", "close"),
+    ]));
 
     Paragraph::new(body)
         .block(
@@ -2276,9 +2305,12 @@ fn render_exit_prompt_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Bu
     }
 
     body.push(Line::from(""));
-    body.push(Line::from(dim(
-        " ↑↓ select · Enter confirm · s/d/c shortcut · Esc cancel",
-    )));
+    body.push(overlay_keymap_line(&[
+        ("↑↓", "select"),
+        ("Enter", "confirm"),
+        ("s/d/c", "shortcut"),
+        ("Esc", "cancel"),
+    ]));
 
     Paragraph::new(body)
         .block(
@@ -2394,7 +2426,11 @@ fn render_search_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer)
             ]));
         }
     }
-    lines.push(Line::from(dim("  ↑↓ select · Enter jump · Esc cancel")));
+    lines.push(overlay_keymap_line(&[
+        ("↑↓", "select"),
+        ("Enter", "jump"),
+        ("Esc", "cancel"),
+    ]));
 
     Paragraph::new(lines)
         .block(
@@ -2532,9 +2568,6 @@ fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line
 }
 
 fn tab_bar_lines(state: &ConfigPanelState, width: usize) -> Vec<Line<'static>> {
-    // Greedy line-wrap of the tab segments (each tab contributing a small
-    // group of styled spans). When a row overflows, flush it and start the
-    // next one with the current segment; matches the old plain-text wrap.
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut current_spans: Vec<Span<'static>> = Vec::new();
     let mut current_w: usize = 0;
@@ -2542,26 +2575,23 @@ fn tab_bar_lines(state: &ConfigPanelState, width: usize) -> Vec<Line<'static>> {
         let active = i == state.selected_section;
         let dirty = state.section_override_count(section) > 0;
         let title = section_title(section);
-        let chevron = if active { "▾" } else { "▸" };
-        let plain_w = chevron.width() + 1 + title.width() + if dirty { 2 } else { 0 };
-        let sep_w = if current_spans.is_empty() { 0 } else { TAB_SEPARATOR.width() };
+        let plain_w = title.width() + if dirty { 2 } else { 0 };
+        let sep_w = if current_spans.is_empty() { 1 } else { TAB_SEPARATOR.width() };
         if !current_spans.is_empty() && current_w + sep_w + plain_w > width {
             lines.push(Line::from(std::mem::take(&mut current_spans)));
             current_w = 0;
         }
-        if !current_spans.is_empty() {
+        if current_spans.is_empty() {
+            current_spans.push(Span::raw(" "));
+            current_w += 1;
+        } else {
             current_spans.push(Span::raw(TAB_SEPARATOR));
             current_w += TAB_SEPARATOR.width();
         }
-        let chevron_style = if active {
-            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(COLOR_DIM)
-        };
-        current_spans.push(Span::styled(chevron.to_string(), chevron_style));
-        current_spans.push(Span::raw(" "));
         let title_style = if active {
-            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(COLOR_FOCUS)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
         } else {
             Style::default().fg(COLOR_DIM)
         };
@@ -2672,6 +2702,12 @@ fn render_value_text(state: &ConfigPanelState, meta: &FieldMeta, _focused: bool)
     let raw = state.value_for(meta);
     if meta.secret && !state.reveal_topic && !raw.is_empty() {
         middle_ellipsis(&raw, 16)
+    } else if matches!(meta.kind, FieldKind::Bool) {
+        if raw == "true" {
+            "✓ on".to_string()
+        } else {
+            "✗ off".to_string()
+        }
     } else {
         raw
     }
@@ -2697,8 +2733,6 @@ fn help_text(state: &ConfigPanelState, width: usize) -> Line<'static> {
         Some(ConflictBanner::MtimeAdvanced) => {
             Some("mtime conflict: r reload · o overwrite · Esc keep editing")
         }
-        // ExitPrompt is rendered as a centered modal — see
-        // `render_exit_prompt_overlay` — so no inline help-row banner.
         Some(ConflictBanner::ExitPrompt { .. }) => None,
         Some(ConflictBanner::RegenerateTopicPrompt) => {
             Some("regenerate ntfy.topic? y accept · n keep")
@@ -2711,157 +2745,237 @@ fn help_text(state: &ConfigPanelState, width: usize) -> Line<'static> {
             Style::default().fg(COLOR_OVERRIDE),
         ));
     }
-    if is_providers_section(state.current_section()) {
+
+    let description = if is_providers_section(state.current_section()) {
         let lines = providers::get_lines(&state.config, &state.folded_vendors);
-        let text = match lines.get(state.providers_cursor) {
+        match lines.get(state.providers_cursor) {
             Some(providers::ProvidersLine::VendorHeader { folded: true, .. }) => {
-                "Space/Enter expands this vendor · n adds a new model"
+                "Space expands · n new model".to_string()
             }
             Some(providers::ProvidersLine::VendorHeader { folded: false, .. }) => {
-                "Space/Enter folds this vendor · n adds a new model"
+                "Space folds · n new model".to_string()
             }
             Some(providers::ProvidersLine::Provider { .. }) => {
-                "Enter opens the per-provider detail drawer · x removes · n adds"
+                "Enter details · x remove".to_string()
             }
-            Some(providers::ProvidersLine::AddAction) => {
-                "Enter creates a new model entry"
-            }
-            _ => "Space/Enter to drill in · n adds a new model · x removes custom",
-        };
-        return Line::from(dim(ellipsize_end(text, width)));
-    }
-    let text = state
-        .current_meta()
-        .map(|meta| meta.description.to_string())
-        .unwrap_or_default();
-    Line::from(dim(ellipsize_end(&text, width)))
-}
-
-fn footer_line(state: &ConfigPanelState, width: usize) -> Line<'static> {
-    let hotkeys: &[(&str, &str)] = if state.searching.is_some() {
-        &[("↑↓", "select"), ("Enter", "jump"), ("Esc", "cancel")]
-    } else {
-        let in_add_provider_dropdown = matches!(
-            &state.editing,
-            Some(Editing::AddProvider(editor)) if editor.open_dropdown.is_some()
-        );
-        if in_add_provider_dropdown {
-            &[
-                ("↑↓", "select"),
-                ("Enter", "pick"),
-                ("q/Esc", "cancel"),
-            ]
-        } else {
-            match &state.editing {
-                Some(Editing::Choice { .. }) => &[
-                    ("↑↓", "select"),
-                    ("Enter", "commit"),
-                    ("q/Esc", "cancel"),
-                ],
-                Some(Editing::Integer | Editing::String) => {
-                    &[("Enter", "commit"), ("Esc", "cancel")]
-                }
-                Some(Editing::AddProvider(_)) => &[
-                    ("Tab", "field"),
-                    ("Enter", "open/add"),
-                    ("Esc", "cancel"),
-                ],
-                Some(Editing::ProviderDetail { .. }) => &[
-                    ("↑↓", "option"),
-                    ("Space", "toggle"),
-                    ("x", "delete"),
-                    ("q/Esc", "close"),
-                ],
-                None if is_providers_section(state.current_section()) => &[
-                    ("↑↓", "model"),
-                    ("Enter", "details"),
-                    ("n", "new"),
-                    ("x", "remove"),
-                    ("Ctrl-S", "save"),
-                    ("q/Esc", "close"),
-                ],
-                None => &[
-                    ("Tab", "page"),
-                    ("Enter", "edit"),
-                    ("Space", "toggle"),
-                    ("d", "default"),
-                    ("/", "search"),
-                    ("Ctrl-S", "save"),
-                    ("q/Esc", "close"),
-                ],
-            }
+            Some(providers::ProvidersLine::AddAction) => "Enter to create".to_string(),
+            _ => "Space toggle · n new model".to_string(),
         }
+    } else {
+        state
+            .current_meta()
+            .map(|meta| meta.description.to_string())
+            .unwrap_or_default()
     };
 
     let invalid = state.current_validation_error();
-    let status_text = if let Some(reason) = invalid.clone() {
-        reason
+    let (status_text, status_color) = if let Some(reason) = invalid {
+        (reason, COLOR_DANGER)
     } else if state.dirty {
-        format!(
-            "unsaved · {} changes · applies after Ctrl-S",
-            dirty_count(state)
+        (
+            format!("{} changes · ^S to save", dirty_count(state)),
+            COLOR_OVERRIDE,
         )
     } else {
-        state.status.clone()
+        (state.status.clone(), COLOR_DIM)
     };
-    let status_color = if invalid.is_some() {
-        COLOR_DANGER
-    } else if state.dirty {
-        COLOR_OVERRIDE
-    } else {
-        COLOR_DIM
-    };
-    let status_chip_full = format!(" │ {status_text}");
 
-    // Pack hotkeys into the available width, dropping trailing entries that
-    // wouldn't fit alongside the status chip. Hotkeys render as `key label`
-    // with key colored cyan and label dim.
-    let status_w = status_chip_full.width();
-    let mut packed: Vec<Span<'static>> = Vec::new();
-    let mut packed_w: usize = 0;
-    for (idx, (key, label)) in hotkeys.iter().enumerate() {
-        let sep = if idx == 0 { "" } else { "  " };
-        let segment_w = sep.width() + key.width() + 1 + label.width();
-        if packed_w + segment_w + status_w > width {
-            break;
+    let sep = " │ ";
+    let status_w = status_text.width();
+    let sep_w = sep.width();
+    let desc_budget = width.saturating_sub(sep_w + status_w);
+
+    if desc_budget >= 12 && !description.is_empty() {
+        let desc_clipped = ellipsize_end(&description, desc_budget);
+        let desc_w = desc_clipped.width();
+        let fill = desc_budget.saturating_sub(desc_w);
+        let mut spans = vec![dim(desc_clipped)];
+        if fill > 0 {
+            spans.push(Span::raw(" ".repeat(fill)));
         }
-        if !sep.is_empty() {
-            packed.push(Span::raw(sep));
-        }
-        packed.push(Span::styled(
-            key.to_string(),
-            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
-        ));
-        packed.push(Span::raw(" "));
-        packed.push(Span::styled(
-            label.to_string(),
+        spans.push(Span::styled(
+            sep.to_string(),
             Style::default().fg(COLOR_DIM),
         ));
-        packed_w += segment_w;
+        spans.push(Span::styled(
+            ellipsize_end(&status_text, width.saturating_sub(desc_budget + sep_w).max(1)),
+            Style::default().fg(status_color),
+        ));
+        Line::from(spans)
+    } else {
+        Line::from(Span::styled(
+            ellipsize_end(&status_text, width),
+            Style::default().fg(status_color),
+        ))
     }
-    // Status chip on the right; the gap fills with spaces.
-    let gap = width.saturating_sub(packed_w + status_w);
-    if gap > 0 {
-        packed.push(Span::raw(" ".repeat(gap)));
+}
+
+struct ConfigKey {
+    glyph: &'static str,
+    action: &'static str,
+    primary: bool,
+}
+
+const fn ck(glyph: &'static str, action: &'static str) -> ConfigKey {
+    ConfigKey {
+        glyph,
+        action,
+        primary: false,
     }
-    packed.push(Span::styled(
-        " │ ".to_string(),
-        Style::default().fg(COLOR_DIM),
-    ));
-    packed.push(Span::styled(
-        ellipsize_end(&status_text, width.saturating_sub(packed_w + 3).max(1)),
-        Style::default().fg(status_color),
-    ));
-    Line::from(packed)
+}
+
+const fn ck_primary(glyph: &'static str, action: &'static str) -> ConfigKey {
+    ConfigKey {
+        glyph,
+        action,
+        primary: true,
+    }
+}
+
+fn footer_bindings(state: &ConfigPanelState) -> (Vec<ConfigKey>, Vec<ConfigKey>) {
+    if state.searching.is_some() {
+        return (
+            vec![ck("↑↓", "select"), ck_primary("Enter", "jump")],
+            vec![ck("Esc", "cancel")],
+        );
+    }
+    let in_dropdown = matches!(
+        &state.editing,
+        Some(Editing::AddProvider(editor)) if editor.open_dropdown.is_some()
+    );
+    if in_dropdown {
+        return (
+            vec![ck("↑↓", "select"), ck_primary("Enter", "pick")],
+            vec![ck("Esc", "cancel")],
+        );
+    }
+    match &state.editing {
+        Some(Editing::Choice { .. }) => (
+            vec![ck("↑↓", "select"), ck_primary("Enter", "commit")],
+            vec![ck("Esc", "cancel")],
+        ),
+        Some(Editing::Integer | Editing::String) => (
+            vec![ck_primary("Enter", "commit")],
+            vec![ck("Esc", "cancel")],
+        ),
+        Some(Editing::AddProvider(_)) => (
+            vec![ck("Tab", "field"), ck_primary("Enter", "open")],
+            vec![ck("Esc", "cancel")],
+        ),
+        Some(Editing::ProviderDetail { .. }) => (
+            vec![
+                ck("↑↓", "navigate"),
+                ck_primary("Space", "toggle"),
+                ck("x", "delete"),
+            ],
+            vec![ck("Esc", "close")],
+        ),
+        None if is_providers_section(state.current_section()) => (
+            vec![
+                ck("↑↓", "navigate"),
+                ck_primary("Enter", "details"),
+                ck("n", "new"),
+                ck("x", "remove"),
+            ],
+            vec![ck("^S", "save"), ck("Esc", "close")],
+        ),
+        None => (
+            vec![
+                ck("←→", "section"),
+                ck("↑↓", "navigate"),
+                ck_primary("Enter", "edit"),
+                ck("Space", "toggle"),
+                ck("d", "reset"),
+                ck("/", "search"),
+            ],
+            vec![ck("^S", "save"), ck("Esc", "close")],
+        ),
+    }
+}
+
+fn render_config_keymap(main: &[ConfigKey], system: &[ConfigKey], width: usize) -> Line<'static> {
+    const KEY_NORMAL: Color = Color::White;
+    const KEY_PRIMARY: Color = Color::Blue;
+    const LABEL: Color = Color::DarkGray;
+    const SEP: &str = " · ";
+    const CAT_SEP: &str = "  ·  ";
+
+    let mut right: Vec<Span<'static>> = Vec::new();
+    let mut right_w: usize = 0;
+    for (i, k) in system.iter().enumerate() {
+        if i > 0 {
+            right.push(Span::styled(SEP.to_string(), Style::default().fg(LABEL)));
+            right_w += SEP.width();
+        }
+        let color = if k.primary { KEY_PRIMARY } else { KEY_NORMAL };
+        right.push(Span::styled(
+            k.glyph.to_string(),
+            Style::default().fg(color),
+        ));
+        right.push(Span::raw(" "));
+        right.push(Span::styled(
+            k.action.to_string(),
+            Style::default().fg(LABEL),
+        ));
+        right_w += k.glyph.width() + 1 + k.action.width();
+    }
+
+    let cat_sep_w = CAT_SEP.width();
+    let budget = width.saturating_sub(cat_sep_w + right_w);
+
+    let mut left: Vec<Span<'static>> = Vec::new();
+    let mut left_w: usize = 0;
+    for (i, k) in main.iter().enumerate() {
+        let sep_w = if i == 0 { 0 } else { SEP.width() };
+        let entry_w = k.glyph.width() + 1 + k.action.width();
+        if left_w + sep_w + entry_w > budget {
+            break;
+        }
+        if i > 0 {
+            left.push(Span::styled(SEP.to_string(), Style::default().fg(LABEL)));
+        }
+        let color = if k.primary { KEY_PRIMARY } else { KEY_NORMAL };
+        left.push(Span::styled(
+            k.glyph.to_string(),
+            Style::default().fg(color),
+        ));
+        left.push(Span::raw(" "));
+        left.push(Span::styled(
+            k.action.to_string(),
+            Style::default().fg(LABEL),
+        ));
+        left_w += sep_w + entry_w;
+    }
+
+    let fill = width.saturating_sub(left_w + cat_sep_w + right_w);
+    let mut spans = left;
+    if fill > 0 {
+        spans.push(Span::styled(
+            format!("{}{}", CAT_SEP, " ".repeat(fill)),
+            Style::default().fg(LABEL),
+        ));
+    } else {
+        spans.push(Span::styled(
+            CAT_SEP.to_string(),
+            Style::default().fg(LABEL),
+        ));
+    }
+    spans.extend(right);
+    Line::from(spans)
+}
+
+fn footer_line(state: &ConfigPanelState, width: usize) -> Line<'static> {
+    let (main, system) = footer_bindings(state);
+    render_config_keymap(&main, &system, width)
 }
 
 fn header_line(path: &Path, width: u16) -> Line<'static> {
     let path = path.display().to_string();
-    let right_w = (width as usize).saturating_sub("settings".width() + 4);
+    let right_w = (width as usize).saturating_sub("Settings".width() + 4);
     let right = middle_ellipsis(&path, right_w);
     top_rule_with_left_spans(
         vec![Span::styled(
-            "settings".to_string(),
+            "Settings".to_string(),
             Style::default().fg(Color::DarkGray),
         )],
         Some(&right),
@@ -3239,10 +3353,14 @@ mod tests {
         // Footer renders `<key> <label>` pairs. High-frequency keys must
         // survive narrower widths; trailing entries are dropped first when
         // the line gets crowded.
-        assert!(text.contains("Tab page"), "missing Tab page: {text}");
-        assert!(text.contains("Enter edit"), "missing Enter edit: {text}");
-        assert!(text.contains("Space toggle"), "missing Space toggle: {text}");
-        assert!(text.contains("d default"), "missing d default: {text}");
+        assert!(
+            text.contains("Enter edit"),
+            "missing Enter edit: {text}"
+        );
+        assert!(
+            text.contains("Space toggle"),
+            "missing Space toggle: {text}"
+        );
         insta::assert_snapshot!(text);
     }
 
@@ -3252,8 +3370,8 @@ mod tests {
         state.selected_section = SECTIONS.iter().position(|s| *s == "system").unwrap();
         state.select_first_field_in_current_section();
         let text = render_to_text(&state, 60, 16);
-        assert!(text.contains("▸ Common"));
-        assert!(text.contains("▾ System"));
+        assert!(text.contains("Common"));
+        assert!(text.contains("System"));
         insta::assert_snapshot!(text);
     }
 
@@ -3504,11 +3622,11 @@ mod tests {
             "missing override chip on value: {text}"
         );
         assert!(
-            text.contains("▾ Notifications ●"),
+            text.contains("Notifications ●"),
             "missing override marker on notifications tab: {text}"
         );
         assert!(
-            text.contains("▸ System ●"),
+            text.contains("System ●"),
             "missing override marker on system tab: {text}"
         );
     }

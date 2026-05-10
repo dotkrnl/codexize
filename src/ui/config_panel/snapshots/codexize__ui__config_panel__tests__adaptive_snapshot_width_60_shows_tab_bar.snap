@@ -2,8 +2,8 @@
 source: src/ui/config_panel/mod.rs
 expression: text
 ---
-"settings────────────────────────────/tmp/example/config.toml"
-"▸ Common  ▸ Models  ▸ Notifications ●  ▸ Agents  ▾ System ● "
+"Settings────────────────────────────/tmp/example/config.toml"
+" Common  Models  Notifications ●  Agents  System ●          "
 "────────────────────────────────────────────────────────────"
 "▌  Notification config created  │                           "
 "   Notification config updated  │                           "
@@ -11,10 +11,10 @@ expression: text
 " ● Sessions folder              │ $HOME/.codex… (overridden)"
 "   Runs folder                  │ .codexize/runs            "
 "   Memory folder                │ .codexize/memory          "
-"   Palette help row             │ true                      "
-"   JSON logs                    │ false                     "
+"   Palette help row             │ ✓ on                      "
+"   JSON logs                    │ ✗ off                     "
 "   Memory topics per prompt     │ 6                         "
 "   Journal retention            │ 12                        "
 "────────────────────────────────────────────────────────────"
-"Metadata timestamp maintained by config mutation paths.     "
-"Tab page  Enter edit  Space toggle  d default  │ config open"
+"Metadata timestamp maintained by config mutat… │ config open"
+"←→ section · ↑↓ navigate  ·              ^S save · Esc close"

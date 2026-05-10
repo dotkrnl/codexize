@@ -25,6 +25,7 @@ const DISPLAY: &[(&str, &str, &str)] = &[
     ("deepseek-v4-flash", "deepseek", "v4 flash"),
     ("deepseek-v4-pro", "deepseek", "v4 pro"),
     ("minimax-m2.5", "minimax", "m2.5"),
+    ("minimax-m2.5-free", "minimax", "m2.5 free"),
     ("minimax-m2.7", "minimax", "m2.7"),
     ("qwen3.5-plus", "qwen", "3.5 plus"),
     ("qwen3.6-plus", "qwen", "3.6 plus"),

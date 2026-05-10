@@ -55,16 +55,18 @@ pub struct BakedProvider {
 /// Sentinel display order for user-additions with no baked counterpart.
 pub const ADDITION_DISPLAY_ORDER: u16 = u16::MAX;
 
-/// Static baked-defaults table — 29 hand-curated provider entries
+/// Static baked-defaults table — 30 hand-curated provider entries
 /// mirroring the ipbr scoreboard: 17 direct-subscription routes
 /// (Claude opus/sonnet, Codex gpt-5.x, Gemini variants, Kimi k2.6 via
-/// the Moonshot route) plus 12 opencode-go routes (deepseek, glm,
-/// kimi-k2.5, kimi-k2.6, mimo, minimax, qwen) sharing the
-/// `"opencode-shared"` quota pool. kimi-k2.6 stacks both the direct
-/// Moonshot route and an opencode-go alternate. Models that the live
-/// `opencode` CLI does not advertise (verified via `opencode models`)
-/// are not baked here even if they appear on the IPBR scoreboard,
-/// since launching them errors with `ProviderModelNotFoundError`.
+/// the Moonshot route) plus 12 paid `opencode-go/...` routes
+/// (deepseek, glm, kimi-k2.5, kimi-k2.6, mimo, minimax, qwen) sharing
+/// the `"opencode-shared"` quota pool, plus one free
+/// `opencode/minimax-m2.5-free` entry with `free=true` and no quota
+/// key. kimi-k2.6 stacks both the direct Moonshot route and an
+/// opencode-go alternate. Models that the live `opencode` CLI does
+/// not advertise (verified via `opencode models`) are not baked here
+/// even if they appear on the IPBR scoreboard, since launching them
+/// errors with `ProviderModelNotFoundError`.
 pub const BAKED_TABLE: &[BakedRow] = &[
     // --- Claude opus (4 rows): tough_eligible=true, cheap_eligible=false, effort_tough="max" ---
     BakedRow {
@@ -447,6 +449,28 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             quota_lookup_key: Some("opencode-shared"),
         }],
     },
+    // opencode advertises a free tier under the bare `opencode/` prefix
+    // (separate from the paid `opencode-go/` pool). The same Opencode CLI
+    // binary launches both, so we reuse SubscriptionKind::OpencodeGo and
+    // let `free=true` handle the billing distinction (Candidate's
+    // effective_quota short-circuits to 100% on free entries).
+    BakedRow {
+        model: "minimax-m2.5-free",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode/minimax-m2.5-free",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: true,
+            official: false,
+            cheap_eligible: true,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: None,
+        }],
+    },
     BakedRow {
         model: "minimax-m2.7",
         providers: &[BakedProvider {
@@ -732,15 +756,29 @@ mod tests {
     }
 
     #[test]
-    fn baked_table_has_twenty_nine_provider_entries() {
+    fn baked_table_has_thirty_provider_entries() {
         // 16 direct-route entries (Claude/GPT/Gemini) + 1 direct kimi-k2.6
-        // via Moonshot + 11 opencode-go entries + 1 alt opencode-go route
-        // stacked on kimi-k2.6 = 29 total. Verified against
+        // via Moonshot + 12 opencode entries (11 paid `opencode-go/...`
+        // routes + 1 free `opencode/minimax-m2.5-free`) + 1 alt opencode-go
+        // route stacked on kimi-k2.6 = 30 total. Verified against
         // `opencode models` 2026-05.
         assert_eq!(
             BAKED_TABLE.iter().map(|r| r.providers.len()).sum::<usize>(),
-            29
+            30
         );
+    }
+
+    #[test]
+    fn baked_table_seeds_minimax_free_via_opencode_with_free_flag() {
+        let entry = baked_for(
+            "minimax-m2.5-free",
+            CliKind::Opencode,
+            "opencode/minimax-m2.5-free",
+        )
+        .expect("opencode/minimax-m2.5-free");
+        assert!(entry.free, "free-tier entry must carry free=true");
+        assert!(entry.quota_lookup_key.is_none(), "free entries skip quota");
+        assert_eq!(entry.subscription, SubscriptionKind::OpencodeGo);
     }
 
     #[test]

@@ -536,6 +536,9 @@ fn codex_acp_install_prompt_requires_codex_cli_and_missing_acp() {
     assert!(!should_offer_codex_acp_install());
 
     write_fake_executable(&fake_bin.path().join("codex"));
+    assert!(!should_offer_codex_acp_install());
+
+    write_fake_executable(&fake_bin.path().join("brew"));
     assert!(should_offer_codex_acp_install());
 
     write_fake_executable(&fake_bin.path().join("codex-acp"));

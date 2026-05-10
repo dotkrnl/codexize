@@ -163,7 +163,10 @@ pub fn should_offer_claude_acp_install_for(install_root: &Path) -> bool {
 }
 #[rustfmt::skip]
 pub fn should_offer_codex_acp_install() -> bool {
-    program_is_executable(CODEX_CLI) && !program_is_executable(CODEX_ACP_CLI)
+    cfg!(target_os = "macos")
+        && program_is_executable("brew")
+        && program_is_executable(CODEX_CLI)
+        && !program_is_executable(CODEX_ACP_CLI)
 }
 #[rustfmt::skip]
 fn agent_def(cli: CliKind, program: &str, args: Vec<String>) -> AcpAgentDefinition {

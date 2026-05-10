@@ -278,9 +278,7 @@ pub enum NodeStatus {
     FailedUnverified,
 }
 impl NodeStatus {
-    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
-        // Kept for backward compatibility until UI callers migrate.
         self.into()
     }
 }

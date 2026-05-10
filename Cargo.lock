@@ -302,7 +302,6 @@ dependencies = [
  "clap",
  "crossterm",
  "dashmap",
- "derive_more",
  "getrandom 0.3.4",
  "indoc",
  "insta",
@@ -319,7 +318,6 @@ dependencies = [
  "serial_test",
  "strip-ansi-escapes",
  "strum",
- "strum_macros",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -543,7 +541,6 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn 2.0.117",
- "unicode-xid",
 ]
 
 [[package]]

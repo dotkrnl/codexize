@@ -260,13 +260,8 @@ impl App {
             self.open_split_target(crate::app::split::SplitTarget::Run(run_id));
         } else {
             // Watchdog only arms for non-interactive runs (spec §3.8 / AC5).
-            self.watchdog.register(
-                run.id,
-                run.effort,
-                run.window_name.clone(),
-                prompt_path,
-                tokio::time::Instant::now(),
-            );
+            self.watchdog
+                .register(run.id, run.effort, prompt_path, tokio::time::Instant::now());
         }
         self.prime_yolo_exit_tracking(&run);
         let effort_suffix = crate::adapters::launch_effort_suffix(

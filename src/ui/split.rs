@@ -6,8 +6,6 @@ pub enum SplitTarget {
     /// The Idea node's captured text or active input surface.
     Idea,
 }
-// Main-panel renderers are wired in a later slice; keep this helper available now.
-#[allow(dead_code)]
 pub(crate) fn run_main_panel_message_visible(
     _run: &crate::state::RunRecord,
     kind: crate::state::MessageKind,

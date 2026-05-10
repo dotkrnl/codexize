@@ -52,17 +52,9 @@ pub(crate) enum WatchdogDecision {
 /// live-summary file.
 #[derive(Debug, Clone)]
 pub(crate) struct WatchdogState {
-    #[allow(dead_code)] // retained for Debug logs and registry round-trip in tests
-    pub(super) run_id: RunId,
-    #[allow(dead_code)] // retained for Debug logs and registry round-trip in tests
-    pub(super) window_name: String,
     pub(super) prompt_path: PathBuf,
-    #[allow(dead_code)] // retained for Debug logs and future operator-visible diagnostics
-    pub(super) started_at: Instant,
     pub(super) last_live_summary_event: Instant,
     pub(super) warned: bool,
-    #[allow(dead_code)] // retained for Debug logs and registry round-trip in tests
-    pub(super) effort: EffortLevel,
     pub(super) warn_threshold: Duration,
     pub(super) kill_threshold: Duration,
     /// Unscaled remaining-minutes value used in the warning preamble. Always
@@ -75,10 +67,8 @@ impl WatchdogState {
     /// registry so it owns the scaling policy in one place. Tests may also
     /// call this to supply hand-picked thresholds.
     pub(crate) fn new_with_thresholds(
-        run_id: RunId,
         effort: EffortLevel,
         now: Instant,
-        window_name: String,
         prompt_path: PathBuf,
         warn_threshold: Duration,
         kill_threshold: Duration,
@@ -87,13 +77,9 @@ impl WatchdogState {
         let kill_unscaled = kill_after(effort).as_secs() / 60;
         let warning_remaining_minutes = kill_unscaled.saturating_sub(warn_unscaled);
         Self {
-            run_id,
-            window_name,
             prompt_path,
-            started_at: now,
             last_live_summary_event: now,
             warned: false,
-            effort,
             warn_threshold,
             kill_threshold,
             warning_remaining_minutes,
@@ -102,12 +88,10 @@ impl WatchdogState {
     /// Construct an unscaled state at run-launch time (production
     /// thresholds). Convenience for tests that don't exercise scaling.
     #[cfg(test)]
-    pub(crate) fn new(run_id: RunId, effort: EffortLevel, now: Instant) -> Self {
+    pub(crate) fn new(effort: EffortLevel, now: Instant) -> Self {
         Self::new_with_thresholds(
-            run_id,
             effort,
             now,
-            String::new(),
             PathBuf::new(),
             warn_after(effort),
             kill_after(effort),
@@ -175,21 +159,12 @@ impl WatchdogRegistry {
         &mut self,
         run_id: RunId,
         effort: EffortLevel,
-        window_name: String,
         prompt_path: PathBuf,
         now: Instant,
     ) {
         let warn = self.warn_threshold(effort);
         let kill = self.kill_threshold(effort);
-        let state = WatchdogState::new_with_thresholds(
-            run_id,
-            effort,
-            now,
-            window_name,
-            prompt_path,
-            warn,
-            kill,
-        );
+        let state = WatchdogState::new_with_thresholds(effort, now, prompt_path, warn, kill);
         self.states.insert(run_id, state);
     }
     pub(crate) fn remove(&mut self, run_id: RunId) -> Option<WatchdogState> {

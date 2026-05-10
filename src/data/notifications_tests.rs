@@ -442,8 +442,6 @@ struct RecordedRequest {
     method: String,
     path: String,
     headers: Vec<(String, String)>,
-    #[allow(dead_code)]
-    body: String,
 }
 
 impl RecordedRequest {
@@ -492,7 +490,6 @@ async fn read_request(stream: &mut tokio::net::TcpStream) -> RecordedRequest {
         method,
         path,
         headers: header_pairs,
-        body: String::from_utf8_lossy(&buf[body_start..body_start + content_length]).to_string(),
     }
 }
 

@@ -117,7 +117,6 @@ impl App {
     }
     /// Clamp the split scroll offset to a maximum value. Called after
     /// terminal resize and after content changes.
-    #[allow(dead_code)]
     pub(crate) fn clamp_split_scroll(&mut self, content_height: usize) {
         let viewport_height = self.split_viewport_height();
         if viewport_height == 0 {

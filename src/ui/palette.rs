@@ -19,8 +19,6 @@ pub enum MatchResult<'a> {
     },
     Ambiguous {
         candidates: Vec<&'a str>,
-        #[allow(dead_code)]
-        ghost: &'a str,
     },
     Unknown {
         input: String,
@@ -60,8 +58,7 @@ pub fn resolve<'a>(input: &str, commands: &'a [PaletteCommand]) -> MatchResult<'
     }
     if prefix_matches.len() > 1 {
         let candidates: Vec<&str> = prefix_matches.iter().map(|c| c.name).collect();
-        let ghost = prefix_matches[0].name;
-        return MatchResult::Ambiguous { candidates, ghost };
+        return MatchResult::Ambiguous { candidates };
     }
     MatchResult::Unknown {
         input: cmd_part.to_string(),

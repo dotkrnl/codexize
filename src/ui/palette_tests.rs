@@ -87,12 +87,10 @@ fn ambiguous_prefix_match() {
     ];
     let result = resolve("fo", &cmds);
     match result {
-        MatchResult::Ambiguous {
-            candidates, ghost, ..
-        } => {
+        MatchResult::Ambiguous { candidates, .. } => {
             assert!(candidates.contains(&"foo"));
             assert!(candidates.contains(&"food"));
-            assert_eq!(ghost, "foo");
+            assert_eq!(ghost_completion("fo", &cmds), Some("foo"));
         }
         _ => panic!("expected ambiguous match"),
     }

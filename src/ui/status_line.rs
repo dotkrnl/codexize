@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 /// Severity drives both color and replacement priority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
-    #[cfg_attr(not(test), allow(dead_code))]
     Info,
     Warn,
     Error,

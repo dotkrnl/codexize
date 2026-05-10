@@ -3,7 +3,7 @@ use tokio::time::{Instant, advance};
 
 fn fresh(effort: EffortLevel) -> (Instant, WatchdogState) {
     let now = Instant::now();
-    (now, WatchdogState::new(7, effort, now))
+    (now, WatchdogState::new(effort, now))
 }
 
 #[tokio::test(start_paused = true)]
@@ -112,20 +112,17 @@ async fn registry_register_get_remove_roundtrip() {
     registry.register(
         42,
         EffortLevel::Tough,
-        "[Builder t1 r1]".to_string(),
         PathBuf::from("/tmp/prompts/coder.md"),
         now,
     );
     assert_eq!(registry.len(), 1);
     let stored = registry.get(42).expect("registered");
-    assert_eq!(stored.window_name, "[Builder t1 r1]");
     assert_eq!(stored.prompt_path.to_str(), Some("/tmp/prompts/coder.md"));
     assert_eq!(stored.warn_threshold, Duration::from_secs(15 * 60));
     assert_eq!(stored.kill_threshold, Duration::from_secs(30 * 60));
     assert_eq!(stored.warning_remaining_minutes, 15);
 
-    let removed = registry.remove(42).expect("was inserted");
-    assert_eq!(removed.run_id, 42);
+    registry.remove(42).expect("was inserted");
     assert!(registry.is_empty());
     assert!(registry.remove(42).is_none());
 }
@@ -134,20 +131,8 @@ async fn registry_register_get_remove_roundtrip() {
 async fn registry_iter_mut_visits_all_states() {
     let mut registry = WatchdogRegistry::new();
     let now = Instant::now();
-    registry.register(
-        1,
-        EffortLevel::Normal,
-        "[a]".to_string(),
-        PathBuf::from("/a"),
-        now,
-    );
-    registry.register(
-        2,
-        EffortLevel::Tough,
-        "[b]".to_string(),
-        PathBuf::from("/b"),
-        now,
-    );
+    registry.register(1, EffortLevel::Normal, PathBuf::from("/a"), now);
+    registry.register(2, EffortLevel::Tough, PathBuf::from("/b"), now);
 
     advance(Duration::from_secs(60)).await;
     for state in registry.iter_mut() {
@@ -168,13 +153,7 @@ async fn registry_iter_mut_visits_all_states() {
 async fn registry_uses_paused_tokio_time_for_thresholds() {
     let mut registry = WatchdogRegistry::new();
     let now = Instant::now();
-    registry.register(
-        1,
-        EffortLevel::Normal,
-        "[w]".to_string(),
-        PathBuf::from("/p"),
-        now,
-    );
+    registry.register(1, EffortLevel::Normal, PathBuf::from("/p"), now);
     advance(WARN_AFTER_NORMAL - Duration::from_secs(1)).await;
     assert_eq!(
         registry.evaluate_all(Instant::now())[0].1,
@@ -191,20 +170,8 @@ async fn registry_uses_paused_tokio_time_for_thresholds() {
 async fn registry_evaluate_all_reports_per_run_decisions() {
     let mut registry = WatchdogRegistry::new();
     let now = Instant::now();
-    registry.register(
-        1,
-        EffortLevel::Normal,
-        "[a]".to_string(),
-        PathBuf::from("/a"),
-        now,
-    );
-    registry.register(
-        2,
-        EffortLevel::Tough,
-        "[b]".to_string(),
-        PathBuf::from("/b"),
-        now,
-    );
+    registry.register(1, EffortLevel::Normal, PathBuf::from("/a"), now);
+    registry.register(2, EffortLevel::Tough, PathBuf::from("/b"), now);
 
     advance(Duration::from_secs(11 * 60)).await;
     let mut decisions = registry.evaluate_all(Instant::now());
@@ -235,13 +202,7 @@ async fn warning_text_contains_prompt_verbatim_and_minute_counts() {
 async fn idle_minutes_for_message_tracks_paused_tokio_time() {
     let mut registry = WatchdogRegistry::new();
     let now = Instant::now();
-    registry.register(
-        1,
-        EffortLevel::Normal,
-        "[w]".to_string(),
-        PathBuf::from("/p"),
-        now,
-    );
+    registry.register(1, EffortLevel::Normal, PathBuf::from("/p"), now);
     advance(Duration::from_secs(11 * 60)).await;
     let state = registry.get_mut(1).expect("registered");
     assert_eq!(state.idle_minutes_for_message(Instant::now()), 11);

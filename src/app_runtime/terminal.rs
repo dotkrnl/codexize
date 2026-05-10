@@ -50,18 +50,6 @@ impl TerminalRuntime {
         }
         app.poll_live_summary_fallback();
     }
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn route_command(
-        &mut self,
-        command: AppCommand,
-        view: &AppView,
-    ) -> TerminalCommandOutcome {
-        let supervisor = crate::runner::Supervisor::shared_for_test();
-        self.route_command_with_dispatch(command, view, |request| {
-            crate::data::events::dispatch(request, &supervisor)
-        })
-    }
     pub(crate) fn route_command_with_dispatch<F>(
         &mut self,
         command: AppCommand,

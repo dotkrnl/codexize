@@ -62,13 +62,8 @@ async fn duplicate_live_summary_write_does_not_reset_watchdog_idle_clock() {
     app.live_summary_path = Some(live_path.clone());
 
     let now = tokio::time::Instant::now();
-    app.watchdog.register(
-        1,
-        EffortLevel::Tough,
-        "[Test]".to_string(),
-        live_path.clone(),
-        now,
-    );
+    app.watchdog
+        .register(1, EffortLevel::Tough, live_path.clone(), now);
 
     std::fs::write(&live_path, "title|first content").expect("write 1");
     app.read_live_summary_pipeline();

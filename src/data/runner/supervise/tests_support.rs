@@ -60,6 +60,7 @@ fn register_test_run_label(window_name: &str, waiting: bool) {
     supervisor.inner.runs.insert(
         run_id,
         RunHandle {
+            #[cfg(test)]
             window_name: window_name.to_string(),
             cancel,
             input_tx,

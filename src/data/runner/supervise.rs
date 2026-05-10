@@ -86,7 +86,7 @@ impl CancelSignal {
 /// fixture-only entries registered by `request_run_label_*_for_test`.
 #[derive(Debug)]
 struct RunHandle {
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     window_name: String,
     cancel: Arc<CancelSignal>,
     input_tx: mpsc::UnboundedSender<AcpInput>,
@@ -244,7 +244,7 @@ fn test_runtime_handle() -> Option<Handle> {
 fn launch_managed_acp_window(
     supervisor: &Supervisor,
     run_id: RunId,
-    window_name: &str,
+    _window_name: &str,
     launch: ManagedAcpLaunch,
 ) -> Result<()> {
     supervisor.cleanup_finished();
@@ -277,7 +277,8 @@ fn launch_managed_acp_window(
     supervisor.inner.runs.insert(
         run_id,
         RunHandle {
-            window_name: window_name.to_string(),
+            #[cfg(test)]
+            window_name: _window_name.to_string(),
             cancel,
             input_tx,
             waiting_for_input: waiting_rx,

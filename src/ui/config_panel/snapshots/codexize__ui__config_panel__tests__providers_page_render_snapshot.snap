@@ -1,0 +1,22 @@
+---
+source: src/ui/config_panel/mod.rs
+expression: "render_to_text(&state, 100, 18)"
+---
+"settings────────────────────────────────────────────────────────────────────/tmp/example/config.toml"
+"▸ Common  ▾ Models  ▸ Notifications  ▸ Agents  ▸ System                                             "
+"────────────────────────────────────────────────────────────────────────────────────────────────────"
+"  ▾ claude · claude-opus-4.1                                                                        "
+"  ▌ ✓ claude · claude-opus-4.1  built-in · official · paid · cheap · tough · effort                 "
+"  ▾ claude · claude-opus-4.5                                                                        "
+"    ✓ claude · claude-opus-4.5  built-in · official · paid · cheap · tough · effort                 "
+"  ▾ claude · claude-opus-4.6                                                                        "
+"    ✓ claude · claude-opus-4.6  built-in · official · paid · cheap · tough · effort                 "
+"  ▾ claude · claude-opus-4.7                                                                        "
+"    ✓ claude · claude-opus-4.7  built-in · official · paid · cheap · tough · effort                 "
+"  ▾ claude · claude-sonnet-4                                                                        "
+"    ✓ claude · claude-sonnet-4  built-in · official · paid · cheap · tough · effort                 "
+"  ▾ claude · claude-sonnet-4.5                                                                      "
+"    ✓ claude · claude-sonnet-4.5  built-in · official · paid · cheap · tough · effort               "
+"────────────────────────────────────────────────────────────────────────────────────────────────────"
+"Enter opens the per-provider detail drawer · a adds a custom entry · x removes                      "
+"↑↓ model  Enter details  a add  x remove  Ctrl-S save  Esc close                       │ config open"

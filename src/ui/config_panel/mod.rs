@@ -3296,6 +3296,23 @@ mod tests {
     }
 
     #[test]
+    fn providers_page_render_snapshot() {
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        state.providers_cursor = providers::get_lines(&state.config)
+            .iter()
+            .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
+            .expect("provider row");
+        insta::assert_snapshot!(render_to_text(&state, 100, 18));
+    }
+
+    #[test]
     fn provider_detail_drawer_render_snapshot() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(

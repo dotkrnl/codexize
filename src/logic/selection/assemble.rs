@@ -81,7 +81,7 @@ pub fn assemble_universe(
     let mut consumed_providers: BTreeSet<(SubscriptionKind, String, CliKind, String)> =
         BTreeSet::new();
     for entry in dashboard_entries {
-        let Some(row_name) = row_name_for_entry(&entry) else {
+        let Some(row_key) = row_key_for_entry(&entry) else {
             continue;
         };
         let dashboard_subscription = subscription_for_dashboard(&entry);
@@ -98,8 +98,8 @@ pub fn assemble_universe(
             )
         });
         let row = rows
-            .entry(row_name.clone())
-            .or_insert_with(|| row_from_entry(row_name.clone(), &entry));
+            .entry(row_key)
+            .or_insert_with(|| row_from_entry(entry.name.clone(), &entry));
         if let Some(candidate) = candidate {
             // With `subscription_for_dashboard` keyed off the baked
             // table, multiple dashboard rows for the same model can
@@ -151,7 +151,7 @@ pub fn assemble_universe(
     (models, free_model_warnings)
 }
 
-fn row_name_for_entry(entry: &DashboardEntry) -> Option<String> {
+fn row_key_for_entry(entry: &DashboardEntry) -> Option<String> {
     if entry.ipbr_row_matched {
         Some(
             entry

@@ -273,6 +273,23 @@ fn make_ipbr_entry(name: &str, vendor: &str, match_key: &str) -> DashboardEntry 
     entry
 }
 
+#[test]
+fn ipbr_matched_row_name_uses_display_canonical_not_normalized_key() {
+    let dashboard = vec![make_ipbr_entry(
+        "claude-opus-4.6",
+        "anthropic",
+        "claude-opus-4-6",
+    )];
+    let quotas = make_quota_payload(&[("claude", "claude-shared", Some(80))]);
+
+    let (models, _warnings) =
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &all_clis(), &[]);
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].name, "claude-opus-4.6");
+    assert_eq!(models[0].ipbr_match_key.as_deref(), Some("claude-opus-4-6"));
+}
+
 fn opencode_available() -> BTreeSet<CliKind> {
     BTreeSet::from([CliKind::Claude, CliKind::Opencode])
 }

@@ -57,6 +57,73 @@ impl App {
     fn test_uses_real_live_summary_watcher() -> bool {
         std::env::var_os("CODEXIZE_TEST_REAL_WATCHER").is_some()
     }
+    /// Install the cache watcher rooted at `paths.cache_root`. Idempotent
+    /// — calling it again tears down the previous watcher first. Failures
+    /// to install the notify backend are non-fatal: the watcher's 60-s
+    /// mtime poll still runs and the reason is surfaced as a boundary log
+    /// so the operator can investigate (matches the live-summary watcher
+    /// degradation path).
+    pub(crate) fn setup_cache_watcher(&mut self) {
+        self.cache_watcher = None;
+        let dir = self.paths.cache_root.clone();
+        // Skip the real notify watcher in unit tests by default to keep
+        // the in-process tests hermetic (the live-summary watcher uses
+        // the same convention). Opt in by setting CODEXIZE_TEST_REAL_WATCHER.
+        #[cfg(test)]
+        if !Self::test_uses_real_live_summary_watcher() {
+            return;
+        }
+        let initial_mtime = crate::data::cache::watcher::current_mtime(&dir.join("models.json"));
+        match crate::data::cache::CacheWatcher::start(&dir, initial_mtime) {
+            crate::data::cache::CacheWatcherOutcome::Active(watcher) => {
+                self.cache_watcher = Some(watcher);
+            }
+            crate::data::cache::CacheWatcherOutcome::PollOnly { reason, watcher } => {
+                self.cache_watcher = Some(watcher);
+                self.surface_boundary_error(reason, false);
+            }
+        }
+    }
+    /// Drain pending cache-watcher signals and, on an external publish,
+    /// reload the on-disk cache and refresh the model strip. Emits a
+    /// `cache_external_publish_observed` event so the publisher/follower
+    /// telemetry stays symmetric with the rest of the cache layer.
+    pub(crate) fn poll_cache_watcher(&mut self) {
+        let Some(watcher) = self.cache_watcher.as_mut() else {
+            return;
+        };
+        if !watcher.poll() {
+            return;
+        }
+        let cache_path = watcher.cache_file_path().to_path_buf();
+        tracing::info!(
+            event = "cache_external_publish_observed",
+            cache_path = %cache_path.display(),
+            "external publish observed; reloading model strip"
+        );
+        let loaded = crate::cache::load(&self.paths.cache_root);
+        let providers = self.config.providers.value().clone();
+        let available = self.available_clis_for_cache_watcher();
+        let models =
+            crate::data::selection_assembly::assemble_from_loaded(&loaded, &available, &providers);
+        if !models.is_empty() {
+            self.set_models(models);
+            // A fresh on-disk publish satisfies the freshness contract:
+            // the follower does NOT need to re-fetch quotas right now,
+            // so reset its retry clock the same way a successful refresh
+            // would.
+            self.model_refresh = super::state::ModelRefreshState::Idle(std::time::Instant::now());
+        }
+    }
+    fn available_clis_for_cache_watcher(
+        &self,
+    ) -> std::collections::BTreeSet<crate::selection::CliKind> {
+        crate::acp::AcpConfig::from_config_views(
+            &self.config.acp.agents,
+            &self.config.acp_install_view(),
+        )
+        .available_clis()
+    }
     pub(crate) fn poll_live_summary_fallback(&mut self) {
         if !self.run_launched {
             self.live_summary_cached_text.clear();

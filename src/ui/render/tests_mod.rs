@@ -66,6 +66,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         live_summary_path: None,
         live_summary_cached_text: String::new(),
         live_summary_cached_mtime: None,
+        cache_watcher: None,
         pending_drain_deadline: None,
         pending_termination: None,
         pending_quit_confirmation_run_id: None,

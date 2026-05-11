@@ -49,6 +49,10 @@ impl TerminalRuntime {
             app.read_live_summary_pipeline();
         }
         app.poll_live_summary_fallback();
+        // Cache watcher: external `models.json` publishes by another
+        // instance flow into the redraw loop the same way live-summary
+        // changes do — a single debounced reload per atomic rename.
+        app.poll_cache_watcher();
     }
     pub(crate) fn route_command_with_dispatch<F>(
         &mut self,

@@ -118,6 +118,7 @@ impl App {
             live_summary_change_events: None,
             live_summary_cached_text: String::new(),
             live_summary_cached_mtime: None,
+            cache_watcher: None,
             pending_drain_deadline: None,
             pending_termination: None,
             pending_quit_confirmation_run_id: None,
@@ -184,6 +185,11 @@ impl App {
                 app.model_refresh = ModelRefreshState::Idle(Instant::now());
             }
         }
+        // Install the cache watcher so atomic publishes from other instances
+        // refresh the model strip without restart. The watcher seeds itself
+        // with the mtime we just loaded; subsequent advances trigger a
+        // single debounced reload.
+        app.setup_cache_watcher();
         if let Ok(run_id) = session_state::resume_running_runs(&mut app.state) {
             app.current_run_id = run_id;
             app.run_launched = run_id.is_some();

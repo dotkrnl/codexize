@@ -271,6 +271,12 @@ pub struct App {
     pub(crate) live_summary_path: Option<std::path::PathBuf>,
     pub(crate) live_summary_cached_text: String,
     pub(crate) live_summary_cached_mtime: Option<std::time::SystemTime>,
+    /// Per-process watcher that fires when another instance atomically
+    /// publishes a new `models.json` under `paths.cache_root`. The notify
+    /// backend handles sub-2-s latency; an internal 60-s mtime poll
+    /// covers events the kernel-side notifier dropped. `None` only when
+    /// the App is constructed without a watcher (tests).
+    pub(crate) cache_watcher: Option<crate::data::cache::CacheWatcher>,
     pub(crate) pending_drain_deadline: Option<Instant>,
     pub(crate) pending_termination: Option<PendingTermination>,
     pub(crate) pending_quit_confirmation_run_id: Option<u64>,

@@ -25,6 +25,25 @@ Refine carryover from prior task's reviewer (apply opportunistically — these a
 This is a RESUME of a previous coding session on the same task — pick up where
 you left off, honour the reviewer feedback above, and finish the work.
 
+Reviewer feedback is a HYPOTHESIS, not a directive. The reviewer is
+another AI agent; it can be wrong, exceed the task's scope, or
+misread the diff. For every prior `feedback` item, before changing
+code:
+  1. Verify the claim against the task's spec/plan refs and the actual
+     code. A finding only obligates you to act if it traces to a
+     specific spec or plan line that your delta violates, or if it
+     identifies a concrete bug.
+  2. If the claim holds, fix it.
+  3. If the claim is wrong, exceeds the task's scope, or has already
+     been addressed in this round's commits, REBUT it in
+     `coder_summary.toml`'s `rebuttal` array (one entry per overruled
+     item, cite the evidence — spec/plan line, commit SHA, code
+     location). Do NOT silently ignore feedback; do NOT blindly
+     comply.
+  4. Genuine ambiguity (the reviewer raised a real question the
+     spec/plan does not answer) is `human_blocked` territory — flag
+     it in the rebuttal and leave the code in a buildable state.
+
 Job:
   1. Read the task file first.
   2. Implement end-to-end on the current branch. Match existing repo
@@ -74,8 +93,12 @@ Write `/tmp/codexize-prompt-fixture/session/rounds/003/coder_summary.toml` as TO
     status   = "done" | "partial"   # "partial" makes the run retry
     summary  = "One short paragraph of what you completed."
     rebuttal = ["Response to prior reviewer feedback."]
-                                    # only when prior feedback was wrong or
-                                    # already addressed; one entry per item
+                                    # one entry per prior feedback item you
+                                    # are NOT acting on, with a concrete
+                                    # reason: wrong, out-of-scope, or
+                                    # already addressed (cite SHA / spec
+                                    # line / code location). Acted-on
+                                    # feedback does not appear here.
 
 If the task was already complete and you committed nothing, status = "done"
 with the reason in summary — that's not a failure. The orchestrator

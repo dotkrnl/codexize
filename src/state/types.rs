@@ -41,6 +41,7 @@ pub enum BlockOrigin {
     FinalValidation,
     Simplification,
     Dreaming,
+    RepoStateUpdate,
 }
 impl BlockOrigin {
     /// Map a `RunRecord.stage` string to its block origin.
@@ -61,6 +62,7 @@ impl BlockOrigin {
             "final-validation" => Self::FinalValidation,
             "simplifier" => Self::Simplification,
             "dreaming" => Self::Dreaming,
+            "repo-state-update" => Self::RepoStateUpdate,
             _ => return None,
         })
     }

@@ -250,6 +250,7 @@ fn stage_for_block_origin(origin: BlockOrigin) -> &'static str {
         BlockOrigin::FinalValidation => "final-validation",
         BlockOrigin::Simplification => "simplifier",
         BlockOrigin::Dreaming => "dreaming",
+        BlockOrigin::RepoStateUpdate => "repo-state-update",
     }
 }
 

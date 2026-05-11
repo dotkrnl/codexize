@@ -392,12 +392,17 @@ pub struct SessionState {
     pub block_origin: Option<BlockOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dreaming_decision: Option<DreamingDecision>,
+    /// Session id of the newest earlier `Done` session at the time this session
+    /// was planned (or last repo-state-updated). `None` when no earlier session
+    /// matches the baseline definition.
+    #[serde(default)]
+    pub planned_after_session_id: Option<String>,
 }
 impl SessionState {
     pub fn new(session_id: String) -> Self {
         Self {
             session_id,
-            schema_version: 3,
+            schema_version: 4,
             modes: Modes::default(),
             agent_runs: Vec::new(),
             current_phase: Phase::IdeaInput,
@@ -416,6 +421,7 @@ impl SessionState {
             simplification_attempts: BTreeMap::new(),
             block_origin: None,
             dreaming_decision: None,
+            planned_after_session_id: None,
         }
     }
     /// Return the next available agent_run_id (monotonic within session).

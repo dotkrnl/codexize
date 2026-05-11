@@ -9,7 +9,7 @@ expression: text
 " ⊕ System (1 override)                                      "
 "▌  Ntfy created                 │                           "
 "   Ntfy updated                 │                           "
-"   Cache root                   │ .codexize/cache           "
+"   Cache root                   │ ~/.codexize/cache         "
 " ● Sessions root                │ $HOME/.codex… (overridden)"
 "   Runs root                    │ .codexize/runs            "
 "   Memory root                  │ .codexize/memory          "

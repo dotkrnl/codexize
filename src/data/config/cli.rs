@@ -303,6 +303,15 @@ mod tests {
 
     #[test]
     #[serial]
+    fn defaults_carry_home_shared_cache_root() {
+        let mut buf = out_string();
+        run_defaults(&mut buf).unwrap();
+        let s = into_string(buf);
+        assert!(s.contains("cache_root = \"~/.codexize/cache\""));
+    }
+
+    #[test]
+    #[serial]
     fn defaults_and_init_produce_identical_content() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("config.toml");

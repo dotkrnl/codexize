@@ -406,7 +406,7 @@ pub struct PathsSection {
 impl Default for PathsSection {
     fn default() -> Self {
         Self {
-            cache_root: Override::baked(".codexize/cache".to_string()),
+            cache_root: Override::baked("~/.codexize/cache".to_string()),
             sessions_root: Override::baked(".codexize/sessions".to_string()),
             runs_root: Override::baked(".codexize/runs".to_string()),
             memory_root: Override::baked(".codexize/memory".to_string()),

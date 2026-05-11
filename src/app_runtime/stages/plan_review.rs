@@ -5,7 +5,24 @@ use crate::selection::CachedModel;
 use crate::state::{self as session_state, MessageKind, Phase, RunStatus};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
+use std::path::Path;
 impl App {
+    /// Extend the operator's default ACP policy so the interactive plan
+    /// reviewer can direct-apply approved edits to both `plan.md` and
+    /// `spec.md` during the session. Idempotent — silently skips
+    /// appending an entry already in the operator's configured allowlist.
+    pub(crate) fn plan_review_acp_policy(
+        mut policy: crate::acp::AcpLaunchPolicy,
+        plan_path: &Path,
+        spec_path: &Path,
+    ) -> crate::acp::AcpLaunchPolicy {
+        for path in [plan_path.to_path_buf(), spec_path.to_path_buf()] {
+            if !policy.allowed_write_paths.contains(&path) {
+                policy.allowed_write_paths.push(path);
+            }
+        }
+        policy
+    }
     pub(crate) fn launch_plan_review(&mut self) {
         let _ = self.launch_plan_review_with_model(None);
     }
@@ -113,11 +130,17 @@ impl App {
         );
         let run_key = Self::run_key_for("plan-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
+        let policy =
+            Self::plan_review_acp_policy(self.default_acp_policy(), &plan_path, &spec_path);
         let launch_result = if let Some(result) =
             self.try_test_launch(Some(&review_path), &run_key, &artifacts_dir)
         {
             result
-        } else {
+        } else if modes.yolo {
+            // YOLO plan review runs without a human operator on the loop —
+            // the finalize handler auto-approves the pause modal, and the
+            // interactive launcher would block on operator input that never
+            // arrives. Mirrors the brainstorm/planning split.
             self.runner_supervisor.launch_noninteractive_with_policy(
                 run_id,
                 &window_name,
@@ -125,7 +148,17 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&review_path),
-                self.default_acp_policy(),
+                policy,
+            )
+        } else {
+            self.runner_supervisor.launch_interactive_with_policy(
+                run_id,
+                &window_name,
+                &run,
+                &run_key,
+                &artifacts_dir,
+                Some(&review_path),
+                policy,
             )
         };
         match launch_result {
@@ -195,5 +228,59 @@ impl App {
             self.auto_approve_plan_review_pause("plan_approval");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::App;
+    use crate::acp::AcpLaunchPolicy;
+    use std::path::PathBuf;
+
+    #[test]
+    fn plan_review_policy_appends_plan_and_spec_md_to_allowed_write_paths() {
+        let plan_path = PathBuf::from("/sess/artifacts/plan.md");
+        let spec_path = PathBuf::from("/sess/artifacts/spec.md");
+        let policy =
+            App::plan_review_acp_policy(AcpLaunchPolicy::default(), &plan_path, &spec_path);
+        assert!(
+            policy.allowed_write_paths.contains(&plan_path),
+            "plan.md must be writable so the interactive reviewer can direct-apply plan edits"
+        );
+        assert!(
+            policy.allowed_write_paths.contains(&spec_path),
+            "spec.md must also be writable — the operator may approve spec edits surfaced during plan review"
+        );
+    }
+
+    #[test]
+    fn plan_review_policy_preserves_operator_configured_entries() {
+        let plan_path = PathBuf::from("/sess/artifacts/plan.md");
+        let spec_path = PathBuf::from("/sess/artifacts/spec.md");
+        let existing = PathBuf::from("/sess/artifacts/live_summary.txt");
+        let mut base = AcpLaunchPolicy::default();
+        base.allowed_write_paths.push(existing.clone());
+        let policy = App::plan_review_acp_policy(base, &plan_path, &spec_path);
+        assert!(policy.allowed_write_paths.contains(&existing));
+        assert!(policy.allowed_write_paths.contains(&plan_path));
+        assert!(policy.allowed_write_paths.contains(&spec_path));
+    }
+
+    #[test]
+    fn plan_review_policy_is_idempotent_when_paths_already_allowed() {
+        let plan_path = PathBuf::from("/sess/artifacts/plan.md");
+        let spec_path = PathBuf::from("/sess/artifacts/spec.md");
+        let mut base = AcpLaunchPolicy::default();
+        base.allowed_write_paths.push(plan_path.clone());
+        base.allowed_write_paths.push(spec_path.clone());
+        let policy = App::plan_review_acp_policy(base, &plan_path, &spec_path);
+        for target in [&plan_path, &spec_path] {
+            let occurrences = policy
+                .allowed_write_paths
+                .iter()
+                .filter(|p| *p == target)
+                .count();
+            assert_eq!(occurrences, 1, "{:?} must not be duplicated", target);
+        }
     }
 }

@@ -310,7 +310,7 @@ impl App {
     }
     fn run_is_interactive(&self, stage: &str, round: u32, modes: LaunchModes) -> bool {
         match stage {
-            "brainstorm" | "planning" => !modes.yolo,
+            "brainstorm" | "planning" | "spec-review" | "plan-review" => !modes.yolo,
             "recovery" => self
                 .state
                 .builder

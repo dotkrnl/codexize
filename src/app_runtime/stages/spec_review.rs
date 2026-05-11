@@ -5,7 +5,22 @@ use crate::selection::CachedModel;
 use crate::state::{self as session_state, MessageKind, Phase, RunStatus};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
+use std::path::Path;
 impl App {
+    /// Extend the operator's default ACP policy so the interactive spec
+    /// reviewer can direct-apply approved edits to `spec.md` during the
+    /// session. Idempotent — silently skips appending if `spec.md` is
+    /// already in the operator's configured allowlist.
+    pub(crate) fn spec_review_acp_policy(
+        mut policy: crate::acp::AcpLaunchPolicy,
+        spec_path: &Path,
+    ) -> crate::acp::AcpLaunchPolicy {
+        let spec_path = spec_path.to_path_buf();
+        if !policy.allowed_write_paths.contains(&spec_path) {
+            policy.allowed_write_paths.push(spec_path);
+        }
+        policy
+    }
     pub(crate) fn launch_spec_review(&mut self) {
         let _ = self.launch_spec_review_with_model(None);
     }
@@ -110,11 +125,16 @@ impl App {
         );
         let run_key = Self::run_key_for("spec-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
+        let policy = Self::spec_review_acp_policy(self.default_acp_policy(), &spec_path);
         let launch_result = if let Some(result) =
             self.try_test_launch(Some(&review_path), &run_key, &artifacts_dir)
         {
             result
-        } else {
+        } else if modes.yolo {
+            // YOLO spec review runs without a human operator on the loop —
+            // the finalize handler auto-approves the pause modal, and the
+            // interactive launcher would block waiting on operator input
+            // that never arrives. Mirrors the brainstorm/planning split.
             self.runner_supervisor.launch_noninteractive_with_policy(
                 run_id,
                 &window_name,
@@ -122,7 +142,17 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&review_path),
-                self.default_acp_policy(),
+                policy,
+            )
+        } else {
+            self.runner_supervisor.launch_interactive_with_policy(
+                run_id,
+                &window_name,
+                &run,
+                &run_key,
+                &artifacts_dir,
+                Some(&review_path),
+                policy,
             )
         };
         match launch_result {
@@ -191,5 +221,47 @@ impl App {
             self.auto_approve_spec_review_pause("spec_approval");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::App;
+    use crate::acp::AcpLaunchPolicy;
+    use std::path::PathBuf;
+
+    #[test]
+    fn spec_review_policy_appends_spec_md_to_allowed_write_paths() {
+        let spec_path = PathBuf::from("/sess/artifacts/spec.md");
+        let policy = App::spec_review_acp_policy(AcpLaunchPolicy::default(), &spec_path);
+        assert!(
+            policy.allowed_write_paths.contains(&spec_path),
+            "spec.md must be writable so the interactive reviewer can direct-apply edits"
+        );
+    }
+
+    #[test]
+    fn spec_review_policy_preserves_operator_configured_entries() {
+        let spec_path = PathBuf::from("/sess/artifacts/spec.md");
+        let existing = PathBuf::from("/sess/artifacts/live_summary.txt");
+        let mut base = AcpLaunchPolicy::default();
+        base.allowed_write_paths.push(existing.clone());
+        let policy = App::spec_review_acp_policy(base, &spec_path);
+        assert!(policy.allowed_write_paths.contains(&existing));
+        assert!(policy.allowed_write_paths.contains(&spec_path));
+    }
+
+    #[test]
+    fn spec_review_policy_is_idempotent_when_spec_already_allowed() {
+        let spec_path = PathBuf::from("/sess/artifacts/spec.md");
+        let mut base = AcpLaunchPolicy::default();
+        base.allowed_write_paths.push(spec_path.clone());
+        let policy = App::spec_review_acp_policy(base, &spec_path);
+        let occurrences = policy
+            .allowed_write_paths
+            .iter()
+            .filter(|p| *p == &spec_path)
+            .count();
+        assert_eq!(occurrences, 1, "spec.md must not be duplicated");
     }
 }

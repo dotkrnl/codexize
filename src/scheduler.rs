@@ -97,10 +97,7 @@ pub struct SchedulerSession {
 #[derive(Debug, Clone)]
 pub enum ScannedSession {
     Loaded(SchedulerSession),
-    Corrupt {
-        session_id: String,
-        error: String,
-    },
+    Corrupt { session_id: String, error: String },
 }
 
 impl ScannedSession {
@@ -126,32 +123,19 @@ pub struct PlanningContinuation {
 pub enum ImplementationDecision {
     /// Some session is already in an implementation-lane phase. The shell
     /// must not start another implementation-lane stage anywhere.
-    LaneOccupied {
-        session_id: String,
-        phase: Phase,
-    },
+    LaneOccupied { session_id: String, phase: Phase },
     /// Oldest unresolved session is `BlockedNeedsUser`. Lane is idle and
     /// remains idle until the operator resolves the block.
-    BlockedByHead {
-        session_id: String,
-    },
+    BlockedByHead { session_id: String },
     /// Oldest unresolved session is still planning. Lane is idle this tick.
-    PlanningHead {
-        session_id: String,
-        phase: Phase,
-    },
+    PlanningHead { session_id: String, phase: Phase },
     /// Oldest unresolved session is `WaitingToImplement` and eligible. The
     /// shell consults the repo-state-update decider to choose between
     /// `RepoStateUpdateRunning` and `ShardingRunning`.
-    DispatchWaiting {
-        session_id: String,
-    },
+    DispatchWaiting { session_id: String },
     /// An earlier-than-head session could not be loaded. The lane is
     /// treated as blocked and an operator-visible error must surface.
-    BlockedByCorruptEarlierSession {
-        session_id: String,
-        error: String,
-    },
+    BlockedByCorruptEarlierSession { session_id: String, error: String },
     /// No unresolved session — every non-archived session is `Done` or
     /// `Cancelled`.
     NothingToDo,
@@ -234,10 +218,12 @@ pub fn evaluate_tick(scanned: &[ScannedSession]) -> SchedulerTick {
                     Phase::WaitingToImplement => ImplementationDecision::DispatchWaiting {
                         session_id: session.session_id.clone(),
                     },
-                    phase if is_planning_lane_phase(phase) => ImplementationDecision::PlanningHead {
-                        session_id: session.session_id.clone(),
-                        phase,
-                    },
+                    phase if is_planning_lane_phase(phase) => {
+                        ImplementationDecision::PlanningHead {
+                            session_id: session.session_id.clone(),
+                            phase,
+                        }
+                    }
                     phase if is_implementation_lane_phase(phase) => {
                         // The head itself occupies the lane — preserved as
                         // LaneOccupied so callers get a single canonical
@@ -387,7 +373,11 @@ mod tests {
             loaded("03-plan-review-paused", Phase::PlanReviewPaused),
         ];
         let tick = evaluate_tick(&scan);
-        let ids: Vec<&str> = tick.planning.iter().map(|p| p.session_id.as_str()).collect();
+        let ids: Vec<&str> = tick
+            .planning
+            .iter()
+            .map(|p| p.session_id.as_str())
+            .collect();
         assert_eq!(ids, vec!["02-brainstorm", "03-plan-review-paused"]);
     }
 
@@ -472,7 +462,11 @@ mod tests {
             }
             other => panic!("expected PlanningHead, got {other:?}"),
         }
-        let planning_ids: Vec<&str> = tick.planning.iter().map(|p| p.session_id.as_str()).collect();
+        let planning_ids: Vec<&str> = tick
+            .planning
+            .iter()
+            .map(|p| p.session_id.as_str())
+            .collect();
         assert_eq!(planning_ids, vec!["01-planning"]);
     }
 

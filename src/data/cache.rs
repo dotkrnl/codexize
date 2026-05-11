@@ -8,11 +8,11 @@ use std::io::Write;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-pub const TTL: Duration = Duration::from_secs(30 * 60);
+pub const TTL: Duration = Duration::from_secs(10 * 60);
 /// Current cache schema version. Cached dashboard rows must refresh into the
 /// exact provider/IPBR canonical shape.
 pub const CACHE_VERSION: u32 = 10;
-pub const DASHBOARD_TTL: Duration = Duration::from_secs(30 * 60);
+pub const DASHBOARD_TTL: Duration = Duration::from_secs(10 * 60);
 pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
 // ---------------------------------------------------------------------------
 // Schema v4 types

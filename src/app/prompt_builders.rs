@@ -24,7 +24,11 @@ fn prior_attempts_block(ctx: &PromptCtx, prior_attempts_path: Option<&Path>) -> 
 /// Render the `{cross_session_context}` slot for brainstorm, spec review, and
 /// planning. Frames specs from earlier waiting sessions as the expected
 /// future repository state.
-fn cross_session_context_block(ctx: &PromptCtx, earlier_specs: &[PathBuf], planning: bool) -> String {
+fn cross_session_context_block(
+    ctx: &PromptCtx,
+    earlier_specs: &[PathBuf],
+    planning: bool,
+) -> String {
     if earlier_specs.is_empty() {
         return String::new();
     }
@@ -34,11 +38,7 @@ fn cross_session_context_block(ctx: &PromptCtx, earlier_specs: &[PathBuf], plann
         Earlier sessions in the queue have already been planned. Treat their \
         specs as the repository state you are {} against.
         ",
-        if planning {
-            "planning"
-        } else {
-            "designing"
-        }
+        if planning { "planning" } else { "designing" }
     );
     if !planning {
         block.push_str(

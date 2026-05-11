@@ -237,7 +237,8 @@ impl App {
                         && session.current_phase == crate::state::Phase::WaitingToImplement
                     {
                         Some(
-                            crate::state::session_dir(&session.session_id).join("artifacts/spec.md"),
+                            crate::state::session_dir(&session.session_id)
+                                .join("artifacts/spec.md"),
                         )
                     } else {
                         None

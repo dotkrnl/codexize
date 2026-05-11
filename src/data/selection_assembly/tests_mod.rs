@@ -151,6 +151,139 @@ async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
     assert_eq!(errors[0].subscription, SubscriptionKind::Claude);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn assemble_models_async_elects_publisher_when_reset_coverage_is_partial() {
+    // Regression for the pre-lock freshness gate: when the on-disk cache
+    // has fresh dashboard and fresh quotas but a quota_resets section that
+    // doesn't cover every quota model, `assemble_models_async` must still
+    // proceed to publisher election and refresh — otherwise the gap is
+    // never backfilled and the role telemetry never fires.
+    let dashboard = vec![
+        make_entry("claude-sonnet-4.6", "claude"),
+        make_entry("claude-opus-4.1", "claude"),
+    ];
+    let quotas = make_quota_payload(&[
+        ("claude", "claude-shared", Some(80)),
+        ("claude", "claude-opus-4.1", Some(80)),
+    ]);
+    // Only one of the two quota models has a reset entry — the other
+    // creates the coverage gap.
+    let resets = make_reset_payload(&[("claude", "claude-shared", None)]);
+    let available = BTreeSet::from([crate::selection::CliKind::Claude]);
+    let temp = tempfile::TempDir::new().unwrap();
+    let bin_dir = temp.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let claude_path = bin_dir.join("claude");
+    let security_path = bin_dir.join("security");
+    std::fs::write(
+        &claude_path,
+        "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n  printf '{\"orgId\":\"test-org\"}'\n  exit 0\nfi\nsleep 1\n",
+    )
+    .unwrap();
+    std::fs::write(&security_path, "#!/bin/sh\nexit 1\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&claude_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&security_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let original_path = std::env::var_os("PATH");
+
+    // SAFETY: serialized via #[serial_test::serial]; restored unconditionally.
+    unsafe {
+        let mut paths = vec![bin_dir.clone()];
+        if let Some(value) = std::env::var_os("PATH") {
+            paths.extend(std::env::split_paths(&value));
+        }
+        let joined = std::env::join_paths(paths).unwrap();
+        std::env::set_var("PATH", joined);
+    }
+
+    let cache_dir = temp.path().join(".codexize").join("cache");
+    cache::save_dashboard(&cache_dir, &dashboard).unwrap();
+    cache::save_quotas(&cache_dir, &quotas).unwrap();
+    cache::save_quota_resets(&cache_dir, &resets).unwrap();
+
+    let (models, errors) = assemble_models_async(&cache_dir, &available, &[]).await;
+
+    unsafe {
+        match original_path {
+            Some(value) => std::env::set_var("PATH", value),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+
+    assert_eq!(models.len(), 2);
+    assert!(
+        !errors.is_empty(),
+        "partial reset coverage must drive publisher election + refresh \
+         through assemble_models_async, not bypass it"
+    );
+    assert_eq!(errors[0].subscription, SubscriptionKind::Claude);
+}
+
+#[test]
+fn refresh_needed_treats_missing_reset_coverage_as_stale() {
+    // Direct unit coverage of the predicate: fresh dashboard + fresh
+    // quotas + fresh resets but partial reset coverage must report
+    // `refresh_needed = true` so the publisher election runs.
+    let quotas = make_quota_payload(&[
+        ("claude", "claude-shared", Some(80)),
+        ("claude", "claude-opus-4.1", Some(80)),
+    ]);
+    let resets = make_reset_payload(&[("claude", "claude-shared", None)]);
+    let loaded = LoadedCache {
+        dashboard: Some(LoadedSection {
+            data: vec![make_entry("claude-sonnet-4.6", "claude")],
+            expired: false,
+        }),
+        quotas: Some(LoadedSection {
+            data: quotas,
+            expired: false,
+        }),
+        quota_resets: Some(LoadedSection {
+            data: resets,
+            expired: false,
+        }),
+    };
+    assert!(super::refresh_needed(&loaded));
+
+    // Fully covered + fresh → no refresh needed.
+    let quotas = make_quota_payload(&[("claude", "claude-shared", Some(80))]);
+    let resets = empty_resets_for_quotas(&quotas);
+    let loaded_clean = LoadedCache {
+        dashboard: Some(LoadedSection {
+            data: vec![make_entry("claude-sonnet-4.6", "claude")],
+            expired: false,
+        }),
+        quotas: Some(LoadedSection {
+            data: quotas,
+            expired: false,
+        }),
+        quota_resets: Some(LoadedSection {
+            data: resets,
+            expired: false,
+        }),
+    };
+    assert!(!super::refresh_needed(&loaded_clean));
+
+    // Fresh quotas but the resets section missing entirely is a gap too.
+    let quotas = make_quota_payload(&[("claude", "claude-shared", Some(80))]);
+    let loaded_no_resets = LoadedCache {
+        dashboard: Some(LoadedSection {
+            data: vec![make_entry("claude-sonnet-4.6", "claude")],
+            expired: false,
+        }),
+        quotas: Some(LoadedSection {
+            data: quotas,
+            expired: false,
+        }),
+        quota_resets: None,
+    };
+    assert!(super::refresh_needed(&loaded_no_resets));
+}
+
 #[test]
 fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
     let loaded = loaded_cache_with(

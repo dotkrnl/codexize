@@ -19,11 +19,11 @@ pub async fn assemble_models_async(
     providers: &[ProviderEntry],
 ) -> (Vec<CachedModel>, Vec<QuotaError>) {
     let loaded = cache::load(cache_dir);
-    let has_expired = loaded.dashboard.as_ref().map(|s| s.expired).unwrap_or(true)
-        || loaded.quotas.as_ref().map(|s| s.expired).unwrap_or(true)
-        || loaded.quota_resets.as_ref().map(|s| s.expired).unwrap_or(false);
-    if !has_expired {
-        return (assemble_from_loaded(&loaded, available_clis, providers), Vec::new());
+    if !refresh_needed(&loaded) {
+        return (
+            assemble_from_loaded(&loaded, available_clis, providers),
+            Vec::new(),
+        );
     }
     let lock = cache::lock_path(cache_dir);
     match cache_lock::try_acquire(&lock) {
@@ -51,7 +51,10 @@ pub async fn assemble_models_async(
                 lock_path = %lock.display(),
                 "lock held by live PID, rendering cached data"
             );
-            (assemble_from_loaded(&loaded, available_clis, providers), Vec::new())
+            (
+                assemble_from_loaded(&loaded, available_clis, providers),
+                Vec::new(),
+            )
         }
         Err(e) => {
             tracing::warn!(
@@ -60,7 +63,10 @@ pub async fn assemble_models_async(
                 error = %e,
                 "lock acquisition failed, falling back to cached data"
             );
-            (assemble_from_loaded(&loaded, available_clis, providers), Vec::new())
+            (
+                assemble_from_loaded(&loaded, available_clis, providers),
+                Vec::new(),
+            )
         }
     }
 }
@@ -107,6 +113,33 @@ fn assemble_from_loaded_with_available(
     let (models, _free_model_warnings) =
         pure::assemble_universe(dashboard, quotas, resets, available_clis, providers);
     models
+}
+
+/// Single source of truth for "does this loaded cache require a network
+/// refresh?". Used both at the publisher/follower election boundary in
+/// `assemble_models_async` and (via individual fields) inside
+/// `assemble_with_refresh_unlocked` to decide which sections to fetch.
+/// Returns true when any tracked section is expired or when the quota
+/// payload has model entries without matching reset coverage — an
+/// absent reset entry is treated as stale (see `has_reset_coverage_gaps`
+/// in the pure layer).
+fn refresh_needed(loaded: &LoadedCache) -> bool {
+    let dashboard_expired = loaded.dashboard.as_ref().map(|s| s.expired).unwrap_or(true);
+    let quotas_expired = loaded.quotas.as_ref().map(|s| s.expired).unwrap_or(true);
+    let resets_expired = loaded
+        .quota_resets
+        .as_ref()
+        .map(|s| s.expired)
+        .unwrap_or(false);
+    let reset_missing = match (loaded.quotas.as_ref(), loaded.quota_resets.as_ref()) {
+        (Some(q), Some(r)) => pure::has_reset_coverage_gaps(&q.data, &r.data),
+        // Missing quotas section is already covered by `quotas_expired`
+        // (its default is `true`). Missing resets section while a quotas
+        // section exists is itself a coverage gap.
+        (Some(_), None) => true,
+        _ => false,
+    };
+    dashboard_expired || quotas_expired || resets_expired || reset_missing
 }
 
 async fn assemble_with_refresh_unlocked(

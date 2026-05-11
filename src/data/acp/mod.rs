@@ -134,6 +134,50 @@ impl AcpLaunchPolicy {
             enforce_readonly_workspace: true,
         }
     }
+    /// Repo-state update is non-interactive and may write only the current
+    /// session's `spec.md`/`plan.md`, its `artifacts/repo-state-update.toml`
+    /// report, the run's live summary, and bounded memory updates. Code
+    /// edits and other-session edits are forbidden. The shell allowlist is
+    /// limited to the read-only git inspection set the reconciliation
+    /// agent needs to characterize the repository state.
+    pub fn repo_state_update(
+        spec_path: impl Into<PathBuf>,
+        plan_path: impl Into<PathBuf>,
+        report_path: impl Into<PathBuf>,
+        live_summary_path: impl Into<PathBuf>,
+    ) -> Self {
+        let spec_path = spec_path.into();
+        let plan_path = plan_path.into();
+        let report_path = report_path.into();
+        let live_summary_path = live_summary_path.into();
+        let memory_glob = memory_glob_from_session_path(&report_path);
+        Self {
+            allowed_write_paths: vec![
+                spec_path,
+                plan_path,
+                report_path,
+                live_summary_path,
+                memory_glob,
+            ],
+            shell_policy: AcpShellCommandPolicy::Allowlist(
+                Self::repo_state_update_shell_allowlist(),
+            ),
+            enforce_readonly_workspace: true,
+        }
+    }
+    /// Read-only git inspection plus the same filesystem-read commands as
+    /// the final-validation allowlist. Extends the base set with the
+    /// `git diff` / `git rev-parse` / `git show` commands the
+    /// reconciliation agent needs to characterize the repository state
+    /// without ever mutating it.
+    fn repo_state_update_shell_allowlist() -> Vec<String> {
+        let mut allow = Self::readonly_memory_shell_allowlist();
+        allow.extend(
+            ["git diff", "git rev-parse", "git show", "git ls-files"]
+                .map(String::from),
+        );
+        allow
+    }
     /// Simplifier writes/commits repo files; workspace not read-only, shell unrestricted.
     pub fn simplifier(
         simplification_path: impl Into<PathBuf>,

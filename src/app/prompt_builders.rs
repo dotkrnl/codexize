@@ -178,6 +178,95 @@ pub(crate) fn sharding_prompt(
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/sharding.md"))
 }
+/// One earlier-completed session whose `tasks.toml` and final-validation
+/// verdicts should be included as repo-state-update inputs. Captured at
+/// scheduler-tick time so the builder is unit-testable without touching
+/// disk.
+pub(crate) struct RepoStateUpdateCompletedSession<'a> {
+    pub session_id: &'a str,
+    pub tasks_toml: &'a Path,
+    /// Every `final_validation_*.toml` for that session, ordered by round.
+    pub final_validation_paths: &'a [PathBuf],
+}
+
+pub(crate) struct RepoStateUpdatePromptInputs<'a> {
+    pub spec_path: &'a Path,
+    pub plan_path: &'a Path,
+    pub report_path: &'a Path,
+    pub live_summary_path: &'a Path,
+    /// Recorded `planned_after_session_id` (or empty string when `None`).
+    pub recorded_baseline: &'a str,
+    /// Current newest-earlier-`Done` session id (or empty string when `None`).
+    pub current_baseline: &'a str,
+    /// Current git HEAD sha (or empty string when unavailable).
+    pub git_head: &'a str,
+    pub newly_completed: &'a [RepoStateUpdateCompletedSession<'a>],
+    pub meta: PromptMeta,
+}
+
+pub(crate) fn repo_state_update_prompt(inputs: RepoStateUpdatePromptInputs<'_>) -> String {
+    let RepoStateUpdatePromptInputs {
+        spec_path,
+        plan_path,
+        report_path,
+        live_summary_path,
+        recorded_baseline,
+        current_baseline,
+        git_head,
+        newly_completed,
+        meta,
+    } = inputs;
+    let mut ctx = PromptCtx::new(meta);
+    let newly_completed_block = if newly_completed.is_empty() {
+        "\nNewly-completed earlier sessions since the recorded baseline: (none)\n".to_string()
+    } else {
+        let mut block = String::from(
+            "\nNewly-completed earlier sessions since the recorded baseline (their tasks and final-validation verdicts are read-only inputs):\n",
+        );
+        for entry in newly_completed {
+            block.push_str(&format!(
+                "  - {} (tasks: {})\n",
+                entry.session_id,
+                ctx.path(entry.tasks_toml),
+            ));
+            if entry.final_validation_paths.is_empty() {
+                block.push_str("      verdicts: (none recorded)\n");
+            } else {
+                for verdict in entry.final_validation_paths {
+                    block.push_str(&format!("      verdict: {}\n", ctx.path(verdict)));
+                }
+            }
+        }
+        block
+    };
+    let recorded_baseline = if recorded_baseline.is_empty() {
+        "(none)".to_string()
+    } else {
+        recorded_baseline.to_string()
+    };
+    let current_baseline = if current_baseline.is_empty() {
+        "(none)".to_string()
+    } else {
+        current_baseline.to_string()
+    };
+    let git_head = if git_head.is_empty() {
+        "(unavailable)".to_string()
+    } else {
+        git_head.to_string()
+    };
+    ctx.path_arg("spec", spec_path)
+        .path_arg("plan", plan_path)
+        .path_arg("report", report_path)
+        .path_arg("live_summary", live_summary_path)
+        .set("recorded_baseline", recorded_baseline)
+        .set("current_baseline", current_baseline)
+        .set("git_head", git_head)
+        .set("newly_completed_block", newly_completed_block)
+        .memory_arg(report_path)
+        .live_arg(live_summary_path, false)
+        .render(include_str!("prompts/repo_state_update.md"))
+}
+
 pub(crate) fn final_validation_prompt(
     idea_text: &str,
     spec_text: &str,

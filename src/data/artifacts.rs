@@ -189,6 +189,7 @@ pub enum ArtifactKind {
     Tasks,
     SkipToImpl,
     SessionSummary,
+    RepoStateUpdate,
 }
 impl ArtifactKind {
     pub fn filename(&self) -> &'static str {
@@ -201,6 +202,7 @@ impl ArtifactKind {
             ArtifactKind::Tasks => "tasks.toml",
             ArtifactKind::SkipToImpl => "skip_proposal.toml",
             ArtifactKind::SessionSummary => "session_summary.toml",
+            ArtifactKind::RepoStateUpdate => "repo-state-update.toml",
         }
     }
 }

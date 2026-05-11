@@ -2,10 +2,11 @@
 // `prompt_builders` so this module remains a thin orchestration surface.
 pub(crate) use super::prompt_builders::dreaming_prompt;
 pub(crate) use super::prompt_builders::{
-    CoderPromptInputs, ReviewerPromptInputs, brainstorm_prompt, coder_prompt,
-    final_validation_prompt, plan_review_prompt, planning_prompt, recovery_plan_review_prompt,
-    recovery_prompt, recovery_sharding_prompt, reviewer_full_alignment_prompt, reviewer_prompt,
-    sharding_prompt, simplifier_prompt, spec_review_prompt,
+    CoderPromptInputs, RepoStateUpdateCompletedSession, RepoStateUpdatePromptInputs,
+    ReviewerPromptInputs, brainstorm_prompt, coder_prompt, final_validation_prompt,
+    plan_review_prompt, planning_prompt, recovery_plan_review_prompt, recovery_prompt,
+    recovery_sharding_prompt, repo_state_update_prompt, reviewer_full_alignment_prompt,
+    reviewer_prompt, sharding_prompt, simplifier_prompt, spec_review_prompt,
 };
 pub(crate) use super::prompt_ctx::PromptMeta;
 #[cfg(test)]

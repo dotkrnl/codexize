@@ -249,14 +249,7 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
         return Ok(());
     }
     let paths_view = config.paths_view();
-    // Honor an explicit `paths.sessions_root` operator override; otherwise
-    // use the project-local `state::codexize_root()` path that runner stages
-    // and tests share.
-    let sessions_root = if config.paths.sessions_root.is_explicit() {
-        paths_view.sessions_root.clone()
-    } else {
-        picker::default_sessions_root()
-    };
+    let sessions_root = picker::sessions_root_for(&config);
     let memory_root_override: Option<std::path::PathBuf> = config
         .paths
         .memory_root

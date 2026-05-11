@@ -8,7 +8,7 @@
 
 use crate::app::{App, AppStartupOrigin};
 use crate::data::app_lock::AppLockGuard;
-use crate::data::config::{Config, view::PathsView};
+use crate::data::config::Config;
 use crate::state::{Message, Phase, RunStatus, SessionState};
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -98,7 +98,7 @@ pub struct SessionWorkspace {
 }
 
 impl SessionWorkspace {
-    fn new(state: SessionState, startup_origin: AppStartupOrigin, _config: Arc<Config>) -> Self {
+    fn new(state: SessionState, startup_origin: AppStartupOrigin) -> Self {
         let current_run_id = state
             .agent_runs
             .iter()
@@ -194,7 +194,12 @@ impl SessionWorkspace {
 }
 
 pub struct AppShell {
-    _app_lock_guard: Option<AppLockGuard>,
+    // Project-level single-process lock guard. Held for the lifetime of the
+    // shell so that the lock file is removed on `Drop` after the embedded
+    // terminal `App` (and its runner supervisor) has been torn down. Never
+    // read directly — the load-bearing behavior is `Drop` ordering.
+    #[allow(dead_code)]
+    app_lock_guard: Option<AppLockGuard>,
     sessions_root: PathBuf,
     focused_session_id: String,
     running_session_id: Option<String>,
@@ -223,16 +228,15 @@ impl AppShell {
         config: Arc<Config>,
         app_lock_guard: Option<AppLockGuard>,
     ) -> Result<Self> {
-        let sessions_root = sessions_root_from_config(&config.paths_view(), &config);
+        let sessions_root = crate::picker::sessions_root_for(&config);
         let focused_session_id = initial_state.session_id.clone();
         let mut workspaces = BTreeMap::new();
-        let initial_workspace =
-            SessionWorkspace::new(initial_state, startup_origin, config.clone());
+        let initial_workspace = SessionWorkspace::new(initial_state, startup_origin);
         let running_run_id = initial_workspace.current_run_id();
         let running_session_id = running_run_id.map(|_| focused_session_id.clone());
         workspaces.insert(focused_session_id.clone(), initial_workspace);
         let mut shell = Self {
-            _app_lock_guard: app_lock_guard,
+            app_lock_guard,
             sessions_root,
             focused_session_id,
             running_session_id,
@@ -337,8 +341,7 @@ impl AppShell {
     pub fn open_session(&mut self, session_id: &str) -> Result<()> {
         if !self.workspaces.contains_key(session_id) {
             let state = SessionState::load(session_id)?;
-            let workspace =
-                SessionWorkspace::new(state, AppStartupOrigin::Default, self.config.clone());
+            let workspace = SessionWorkspace::new(state, AppStartupOrigin::Default);
             self.workspaces.insert(session_id.to_string(), workspace);
         }
         self.focus_session(session_id)
@@ -414,13 +417,5 @@ impl AppShell {
             self.sidebar_selected_index = self.sidebar_rows.len().saturating_sub(1);
         }
         Ok(())
-    }
-}
-
-fn sessions_root_from_config(paths: &PathsView, config: &Config) -> PathBuf {
-    if config.paths.sessions_root.is_explicit() {
-        paths.sessions_root.clone()
-    } else {
-        crate::picker::default_sessions_root()
     }
 }

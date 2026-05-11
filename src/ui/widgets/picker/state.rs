@@ -511,6 +511,18 @@ pub fn scan_sessions(sessions_root: &Path) -> Result<Vec<SessionEntry>> {
 pub fn default_sessions_root() -> PathBuf {
     session_state::codexize_root().join("sessions")
 }
+
+/// Resolve the sessions directory from a loaded [`Config`]: honors an
+/// explicit `paths.sessions_root` override; otherwise falls back to
+/// [`default_sessions_root`]. Centralized so the startup entry point and the
+/// app shell agree on the path.
+pub fn sessions_root_for(config: &crate::data::config::Config) -> PathBuf {
+    if config.paths.sessions_root.is_explicit() {
+        config.paths_view().sessions_root
+    } else {
+        default_sessions_root()
+    }
+}
 /// Create a new session on disk and emit the standard creation events.
 ///
 /// `idea` is stored verbatim — the caller is responsible for trimming and

@@ -22,6 +22,7 @@ pub use crate::ui::input_editor;
 pub mod logic;
 pub mod model_names;
 pub use crate::data::providers;
+pub use crate::data::repo_state_update;
 pub use crate::ui::preflight;
 pub use crate::ui::widgets::picker::state as picker;
 pub mod review;

@@ -21,6 +21,7 @@ pub mod picker_io;
 pub mod preflight;
 pub mod process_probe;
 pub mod providers;
+pub mod repo_state_update;
 pub mod runner;
 pub mod selection_assembly;
 pub mod selection_quota;

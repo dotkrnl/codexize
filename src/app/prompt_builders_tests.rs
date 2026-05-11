@@ -44,6 +44,7 @@ fn brainstorm_prompt_inlines_prior_attempts_pointer_when_supplied() {
         "/tmp/codexize-test-session/artifacts/live.txt",
         false,
         Some(&prior),
+        &[],
         PromptMeta::with_topics(6),
     );
     assert!(
@@ -65,6 +66,7 @@ fn brainstorm_prompt_omits_prior_attempts_block_when_none() {
         "/tmp/codexize-test-session/artifacts/live.txt",
         false,
         None,
+        &[],
         PromptMeta::with_topics(6),
     );
     assert!(
@@ -74,6 +76,66 @@ fn brainstorm_prompt_omits_prior_attempts_block_when_none() {
     assert!(
         !prompt.contains("{prior_attempts_block}"),
         "the placeholder must be substituted away even when empty:\n{prompt}"
+    );
+}
+
+#[test]
+fn brainstorm_prompt_includes_earlier_waiting_specs() {
+    let earlier_specs = vec![
+        PathBuf::from("/tmp/codexize/sessions/01-earlier/artifacts/spec.md"),
+        PathBuf::from("/tmp/codexize/sessions/02-earlier/artifacts/spec.md"),
+    ];
+    let prompt = brainstorm_prompt(
+        "fictional idea",
+        "/tmp/codexize-test-session/artifacts/spec.md",
+        "/tmp/codexize-test-session/artifacts/session_summary.toml",
+        "/tmp/codexize-test-session/artifacts/live.txt",
+        false,
+        None,
+        &earlier_specs,
+        PromptMeta::with_topics(6),
+    );
+    assert!(
+        prompt.contains("Expected future repository state"),
+        "header missing:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("01-earlier/artifacts/spec.md"),
+        "first spec missing:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("02-earlier/artifacts/spec.md"),
+        "second spec missing:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("MUST flag the conflict"),
+        "conflict flagging instruction missing:\n{prompt}"
+    );
+}
+
+#[test]
+fn spec_review_prompt_includes_earlier_waiting_specs() {
+    let earlier_specs = vec![PathBuf::from(
+        "/tmp/codexize/sessions/01-earlier/artifacts/spec.md",
+    )];
+    let prompt = spec_review_prompt(
+        "/tmp/codexize-test-session/artifacts/spec.md",
+        "/tmp/codexize-test-session/artifacts/spec-review-1.md",
+        "/tmp/codexize-test-session/artifacts/live.txt",
+        &earlier_specs,
+        PromptMeta::with_topics(6),
+    );
+    assert!(
+        prompt.contains("Expected future repository state"),
+        "header missing:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("01-earlier/artifacts/spec.md"),
+        "spec path missing:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("MUST flag the conflict"),
+        "conflict flagging instruction missing:\n{prompt}"
     );
 }
 
@@ -88,7 +150,15 @@ fn planning_prompt_does_not_splice_spec_review_paths_or_bodies() {
     let plan = artifacts.join("plan.md");
     let live = artifacts.join("live.txt");
 
-    let prompt = planning_prompt(&spec, &plan, &live, false, None, PromptMeta::with_topics(6));
+    let prompt = planning_prompt(
+        &spec,
+        &plan,
+        &live,
+        false,
+        None,
+        &[],
+        PromptMeta::with_topics(6),
+    );
 
     assert!(
         prompt.contains(&spec.display().to_string()),
@@ -108,11 +178,59 @@ fn planning_prompt_yolo_variant_also_omits_spec_review_splice() {
     let plan = artifacts.join("plan.md");
     let live = artifacts.join("live.txt");
 
-    let prompt = planning_prompt(&spec, &plan, &live, true, None, PromptMeta::with_topics(6));
+    let prompt = planning_prompt(
+        &spec,
+        &plan,
+        &live,
+        true,
+        None,
+        &[],
+        PromptMeta::with_topics(6),
+    );
 
     assert!(
         !prompt.contains("spec-review-"),
         "yolo planner prompt must not name any spec-review-*.md file:\n{prompt}"
+    );
+}
+
+#[test]
+fn planning_prompt_includes_earlier_waiting_specs() {
+    let session_dir = PathBuf::from("/tmp/codexize-test-planning-future-state");
+    let artifacts = session_dir.join("artifacts");
+    let spec = artifacts.join("spec.md");
+    let plan = artifacts.join("plan.md");
+    let live = artifacts.join("live.txt");
+    let earlier_specs = vec![PathBuf::from(
+        "/tmp/codexize/sessions/01-earlier/artifacts/spec.md",
+    )];
+
+    let prompt = planning_prompt(
+        &spec,
+        &plan,
+        &live,
+        false,
+        None,
+        &earlier_specs,
+        PromptMeta::with_topics(6),
+    );
+
+    assert!(
+        prompt.contains("Expected future repository state"),
+        "header missing:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("01-earlier/artifacts/spec.md"),
+        "spec path missing:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("planning against"),
+        "planning-specific framing missing:\n{prompt}"
+    );
+    // Planning must NOT receive instructions to "flag conflicts" (brainstorm/spec review only)
+    assert!(
+        !prompt.contains("MUST flag the conflict"),
+        "planning must not receive brainstorm-only conflict instructions:\n{prompt}"
     );
 }
 

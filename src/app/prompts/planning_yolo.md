@@ -2,41 +2,45 @@
 decisive. Do not hedge or ask for confirmation. Resolve every ambiguity using
 your best judgement and move forward.
 
-You produce an implementation plan from an approved spec and its
-spec reviews. Run this workflow end-to-end inside this prompt — do not
-delegate to any skill.
+You produce an implementation plan from an approved spec. Run this
+workflow end-to-end inside this prompt — do not delegate to any skill.
+
+The spec is the design contract. You do NOT edit {spec}. If the spec is
+genuinely ambiguous on a detail you need to plan, resolve it yourself
+per the trust preamble AND record the choice inline in the plan as an
+HTML comment of the form `<!-- assumption: <topic>: <choice you made>
+— <one-line rationale> -->` placed adjacent to the plan step it
+affects.
 
 Workflow:
-  1. Read the spec and the spec reviews below; cross-check that the spec
-     covers the operator's intent.
-  2. Triage the reviews and resolve every trade-off yourself per the trust
-     preamble — the operator is unavailable.
-  3. Update the spec to reflect every accepted decision, including the
-     spec's TL;DR if the body changed.
-  4. Write a coordination-oriented plan: sequencing & dependencies,
-     interfaces / integration points / execution seams to honor, the spec
-     constraints that narrow the solution space, and (only as orientation)
-     likely file/module touchpoints. The plan is an execution map for
-     coordination, not a patch recipe.
+  1. Read {spec} carefully; build a mental model of the operator's
+     intent.
+  2. For every detail you need to plan that is NOT already pinned by
+     the spec, decide it yourself per the trust preamble and emit an
+     inline `<!-- assumption: … -->` next to the affected plan step.
+  3. Write {plan}: a coordination map of sequencing & dependencies,
+     interfaces / integration points / execution seams to honor, and
+     (only as orientation) likely file/module touchpoints.
+
+Assumption-logging rule (HARD):
+  Every detail you decided that is not in the spec MUST be recorded as
+  an inline HTML comment `<!-- assumption: <topic>: <choice> —
+  <one-line rationale> -->` placed in the plan next to the step it
+  affects. Cover at minimum: data shape, user-visible names/strings,
+  scope boundaries, behavioral edge cases, semantics (error/retry/
+  cancellation/ordering), versioning/migration. Do NOT bury
+  assumptions in prose; reviewers grep for `assumption:`. If a
+  milestone or phase rests on a non-spec assumption, that milestone or
+  phase carries its own assumption comment.
 
 Do not invoke any skill or follow harness-loaded skill instructions; this prompt is authoritative.
 
-Inputs:
-  Spec:    {spec}
-  Reviews:
-{reviews}
+Input:
+  Spec: {spec}
 
-Triage reviews first. They may contradict each other and are written by AI
-agents — be skeptical; accept only what improves the spec or plan, reject
-the rest with a brief reason. Resolve trade-offs yourself per the trust
-preamble.
-
-Once trade-offs are resolved, do TWO things IN THIS ORDER:
-  1. UPDATE {spec} in place to reflect every accepted decision. If you change
-     the body, also update its TL;DR so the two stay consistent — an agent
-     reading ONLY the spec must not be surprised by anything in the plan.
-  2. Write {plan} using the required plan schema below. The four `##` headings
-     are mandatory and must appear in the order shown.
+Output:
+  Write {plan} using the required plan schema below. The four `##`
+  headings are mandatory and must appear in the order shown.
 
 Required plan schema for {plan}:
 
@@ -73,20 +77,21 @@ Required plan schema for {plan}:
 ```
 
 Plan shape: an execution map — sequencing & dependencies, interfaces and
-execution seams to honor, spec constraints that narrow the solution space, and
-(as orientation) likely file/module touchpoints. NOT a patch recipe: no
-checkbox to-dos, function-by-function edit sequences, or mandated code shape
-(struct fields, signatures, class layout) unless the spec requires it.
+execution seams to honor, spec constraints that narrow the solution
+space, and (as orientation) likely file/module touchpoints. NOT a patch
+recipe: no checkbox to-dos, function-by-function edit sequences, or
+mandated code shape (struct fields, signatures, class layout) unless the
+spec requires it.
 
-Authority: spec is the design contract and wins any conflict; the plan is
-authoritative ONLY for sequencing and the explicit interfaces it names —
-everything else in the plan is advisory. Don't promote advisory detail into
-an implementation contract.
+Authority: spec is the design contract and wins any conflict; the plan
+is authoritative ONLY for sequencing and the explicit interfaces it
+names — everything else in the plan is advisory. Don't promote advisory
+detail into an implementation contract.
 
 Hard rules:
-  - No code/config edits, no VCS, no test runs. You may only edit the spec
-    and write the plan; both files stay untracked.
-  - Don't ask whether to continue. When both files are written, STOP — the
+  - You may NOT edit {spec}.
+  - No code/config edits, no VCS, no test runs.
+  - Don't ask whether to continue. When {plan} is written, STOP — the
     orchestrator drives stage transitions.
 {memory_context}
 {instr}

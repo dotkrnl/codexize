@@ -60,6 +60,7 @@ fn modal_from_runtime(modal: crate::app_runtime::ModalKind) -> ModalKind {
         crate::app_runtime::ModalKind::SkipToImpl => ModalKind::SkipToImpl,
         crate::app_runtime::ModalKind::GitGuard => ModalKind::GitGuard,
         crate::app_runtime::ModalKind::QuitRunningAgent => ModalKind::QuitRunningAgent,
+        crate::app_runtime::ModalKind::CancelSession => ModalKind::CancelSession,
         crate::app_runtime::ModalKind::InteractiveExitPrompt => ModalKind::InteractiveExitPrompt,
         crate::app_runtime::ModalKind::SpecReviewPaused => ModalKind::SpecReviewPaused,
         crate::app_runtime::ModalKind::PlanReviewPaused => ModalKind::PlanReviewPaused,
@@ -475,6 +476,18 @@ impl App {
                     )),
                 ]
             }
+            ModalKind::CancelSession => vec![
+                Line::from(Span::styled(
+                    "This preserves artifacts and messages, stops any active run, and removes the session from in-app automation."
+                        .to_string(),
+                    Style::default().fg(Color::White),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Enter confirm · Esc/n/q cancel".to_string(),
+                    Style::default().fg(Color::White),
+                )),
+            ],
             ModalKind::InteractiveExitPrompt => vec![
                 Line::from(Span::styled(
                     "The agent offered to finish this interactive turn.".to_string(),

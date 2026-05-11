@@ -56,6 +56,7 @@ pub enum ModalKind {
     SkipToImpl,
     GitGuard,
     QuitRunningAgent,
+    CancelSession,
     InteractiveExitPrompt,
     SpecReviewPaused,
     PlanReviewPaused,

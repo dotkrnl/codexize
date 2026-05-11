@@ -139,6 +139,12 @@ fn quit_running_agent_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
         vec![key("Esc", "cancel"), key("n", "cancel")],
     )
 }
+fn cancel_session_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
+    (
+        vec![primary_key("Enter", "confirm")],
+        vec![key("Esc", "cancel"), key("n", "cancel"), key("q", "cancel")],
+    )
+}
 fn interactive_exit_prompt_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
     (
         vec![primary_key("Enter", "no requests")],
@@ -325,6 +331,7 @@ pub fn keymap(
             ModalKind::SkipToImpl => skip_to_impl_bindings(),
             ModalKind::GitGuard => guard_bindings(),
             ModalKind::QuitRunningAgent => quit_running_agent_bindings(),
+            ModalKind::CancelSession => cancel_session_bindings(),
             ModalKind::InteractiveExitPrompt => interactive_exit_prompt_bindings(),
             ModalKind::StageError(stage_id) => stage_error_bindings(stage_id),
             ModalKind::FinalValidationBlocked => final_validation_blocked_bindings(),

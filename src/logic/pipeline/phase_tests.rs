@@ -218,10 +218,16 @@ fn new_phase_labels() {
 
 #[test]
 fn running_phases_can_transition_to_cancelled() {
+    assert!(Phase::IdeaInput.can_transition_to(&Phase::Cancelled));
     assert!(Phase::BrainstormRunning.can_transition_to(&Phase::Cancelled));
     assert!(Phase::SpecReviewRunning.can_transition_to(&Phase::Cancelled));
+    assert!(Phase::SpecReviewPaused.can_transition_to(&Phase::Cancelled));
     assert!(Phase::PlanningRunning.can_transition_to(&Phase::Cancelled));
     assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::Cancelled));
+    assert!(Phase::PlanReviewPaused.can_transition_to(&Phase::Cancelled));
+    assert!(Phase::SkipToImplPending.can_transition_to(&Phase::Cancelled));
+    assert!(Phase::BlockedNeedsUser.can_transition_to(&Phase::Cancelled));
+    assert!(Phase::GitGuardPending.can_transition_to(&Phase::Cancelled));
     assert!(Phase::ShardingRunning.can_transition_to(&Phase::Cancelled));
     assert!(Phase::ImplementationRound(1).can_transition_to(&Phase::Cancelled));
     assert!(Phase::ReviewRound(1).can_transition_to(&Phase::Cancelled));
@@ -229,6 +235,7 @@ fn running_phases_can_transition_to_cancelled() {
     assert!(Phase::BuilderRecoveryPlanReview(1).can_transition_to(&Phase::Cancelled));
     assert!(Phase::BuilderRecoverySharding(1).can_transition_to(&Phase::Cancelled));
     assert!(Phase::FinalValidation(1).can_transition_to(&Phase::Cancelled));
+    assert!(Phase::DreamingPending.can_transition_to(&Phase::Cancelled));
     assert!(Phase::Dreaming(1).can_transition_to(&Phase::Cancelled));
     assert!(Phase::Simplification(1).can_transition_to(&Phase::Cancelled));
 }

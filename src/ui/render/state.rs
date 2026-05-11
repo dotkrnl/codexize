@@ -333,6 +333,7 @@ pub(crate) fn modal_accent_color(kind: ModalKind) -> Color {
         ModalKind::SkipToImpl
         | ModalKind::GitGuard
         | ModalKind::QuitRunningAgent
+        | ModalKind::CancelSession
         | ModalKind::InteractiveExitPrompt
         | ModalKind::DreamingDecision => Color::Yellow,
         ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused => Color::Cyan,
@@ -344,6 +345,7 @@ pub(crate) fn modal_title(kind: ModalKind) -> Option<&'static str> {
         ModalKind::SkipToImpl => Some("Skip to implementation?"),
         ModalKind::GitGuard => Some("Git guard"),
         ModalKind::QuitRunningAgent => Some("Stop running agent and quit?"),
+        ModalKind::CancelSession => Some("Cancel this session?"),
         ModalKind::InteractiveExitPrompt => Some("Any requests?"),
         ModalKind::SpecReviewPaused => Some("Spec review complete"),
         ModalKind::PlanReviewPaused => Some("Plan review complete"),

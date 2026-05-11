@@ -75,6 +75,7 @@ impl App {
                 ModalKind::SkipToImpl => RuntimeModalKind::SkipToImpl,
                 ModalKind::GitGuard => RuntimeModalKind::GitGuard,
                 ModalKind::QuitRunningAgent => RuntimeModalKind::QuitRunningAgent,
+                ModalKind::CancelSession => RuntimeModalKind::CancelSession,
                 ModalKind::InteractiveExitPrompt => RuntimeModalKind::InteractiveExitPrompt,
                 ModalKind::SpecReviewPaused => RuntimeModalKind::SpecReviewPaused,
                 ModalKind::PlanReviewPaused => RuntimeModalKind::PlanReviewPaused,
@@ -106,6 +107,9 @@ impl App {
     pub(crate) fn active_modal(&self) -> Option<ModalKind> {
         if self.pending_quit_confirmation_run_id.is_some() {
             return Some(ModalKind::QuitRunningAgent);
+        }
+        if self.pending_cancel_confirmation {
+            return Some(ModalKind::CancelSession);
         }
         if self.interactive_exit_prompt_key().is_some() {
             return Some(ModalKind::InteractiveExitPrompt);

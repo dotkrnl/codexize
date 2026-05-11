@@ -83,6 +83,14 @@ impl App {
                 key_hint: None,
             });
         }
+        if self.cancel_command_available() {
+            commands.push(PaletteCommand {
+                name: "cancel",
+                aliases: &[],
+                help: "Cancel this session",
+                key_hint: None,
+            });
+        }
         if self.editable_artifact().is_some() {
             commands.push(PaletteCommand {
                 name: "edit",
@@ -253,6 +261,10 @@ impl App {
                 }
                 false
             }
+            "cancel" => {
+                self.open_cancel_session_modal();
+                false
+            }
             "config" => {
                 self.open_config_panel_with_arg(args);
                 false
@@ -269,6 +281,7 @@ impl App {
             ModalKind::SkipToImpl => self.handle_skip_to_impl_modal_key(key),
             ModalKind::GitGuard => self.handle_guard_modal_key(key),
             ModalKind::QuitRunningAgent => self.handle_quit_running_agent_modal_key(key),
+            ModalKind::CancelSession => self.handle_cancel_session_modal_key(key),
             ModalKind::InteractiveExitPrompt => self.handle_interactive_exit_prompt_modal_key(key),
             ModalKind::SpecReviewPaused => self.handle_spec_review_paused_modal_key(key),
             ModalKind::PlanReviewPaused => self.handle_plan_review_paused_modal_key(key),
@@ -339,6 +352,77 @@ impl App {
                 false
             }
             _ => false,
+        }
+    }
+    fn cancel_command_available(&self) -> bool {
+        !matches!(self.state.current_phase, Phase::Done | Phase::Cancelled)
+    }
+    fn open_cancel_session_modal(&mut self) {
+        if !self.cancel_command_available() {
+            self.push_status(
+                "Session is already terminal.".to_string(),
+                Severity::Info,
+                Duration::from_secs(3),
+            );
+            return;
+        }
+        if self
+            .pending_termination
+            .as_ref()
+            .is_some_and(|pending| pending.intent == TerminationIntent::CancelSession)
+        {
+            self.push_status(
+                "Cancellation already pending.".to_string(),
+                Severity::Info,
+                Duration::from_secs(3),
+            );
+            return;
+        }
+        self.pending_cancel_confirmation = true;
+    }
+    pub(crate) fn handle_cancel_session_modal_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Enter => {
+                self.pending_cancel_confirmation = false;
+                self.confirm_cancel_session();
+                false
+            }
+            KeyCode::Esc
+            | KeyCode::Char('n')
+            | KeyCode::Char('N')
+            | KeyCode::Char('q')
+            | KeyCode::Char('Q') => {
+                self.pending_cancel_confirmation = false;
+                false
+            }
+            _ => false,
+        }
+    }
+    fn confirm_cancel_session(&mut self) {
+        if !self.cancel_command_available() {
+            return;
+        }
+        let running = self
+            .running_run()
+            .or_else(|| {
+                self.state
+                    .agent_runs
+                    .iter()
+                    .find(|candidate| candidate.status == RunStatus::Running)
+            })
+            .cloned();
+        if let Some(run) = running {
+            self.request_termination(
+                PendingTermination {
+                    run_id: run.id,
+                    intent: TerminationIntent::CancelSession,
+                },
+                run.window_name,
+            );
+            return;
+        }
+        if let Err(err) = self.transition_to_phase(Phase::Cancelled) {
+            self.surface_boundary_error(format!("cancel failed: {err:#}"), false);
         }
     }
     pub(crate) fn handle_stage_error_modal_key(

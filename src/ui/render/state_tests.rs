@@ -27,6 +27,14 @@ fn quit_running_agent_modal_title() {
 }
 
 #[test]
+fn cancel_session_modal_title() {
+    assert_eq!(
+        modal_title(ModalKind::CancelSession),
+        Some("Cancel this session?")
+    );
+}
+
+#[test]
 fn row_is_not_last_sibling_when_next_peer_has_same_depth() {
     let rows = vec![row(0), row(1), row(2), row(1)];
 

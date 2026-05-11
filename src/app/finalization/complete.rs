@@ -7,6 +7,16 @@ impl App {
         run: &crate::state::RunRecord,
         failure_reason: Option<String>,
     ) -> Result<()> {
+        let pending_cancellation = self.pending_termination.as_ref().is_some_and(|pending| {
+            pending.run_id == run.id && pending.intent == TerminationIntent::CancelSession
+        });
+        if pending_cancellation {
+            self.pending_termination = None;
+            self.clear_agent_error();
+            self.finalize_run_record(run.id, failure_reason.is_none(), failure_reason);
+            self.transition_to_phase(Phase::Cancelled)?;
+            return Ok(());
+        }
         if let Some(error) = failure_reason {
             return self.handle_run_finalization_failure(run, error);
         }
@@ -63,6 +73,9 @@ impl App {
                 }
                 TerminationIntent::StopAndQuit => {
                     self.pending_app_exit = true;
+                }
+                TerminationIntent::CancelSession => {
+                    self.transition_to_phase(Phase::Cancelled)?;
                 }
             }
             return Ok(());

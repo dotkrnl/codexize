@@ -110,6 +110,7 @@ pub(crate) enum ModalKind {
     SkipToImpl,
     GitGuard,
     QuitRunningAgent,
+    CancelSession,
     InteractiveExitPrompt,
     SpecReviewPaused,
     PlanReviewPaused,
@@ -163,6 +164,7 @@ pub(crate) enum TerminationIntent {
     StopOnly,
     StopAndRetry(RetryLaunch),
     StopAndQuit,
+    CancelSession,
 }
 impl TerminationIntent {
     fn summary(&self) -> &'static str {
@@ -170,6 +172,7 @@ impl TerminationIntent {
             Self::StopOnly => "stop without retry",
             Self::StopAndRetry(_) => "stop and retry",
             Self::StopAndQuit => "stop and quit",
+            Self::CancelSession => "cancel session",
         }
     }
     fn in_progress_status(&self) -> &'static str {
@@ -177,6 +180,7 @@ impl TerminationIntent {
             Self::StopOnly => "Stopping agent...",
             Self::StopAndRetry(_) => "Stopping agent and queuing retry...",
             Self::StopAndQuit => "Stopping agent and quitting...",
+            Self::CancelSession => "Cancelling session...",
         }
     }
 }
@@ -190,6 +194,7 @@ impl PendingTermination {
         match self.intent {
             TerminationIntent::StopOnly | TerminationIntent::StopAndQuit => "agent_stopped_by_user",
             TerminationIntent::StopAndRetry(_) => "agent_retry_requested_by_user",
+            TerminationIntent::CancelSession => "session_cancel_requested_by_user",
         }
     }
 }
@@ -311,6 +316,7 @@ pub struct App {
     pub(crate) pending_drain_deadline: Option<Instant>,
     pub(crate) pending_termination: Option<PendingTermination>,
     pub(crate) pending_quit_confirmation_run_id: Option<u64>,
+    pub(crate) pending_cancel_confirmation: bool,
     pub(crate) interactive_exit_prompt_dismissed_at: Option<(u64, usize)>,
     pub(crate) pending_app_exit: bool,
     pub(crate) current_run_id: Option<u64>,

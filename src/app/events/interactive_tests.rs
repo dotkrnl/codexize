@@ -1,6 +1,10 @@
-use crate::app::TerminationIntent;
 use crate::app::test_support::mk_app;
-use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState};
+use crate::app::{ModalKind, TerminationIntent};
+use crate::state::{
+    BlockOrigin, LaunchModes, Message, MessageKind, MessageSender, Phase, RunRecord, RunStatus,
+    SessionState,
+};
+use crossterm::event::KeyCode;
 
 fn running_recovery_run(id: u64) -> RunRecord {
     RunRecord {
@@ -42,6 +46,12 @@ fn finished_run(id: u64) -> RunRecord {
     let mut run = running_recovery_run(id);
     run.status = RunStatus::Done;
     run
+}
+
+fn app_with_phase(phase: Phase) -> crate::app::App {
+    let mut state = SessionState::new(format!("cancel-palette-{phase:?}"));
+    state.current_phase = phase;
+    mk_app(state)
 }
 
 #[test]
@@ -135,6 +145,188 @@ fn palette_interrupt_absent_with_empty_runs() {
         !commands.iter().any(|cmd| cmd.name == "interrupt"),
         ":interrupt must not appear in palette when there are no runs"
     );
+}
+
+#[test]
+fn palette_cancel_registered_for_cancellable_session_states() {
+    for phase in [
+        Phase::IdeaInput,
+        Phase::WaitingToImplement,
+        Phase::BlockedNeedsUser,
+        Phase::RepoStateUpdateRunning,
+    ] {
+        let app = app_with_phase(phase);
+        assert!(
+            app.palette_commands()
+                .iter()
+                .any(|cmd| cmd.name == "cancel"),
+            ":cancel must appear for cancellable phase {phase:?}"
+        );
+    }
+}
+
+#[test]
+fn palette_cancel_hidden_for_terminal_session_states() {
+    for phase in [Phase::Done, Phase::Cancelled] {
+        let app = app_with_phase(phase);
+        assert!(
+            app.palette_commands()
+                .iter()
+                .all(|cmd| cmd.name != "cancel"),
+            ":cancel must be hidden for terminal phase {phase:?}"
+        );
+    }
+}
+
+#[test]
+fn palette_cancel_opens_confirmation_modal_and_dismisses_without_transition() {
+    let mut app = app_with_phase(Phase::WaitingToImplement);
+
+    app.execute_palette_input("cancel");
+    assert_eq!(app.active_modal(), Some(ModalKind::CancelSession));
+
+    assert!(!app.handle_modal_key(
+        ModalKind::CancelSession,
+        crate::app::test_support::key(KeyCode::Char('n'))
+    ));
+    assert_eq!(app.active_modal(), None);
+    assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+}
+
+#[test]
+fn confirmed_idle_cancel_transitions_to_cancelled() {
+    crate::app::test_support::with_temp_root(|| {
+        let mut app = app_with_phase(Phase::WaitingToImplement);
+
+        app.execute_palette_input("cancel");
+        assert!(!app.handle_modal_key(
+            ModalKind::CancelSession,
+            crate::app::test_support::key(KeyCode::Enter)
+        ));
+
+        assert_eq!(app.state.current_phase, Phase::Cancelled);
+    });
+}
+
+#[test]
+fn confirmed_blocked_cancel_transitions_to_cancelled() {
+    crate::app::test_support::with_temp_root(|| {
+        let mut state = SessionState::new("cancel-blocked".to_string());
+        state.current_phase = Phase::BlockedNeedsUser;
+        state.block_origin = Some(BlockOrigin::FinalValidation);
+        let mut app = mk_app(state);
+
+        app.execute_palette_input("cancel");
+        assert!(!app.handle_modal_key(
+            ModalKind::CancelSession,
+            crate::app::test_support::key(KeyCode::Enter)
+        ));
+
+        assert_eq!(app.state.current_phase, Phase::Cancelled);
+        assert_eq!(app.state.block_origin, None);
+    });
+}
+
+#[test]
+fn confirmed_idle_cancel_preserves_messages_and_artifacts() {
+    crate::app::test_support::with_temp_root(|| {
+        let mut state = SessionState::new("cancel-preserves-audit".to_string());
+        state.current_phase = Phase::WaitingToImplement;
+        state
+            .append_message(&Message {
+                ts: chrono::Utc::now(),
+                run_id: 0,
+                kind: MessageKind::Summary,
+                sender: MessageSender::System,
+                text: "audit message".to_string(),
+            })
+            .expect("message append");
+        let artifact = crate::state::session_dir(&state.session_id)
+            .join("artifacts")
+            .join("note.txt");
+        std::fs::create_dir_all(artifact.parent().unwrap()).expect("artifact dir");
+        std::fs::write(&artifact, "preserved").expect("artifact");
+        let mut app = mk_app(state);
+
+        app.execute_palette_input("cancel");
+        assert!(!app.handle_modal_key(
+            ModalKind::CancelSession,
+            crate::app::test_support::key(KeyCode::Enter)
+        ));
+
+        assert_eq!(app.state.current_phase, Phase::Cancelled);
+        assert_eq!(std::fs::read_to_string(&artifact).unwrap(), "preserved");
+        let messages = SessionState::load_messages(&app.state.session_id).expect("messages");
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.text == "audit message")
+        );
+    });
+}
+
+#[test]
+fn confirmed_running_cancel_signals_runner_and_finalizes_to_cancelled() {
+    crate::app::test_support::with_temp_root(|| {
+        let window = "[Cancel Running Test]";
+        crate::runner::request_run_label_active_for_test(window);
+        let mut run = running_noninteractive_run(7101);
+        run.window_name = window.to_string();
+        let mut state = SessionState::new("cancel-running".to_string());
+        state.current_phase = Phase::RepoStateUpdateRunning;
+        state.agent_runs.push(run.clone());
+        let mut app = mk_app(state);
+        app.current_run_id = Some(run.id);
+
+        app.execute_palette_input("cancel");
+        assert!(!app.handle_modal_key(
+            ModalKind::CancelSession,
+            crate::app::test_support::key(KeyCode::Enter)
+        ));
+
+        assert_eq!(
+            crate::runner::drain_test_cancel_receiver_for(window),
+            vec!["terminate"]
+        );
+        assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
+
+        app.complete_run_finalization(&run, Some("Operator Killed".to_string()))
+            .expect("cancel finalization");
+        assert_eq!(app.state.current_phase, Phase::Cancelled);
+    });
+}
+
+#[test]
+fn repeated_running_cancel_while_pending_is_idempotent() {
+    crate::app::test_support::with_temp_root(|| {
+        let window = "[Cancel Idempotent Test]";
+        crate::runner::request_run_label_active_for_test(window);
+        let mut run = running_noninteractive_run(7102);
+        run.window_name = window.to_string();
+        let mut state = SessionState::new("cancel-running-idempotent".to_string());
+        state.current_phase = Phase::RepoStateUpdateRunning;
+        state.agent_runs.push(run.clone());
+        let mut app = mk_app(state);
+        app.current_run_id = Some(run.id);
+
+        app.execute_palette_input("cancel");
+        assert!(!app.handle_modal_key(
+            ModalKind::CancelSession,
+            crate::app::test_support::key(KeyCode::Enter)
+        ));
+        assert_eq!(
+            crate::runner::drain_test_cancel_receiver_for(window),
+            vec!["terminate"]
+        );
+
+        app.execute_palette_input("cancel");
+
+        assert_eq!(
+            crate::runner::drain_test_cancel_receiver_for(window),
+            Vec::<&str>::new()
+        );
+        assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
+    });
 }
 
 #[test]

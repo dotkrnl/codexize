@@ -28,6 +28,13 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 const STAGE: &str = "repo-state-update";
+/// Hidden directory under the session root that holds the byte-for-byte
+/// snapshot of `spec.md` and `plan.md` taken at repo-state-update launch
+/// time. Finalization compares the current file contents against these
+/// snapshots; a report that claims `rewrote_spec=true`/`rewrote_plan=true`
+/// while the on-disk content is byte-identical to the snapshot is a stage
+/// failure (spec § Failure and edge behavior line 306).
+const REPO_STATE_UPDATE_BASELINE_DIR: &str = ".repo-state-update-baseline";
 
 impl App {
     pub(crate) fn launch_repo_state_update(&mut self) {
@@ -56,6 +63,17 @@ impl App {
         // A leftover report from a prior attempt must not be mistaken for
         // this run's verdict during finalization.
         let _ = std::fs::remove_file(&report_path);
+        // Snapshot spec.md/plan.md bytes before the agent starts so
+        // finalization can detect a false-positive "rewrote_*=true" report.
+        // ACP allowed_write_paths only restrict agent-side writes; the
+        // orchestrator writes the baseline directly.
+        if let Err(err) = capture_baseline(&session_dir, &spec_path, &plan_path) {
+            self.surface_boundary_error(
+                format!("error capturing repo-state update baseline: {err}"),
+                true,
+            );
+            return false;
+        }
 
         let modes = self.state.launch_modes();
         let phase = Self::phase_for_stage(STAGE);
@@ -279,20 +297,109 @@ impl App {
                 // rewrote_spec/plan but left empty files is a stage failure.
                 require_nonempty_artifact(&spec_path, &report)?;
                 require_nonempty_artifact(&plan_path, &report)?;
+                // Spec § Failure and edge behavior line 306: a report
+                // claiming success but leaving either file byte-identical
+                // to its pre-run snapshot is treated as a stage failure.
+                // The baseline was captured by the launcher; tests that
+                // exercise finalize directly must first call
+                // `capture_repo_state_update_baseline` to simulate it.
+                require_rewrote_against_baseline(&session_dir, &spec_path, "spec.md")?;
+                require_rewrote_against_baseline(&session_dir, &plan_path, "plan.md")?;
                 let (current_baseline, _) = self.compute_repo_state_update_inputs();
                 self.state.planned_after_session_id = current_baseline;
                 self.finalize_run_record(run.id, true, None);
                 self.clear_agent_error();
+                clear_baseline(&session_dir);
                 self.transition_to_phase(Phase::ShardingRunning)?;
             }
             RepoStateUpdateStatus::NotImplementable => {
                 self.finalize_run_record(run.id, true, None);
                 self.clear_agent_error();
+                clear_baseline(&session_dir);
                 self.transition_to_blocked(BlockOrigin::RepoStateUpdate)?;
             }
         }
         Ok(())
     }
+
+    /// Public for tests that exercise finalize directly: snapshot the
+    /// current `spec.md`/`plan.md` bytes into the hidden baseline dir so
+    /// `finalize_repo_state_update_success` can detect a false-positive
+    /// rewrite. In production this fires from `launch_repo_state_update_with_model`.
+    #[cfg(test)]
+    pub(crate) fn capture_repo_state_update_baseline(&self) -> Result<()> {
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let artifacts = session_dir.join("artifacts");
+        capture_baseline(
+            &session_dir,
+            &artifacts.join(ArtifactKind::Spec.filename()),
+            &artifacts.join(ArtifactKind::Plan.filename()),
+        )
+    }
+}
+
+fn baseline_dir(session_dir: &Path) -> PathBuf {
+    session_dir.join(REPO_STATE_UPDATE_BASELINE_DIR)
+}
+
+fn capture_baseline(session_dir: &Path, spec_path: &Path, plan_path: &Path) -> Result<()> {
+    let dir = baseline_dir(session_dir);
+    // Wipe any prior snapshot so a leftover from a previous attempt
+    // can't masquerade as this attempt's pre-run state.
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)
+            .with_context(|| format!("removing stale {}", dir.display()))?;
+    }
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    snapshot_file(spec_path, &dir.join("spec.md"))?;
+    snapshot_file(plan_path, &dir.join("plan.md"))?;
+    Ok(())
+}
+
+fn snapshot_file(source: &Path, dest: &Path) -> Result<()> {
+    // A missing source is captured as an empty snapshot so a fresh write
+    // counts as a rewrite. This also covers the "first run, no prior
+    // spec/plan" case without forcing the launcher to special-case it.
+    let bytes = std::fs::read(source).unwrap_or_default();
+    std::fs::write(dest, bytes).with_context(|| format!("writing {}", dest.display()))
+}
+
+fn clear_baseline(session_dir: &Path) {
+    let dir = baseline_dir(session_dir);
+    if dir.exists() {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+fn require_rewrote_against_baseline(
+    session_dir: &Path,
+    current_path: &Path,
+    snapshot_name: &str,
+) -> Result<()> {
+    let baseline_path = baseline_dir(session_dir).join(snapshot_name);
+    if !baseline_path.exists() {
+        anyhow::bail!(
+            "repo-state update reported success but the pre-run baseline at \
+             {} is missing — cannot verify {} was actually rewritten",
+            baseline_path.display(),
+            snapshot_name
+        );
+    }
+    let before = std::fs::read(&baseline_path).with_context(|| {
+        format!(
+            "reading repo-state update baseline {}",
+            baseline_path.display()
+        )
+    })?;
+    let after = std::fs::read(current_path)
+        .with_context(|| format!("reading {}", current_path.display()))?;
+    if before == after {
+        anyhow::bail!(
+            "repo-state update reported success but {} is byte-identical to its pre-run state — the agent did not rewrite it",
+            current_path.display()
+        );
+    }
+    Ok(())
 }
 
 /// One earlier `Done` session whose artifacts are part of this repo-state
@@ -454,6 +561,15 @@ mod tests {
             state.agent_runs.push(run.clone());
             state.save().unwrap();
             write_spec_and_plan(session_id);
+            let app_for_baseline = mk_app(state.clone());
+            app_for_baseline
+                .capture_repo_state_update_baseline()
+                .unwrap();
+            // Simulate the agent actually rewriting both files: contents
+            // must differ byte-for-byte from the captured baseline.
+            let artifacts = session_state::session_dir(session_id).join("artifacts");
+            std::fs::write(artifacts.join("spec.md"), "# spec\nrewritten\n").unwrap();
+            std::fs::write(artifacts.join("plan.md"), "# plan\nrewritten\n").unwrap();
             write_report(
                 session_id,
                 r#"status = "implementable"
@@ -469,6 +585,128 @@ rewrote_plan = true
                 app.state.planned_after_session_id.as_deref(),
                 Some("20260511-090000-000000001")
             );
+            // Baseline directory is cleared on success so a subsequent
+            // attempt captures a fresh pre-run state.
+            let baseline =
+                session_state::session_dir(session_id).join(REPO_STATE_UPDATE_BASELINE_DIR);
+            assert!(
+                !baseline.exists(),
+                "baseline dir should be cleared on success"
+            );
+        });
+    }
+
+    #[test]
+    fn implementable_without_rewriting_spec_or_plan_fails() {
+        // False-positive report: the agent claims rewrote_spec and
+        // rewrote_plan, but the underlying files are byte-identical to
+        // their pre-run snapshots. Spec § Failure and edge behavior
+        // line 306: treat as stage failure.
+        with_temp_root(|| {
+            let session_id = "20260511-092500-000000001";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::RepoStateUpdateRunning;
+            let run = run_record(21);
+            state.agent_runs.push(run.clone());
+            state.save().unwrap();
+            write_spec_and_plan(session_id);
+            mk_app(state.clone())
+                .capture_repo_state_update_baseline()
+                .unwrap();
+            // No rewrite happens — spec.md and plan.md remain at their
+            // pre-launch bytes. The report still claims success.
+            write_report(
+                session_id,
+                r#"status = "implementable"
+summary = "Pretending to have rewritten both files."
+rewrote_spec = true
+rewrote_plan = true
+"#,
+            );
+            let mut app = mk_app(state);
+            let err = app
+                .finalize_repo_state_update_success(&run)
+                .expect_err("expected failure when no rewrite actually happened");
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("spec.md") && msg.contains("byte-identical"),
+                "error should call out the unchanged spec.md, got: {msg}"
+            );
+            // Phase must stay put so the operator can intervene.
+            assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
+        });
+    }
+
+    #[test]
+    fn implementable_with_only_plan_unchanged_fails() {
+        // Mixed case: spec.md was rewritten but plan.md was not. The
+        // stage must still fail.
+        with_temp_root(|| {
+            let session_id = "20260511-092600-000000001";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::RepoStateUpdateRunning;
+            let run = run_record(22);
+            state.agent_runs.push(run.clone());
+            state.save().unwrap();
+            write_spec_and_plan(session_id);
+            mk_app(state.clone())
+                .capture_repo_state_update_baseline()
+                .unwrap();
+            // Rewrite only spec.md.
+            let artifacts = session_state::session_dir(session_id).join("artifacts");
+            std::fs::write(artifacts.join("spec.md"), "# spec\nnew bytes\n").unwrap();
+            write_report(
+                session_id,
+                r#"status = "implementable"
+summary = "Rewrote spec but forgot plan."
+rewrote_spec = true
+rewrote_plan = true
+"#,
+            );
+            let mut app = mk_app(state);
+            let err = app
+                .finalize_repo_state_update_success(&run)
+                .expect_err("expected failure when plan.md is unchanged");
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("plan.md"),
+                "error should call out the unchanged plan.md, got: {msg}"
+            );
+        });
+    }
+
+    #[test]
+    fn implementable_missing_baseline_fails() {
+        // Defensive: if the baseline snapshot is somehow absent at
+        // finalize time (e.g., process crash between capture and
+        // finalize), the stage cannot verify the rewrite and must fail
+        // rather than silently accept the report.
+        with_temp_root(|| {
+            let session_id = "20260511-092700-000000001";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::RepoStateUpdateRunning;
+            let run = run_record(23);
+            state.agent_runs.push(run.clone());
+            state.save().unwrap();
+            write_spec_and_plan(session_id);
+            // Note: no baseline capture.
+            write_report(
+                session_id,
+                r#"status = "implementable"
+summary = "Claims rewrites but no baseline exists."
+rewrote_spec = true
+rewrote_plan = true
+"#,
+            );
+            let mut app = mk_app(state);
+            let err = app
+                .finalize_repo_state_update_success(&run)
+                .expect_err("expected failure when baseline missing");
+            assert!(
+                format!("{err:#}").contains("baseline"),
+                "error should mention the missing baseline"
+            );
+            assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
         });
     }
 

@@ -492,13 +492,11 @@ impl App {
                 )),
             ],
             ModalKind::SpecReviewPaused => vec![Line::from(Span::styled(
-                "Advance to planning? y = yes, n = no (stay/rerun) · q = stay here"
-                    .to_string(),
+                "Advance to planning? y = yes, n = no (stay/rerun) · q = stay here".to_string(),
                 Style::default().fg(Color::White),
             ))],
             ModalKind::PlanReviewPaused => vec![Line::from(Span::styled(
-                "Advance to sharding? y = yes, n = no (stay/rerun) · q = stay here"
-                    .to_string(),
+                "Advance to sharding? y = yes, n = no (stay/rerun) · q = stay here".to_string(),
                 Style::default().fg(Color::White),
             ))],
             ModalKind::StageError(stage_id) => {

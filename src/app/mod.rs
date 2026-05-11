@@ -218,6 +218,36 @@ pub enum AppStartupOrigin {
     Default,
     PickerCreated,
 }
+impl App {
+    /// Return the `artifacts/spec.md` paths for every non-archived session that
+    /// sorts earlier than the current session and is in `WaitingToImplement`.
+    /// These represent the "expected future repository state" that brainstorm,
+    /// spec review, and planning stages must consider.
+    pub(crate) fn earlier_waiting_specs(&self) -> Vec<std::path::PathBuf> {
+        let Ok(scanned) =
+            crate::data::picker_io::scan_sessions_for_scheduler(&self.paths.sessions_root)
+        else {
+            return Vec::new();
+        };
+        scanned
+            .into_iter()
+            .filter_map(|s| match s {
+                crate::scheduler::ScannedSession::Loaded(session) => {
+                    if session.session_id < self.state.session_id
+                        && session.current_phase == crate::state::Phase::WaitingToImplement
+                    {
+                        Some(
+                            crate::state::session_dir(&session.session_id).join("artifacts/spec.md"),
+                        )
+                    } else {
+                        None
+                    }
+                }
+                crate::scheduler::ScannedSession::Corrupt { .. } => None,
+            })
+            .collect()
+    }
+}
 pub struct App {
     pub(crate) state: SessionState,
     pub(crate) nodes: Vec<Node>,

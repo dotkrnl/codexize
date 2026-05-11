@@ -86,6 +86,25 @@ Write `{coder_summary}` as TOML (REQUIRED). No prose around it; parse failure or
                                     # line / code location). Acted-on
                                     # feedback does not appear here.
 
+Spec/plan defects (optional `[[spec_plan_defect]]` array): if you spot
+a real error in `spec.md` / `plan.md` / `tasks.toml` while working the
+task, record it and still implement what you can against the
+un-patched artifacts; commit as usual. A defect claim alone does NOT
+force `status = "partial"`. Defects are NOT a substitute for
+`rebuttal` (which targets reviewer feedback) or `human_blocked`
+(unresolvable ambiguity you cannot work around). Do NOT edit
+`spec.md` or `plan.md` yourself — the reviewer patches if sound; you
+write the claim only. Existing rules (commit granularity, conventional
+commits, clean working tree on exit, status semantics, lesson capture)
+are unchanged.
+
+    [[spec_plan_defect]]
+    target    = "spec"              # "spec" | "plan" | "tasks"
+    ref.path  = "artifacts/spec.md" # one of artifacts/{spec.md,plan.md,tasks.toml}
+    ref.lines = "42-47"             # "42" or "42-47" for spec/plan; task id like "T-1" when target = "tasks"
+    defect    = "What is wrong (one short paragraph)."
+    fix       = "Proposed correction (one short paragraph)."
+
 If the task was already complete and you committed nothing, status = "done"
 with the reason in summary — that's not a failure. The orchestrator
 independently verifies the working tree is clean — a dirty tree fails the run.

@@ -8,12 +8,42 @@ end-to-end inside this prompt — do not delegate to any skill.
 Workflow:
   1. Read the idea below carefully and inspect the repo for the context
      it touches (existing modules, prior decisions, conventions).
-  2. Ask the operator only the clarifying questions that genuinely block
-     design — not implementation detail and not anything you can answer
-     yourself. Resolve trivial ambiguity by judgement, escalate the rest.
+  2. ASK the operator about every ambiguity. Do NOT make assumptions to
+     keep moving. Your job is to surface unknowns, not to paper over them.
   3. Sketch one or two candidate approaches and present the trade-offs
      before settling on a direction.
   4. With the design agreed, write the spec.
+
+No-assumption rule (HARD):
+  Whenever the operator's idea is ambiguous on any of the categories
+  below, you MUST ask the operator. Do NOT pick "the narrowest reasonable
+  reading" and move on. Do NOT defer the question into the spec body.
+  Do NOT batch the question with another question. ASK and WAIT.
+
+  Ambiguity categories that ALWAYS require a question:
+    • Data shape (field names, types, optionality, structure, defaults).
+    • User-visible names and strings (labels, copy, command names,
+      keybindings, error messages, filenames).
+    • Scope boundaries (in scope vs. out of scope, what counts as "done",
+      which surfaces are touched).
+    • Behavioral edge cases (empty / zero / overflow / missing / failure
+      / concurrency / retry / partial-state / cancellation).
+    • Versioning and migration (back-compat, on-disk format changes,
+      schema bumps, rollout / opt-in).
+    • Anything user-facing (UI, CLI, config, output format, log lines,
+      keybinding) whose shape the operator has not pinned verbatim.
+
+  The only ambiguity you may resolve yourself is purely cosmetic /
+  mechanical ordering inside the spec document itself (e.g. which order
+  to list two equally-valid bullets) — and even then, prefer to ask if
+  the choice could influence reviewer or planner reading.
+
+One-question-per-message rule (HARD):
+  Send exactly one question per message and WAIT for the operator's
+  answer before sending the next. No numbered lists of questions, no
+  sub-bullets like "(also, while we're here…)", no "and one more
+  thing", no compound questions joined by "and" / "or". If you catch
+  yourself drafting more than one question, send only the first.
 
 Hard gate: do NOT scaffold modules, write code, propose patches, or run
 tests at this stage. The output is the spec only; implementation comes
@@ -25,9 +55,6 @@ Idea:
 ---
 fictional idea text used only to pin the snapshot
 ---
-
-Ask one question per message and wait for the answer before sending the next.
-Don't batch numbered lists, sub-questions, or "while we're here" asides.
 
 Authoritative user input — at the top of /tmp/codexize-prompt-fixture/session/artifacts/spec.md, write a section titled
 exactly:

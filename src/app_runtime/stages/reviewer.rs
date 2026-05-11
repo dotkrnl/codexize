@@ -11,7 +11,28 @@ use crate::state::{
     self as session_state, Message, MessageKind, MessageSender, Phase, PipelineItemStatus,
 };
 use anyhow::Result;
+use std::path::Path;
 impl App {
+    /// Extend the operator's default ACP policy so the non-interactive
+    /// per-task reviewer can land approved spec/plan-defect patches
+    /// directly to `artifacts/spec.md`, `artifacts/plan.md`, and
+    /// `artifacts/tasks.toml` under the session root. Idempotent —
+    /// silently skips appending any path already in the allowlist, so
+    /// operator-configured entries and repeat invocations never produce
+    /// duplicates. The launcher stays `launch_noninteractive_with_policy`;
+    /// only `allowed_write_paths` is widened.
+    pub(crate) fn reviewer_acp_policy(
+        mut policy: crate::acp::AcpLaunchPolicy,
+        artifacts_dir: &Path,
+    ) -> crate::acp::AcpLaunchPolicy {
+        for name in ["spec.md", "plan.md", "tasks.toml"] {
+            let path = artifacts_dir.join(name);
+            if !policy.allowed_write_paths.contains(&path) {
+                policy.allowed_write_paths.push(path);
+            }
+        }
+        policy
+    }
     pub(crate) fn launch_reviewer(&mut self) {
         let _ = self.launch_reviewer_with_model(None);
     }
@@ -159,7 +180,7 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&review_path),
-                self.default_acp_policy(),
+                Self::reviewer_acp_policy(self.default_acp_policy(), &artifacts_dir),
             )
         };
         match launch_result {
@@ -378,6 +399,8 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use super::App;
+    use crate::acp::AcpLaunchPolicy;
     use crate::app::TestLaunchHarness;
     use crate::app::TestLaunchOutcome;
     use crate::app::test_support::{mk_app, with_temp_root};
@@ -390,6 +413,67 @@ mod tests {
     };
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
+
+    fn artifact_paths(root: &std::path::Path) -> [std::path::PathBuf; 3] {
+        [
+            root.join("spec.md"),
+            root.join("plan.md"),
+            root.join("tasks.toml"),
+        ]
+    }
+
+    #[test]
+    fn reviewer_policy_grants_write_to_all_three_artifact_paths() {
+        let artifacts = std::path::PathBuf::from("/sess/artifacts");
+        let policy = App::reviewer_acp_policy(AcpLaunchPolicy::default(), &artifacts);
+        for path in artifact_paths(&artifacts) {
+            assert!(
+                policy.allowed_write_paths.contains(&path),
+                "{} must be writable so the reviewer can land approved patches",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn reviewer_policy_preserves_operator_configured_entries() {
+        let artifacts = std::path::PathBuf::from("/sess/artifacts");
+        let existing = std::path::PathBuf::from("/sess/artifacts/live_summary.txt");
+        let mut base = AcpLaunchPolicy::default();
+        base.allowed_write_paths.push(existing.clone());
+        let policy = App::reviewer_acp_policy(base, &artifacts);
+        assert!(
+            policy.allowed_write_paths.contains(&existing),
+            "operator-configured entries must survive the extension"
+        );
+        for path in artifact_paths(&artifacts) {
+            assert!(policy.allowed_write_paths.contains(&path));
+        }
+    }
+
+    #[test]
+    fn reviewer_policy_is_idempotent_on_double_invocation() {
+        let artifacts = std::path::PathBuf::from("/sess/artifacts");
+        let once = App::reviewer_acp_policy(AcpLaunchPolicy::default(), &artifacts);
+        let twice = App::reviewer_acp_policy(once.clone(), &artifacts);
+        for path in artifact_paths(&artifacts) {
+            let occurrences = twice
+                .allowed_write_paths
+                .iter()
+                .filter(|p| *p == &path)
+                .count();
+            assert_eq!(
+                occurrences, 1,
+                "{} must not be duplicated on a second invocation",
+                path.display()
+            );
+        }
+        assert_eq!(
+            once.allowed_write_paths.len(),
+            twice.allowed_write_paths.len(),
+            "double invocation must not grow the allowlist"
+        );
+    }
 
     #[test]
     fn select_full_alignment_matrix() {

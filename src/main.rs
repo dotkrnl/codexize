@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use codexize::{
     app, app_runtime,
-    data::config::cli as config_cli,
+    data::{app_lock, config::cli as config_cli},
     picker, preflight,
     state::{self},
     tui,
@@ -223,6 +223,22 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
     // defaults"; only true I/O, parse, unknown-key, type-mismatch,
     // unsupported-version, and validation errors abort launch.
     let config = std::sync::Arc::new(load_config_for_launch()?);
+    // Acquire `<.codexize>/app.lock` before the terminal switches to raw
+    // mode so the spec-pinned refusal messages reach a normal stderr.
+    // The guard is held for the lifetime of `try_main_async`; a clean exit
+    // (or any unwinding `?`) drops it, removing the lock — the existing
+    // single-session shutdown awaits the runner before returning, matching
+    // the spec's "stop active runners before lock removal" rule. Multi-
+    // runner coordination lives in the AppShell layer arriving in a later
+    // milestone and will replace this drop with an explicit release.
+    let project_root = std::env::current_dir()
+        .map_err(|e| anyhow::anyhow!("failed to read current directory: {e}"))?;
+    let lock_path = state::codexize_root().join(app_lock::APP_LOCK_FILENAME);
+    let _app_lock_guard =
+        app_lock::acquire(&lock_path, &project_root).map_err(|err| match err {
+            app_lock::AcquireError::Io(io_err) => io_err,
+            other => anyhow::Error::new(other),
+        })?;
     let mut terminal_guard = TerminalGuard::start()?;
     // When running inside tmux, label the active window with the working
     // directory so an operator with several codexize panes can tell them

@@ -105,6 +105,7 @@ pub(crate) fn plan_review_prompt(
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/plan_review.md"))
 }
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn brainstorm_prompt(
     idea: &str,
     spec_path: &str,

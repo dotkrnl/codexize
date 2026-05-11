@@ -358,6 +358,161 @@ feedback = ["The loop condition is wrong"]
 }
 
 #[test]
+fn review_spec_plan_patch_absent_defaults_to_empty() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "approved"
+summary = "ok"
+"#,
+    );
+    let v = validate(&path).unwrap();
+    assert!(v.spec_plan_patch.is_empty());
+}
+
+#[test]
+fn review_spec_plan_patch_valid_parses() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "approved"
+summary = "Patched spec and tasks"
+
+[[spec_plan_patch]]
+target = "spec"
+ref = { path = "artifacts/spec.md", lines = "42-47" }
+defect = "Wording conflated two requirements."
+patch = "Split into two bullets."
+
+[[spec_plan_patch]]
+target = "tasks"
+ref = { path = "artifacts/tasks.toml", lines = "T-3" }
+defect = "Task 3 references the wrong plan line."
+patch = "Repointed plan_refs to lines 88-99."
+"#,
+    );
+    let v = validate(&path).unwrap();
+    assert_eq!(v.spec_plan_patch.len(), 2);
+    assert_eq!(v.spec_plan_patch[0].r#ref.lines, "42-47");
+    assert_eq!(v.spec_plan_patch[1].target, "tasks");
+}
+
+#[test]
+fn review_spec_plan_patch_rejects_bad_target() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "approved"
+summary = "ok"
+
+[[spec_plan_patch]]
+target = "code"
+ref = { path = "artifacts/spec.md", lines = "1-2" }
+defect = "x"
+patch = "y"
+"#,
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("target must be one of"));
+}
+
+#[test]
+fn review_spec_plan_patch_rejects_unknown_path() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "approved"
+summary = "ok"
+
+[[spec_plan_patch]]
+target = "spec"
+ref = { path = "artifacts/other.md", lines = "1-2" }
+defect = "x"
+patch = "y"
+"#,
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("ref.path must be one of"));
+}
+
+#[test]
+fn review_spec_plan_patch_rejects_empty_defect_or_patch() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "approved"
+summary = "ok"
+
+[[spec_plan_patch]]
+target = "spec"
+ref = { path = "artifacts/spec.md", lines = "1" }
+defect = "  "
+patch = "y"
+"#,
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("defect is empty"));
+
+    let path2 = write_review(
+        &dir,
+        r#"status = "approved"
+summary = "ok"
+
+[[spec_plan_patch]]
+target = "spec"
+ref = { path = "artifacts/spec.md", lines = "1" }
+defect = "x"
+patch = ""
+"#,
+    );
+    let err = validate(&path2).unwrap_err();
+    assert!(format!("{err:#}").contains("patch is empty"));
+}
+
+#[test]
+fn review_spec_plan_patch_rejects_bad_lines_for_tasks() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "approved"
+summary = "ok"
+
+[[spec_plan_patch]]
+target = "tasks"
+ref = { path = "artifacts/tasks.toml", lines = "42-47" }
+defect = "x"
+patch = "y"
+"#,
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("task id"));
+}
+
+#[test]
+fn review_mismatched_defect_and_patch_lengths_are_permitted() {
+    // The reviewer may accept some coder-flagged defects (one patch each)
+    // and reject others (those become feedback items). The parser must not
+    // require equal cardinality between defect input and patch output.
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "revise"
+summary = "Accepted one, rejected the other"
+feedback = ["Second defect was unsound: the section already covers that case"]
+
+[[spec_plan_patch]]
+target = "spec"
+ref = { path = "artifacts/spec.md", lines = "42-47" }
+defect = "Wording conflated two requirements."
+patch = "Split into two bullets."
+"#,
+    );
+    let v = validate(&path).unwrap();
+    assert_eq!(v.spec_plan_patch.len(), 1);
+    assert_eq!(v.feedback.len(), 1);
+}
+
+#[test]
 fn review_all_status_values_roundtrip() {
     for (toml_val, expected) in [
         ("\"approved\"", ReviewStatus::Approved),

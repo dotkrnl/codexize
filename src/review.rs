@@ -1,4 +1,5 @@
-use crate::tasks::Task;
+use crate::coder_summary::validate_spec_plan_ref;
+use crate::tasks::{Ref, Task};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -23,6 +24,28 @@ pub struct ReviewVerdict {
     pub feedback: Vec<String>,
     #[serde(default)]
     pub new_tasks: Vec<Task>,
+    #[serde(default)]
+    pub spec_plan_patch: Vec<SpecPlanPatch>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpecPlanPatch {
+    pub target: String,
+    #[serde(rename = "ref")]
+    pub r#ref: Ref,
+    pub defect: String,
+    pub patch: String,
+}
+impl SpecPlanPatch {
+    pub(crate) fn validate(&self, label: &str) -> Result<()> {
+        validate_spec_plan_ref(label, &self.target, &self.r#ref)?;
+        if self.defect.trim().is_empty() {
+            bail!("{label}: defect is empty");
+        }
+        if self.patch.trim().is_empty() {
+            bail!("{label}: patch is empty");
+        }
+        Ok(())
+    }
 }
 /// Parse and validate a review TOML file.
 pub fn validate(path: &Path) -> Result<ReviewVerdict> {
@@ -51,6 +74,9 @@ pub fn validate(path: &Path) -> Result<ReviewVerdict> {
     }
     for (i, t) in parsed.new_tasks.iter().enumerate() {
         t.validate_fields(&format!("new_tasks[{i}]"))?;
+    }
+    for (i, p) in parsed.spec_plan_patch.iter().enumerate() {
+        p.validate(&format!("spec_plan_patch[{i}]"))?;
     }
     Ok(parsed)
 }

@@ -91,7 +91,7 @@ fn system_bindings() -> Vec<KeyBinding> {
 /// Pause modal: actions + system.
 fn pause_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
     (
-        vec![primary_key("Enter", "continue"), key("n", "new reviewer")],
+        vec![primary_key("Enter", "advance"), key("n", "stay/rerun")],
         system_bindings(),
     )
 }

@@ -2044,12 +2044,15 @@ fn spec_review_modal_is_centered_with_content_driven_height() {
         format!(
             "{}{}{}",
             " ".repeat(dialog.x as usize),
-            modal_row(inner_width, "Spec review complete"),
+            modal_row(
+                inner_width,
+                "Advance to planning? y = yes, n = no (stay/rerun) · q = stay here"
+            ),
             " ".repeat((width - dialog.x - dialog.width) as usize)
         )
     );
     assert!(
-        raw_line_text(&buf, dialog.y + dialog.height - 2, width).contains("Enter continue"),
+        raw_line_text(&buf, dialog.y + dialog.height - 2, width).contains("Enter advance"),
         "keymap should occupy the last inner row"
     );
     assert_eq!(

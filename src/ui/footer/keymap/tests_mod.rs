@@ -58,8 +58,8 @@ fn spec_review_paused_exact_string() {
         true,
     );
     let text = line_text(&line);
-    assert!(text.contains("Enter continue"));
-    assert!(text.contains("n new reviewer"));
+    assert!(text.contains("Enter advance"));
+    assert!(text.contains("n stay/rerun"));
     assert!(text.contains("Esc quit"));
 }
 
@@ -75,8 +75,8 @@ fn plan_review_paused_exact_string() {
         true,
     );
     let text = line_text(&line);
-    assert!(text.contains("Enter continue"));
-    assert!(text.contains("n new reviewer"));
+    assert!(text.contains("Enter advance"));
+    assert!(text.contains("n stay/rerun"));
     assert!(text.contains("Esc quit"));
 }
 

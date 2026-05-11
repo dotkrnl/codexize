@@ -184,6 +184,7 @@ fn waiting_to_implement_transitions() {
     assert!(Phase::WaitingToImplement.can_transition_to(&Phase::ShardingRunning));
     assert!(Phase::WaitingToImplement.can_transition_to(&Phase::RepoStateUpdateRunning));
     assert!(Phase::RepoStateUpdateRunning.can_transition_to(&Phase::ShardingRunning));
+    assert!(Phase::RepoStateUpdateRunning.can_transition_to(&Phase::BlockedNeedsUser));
     assert!(Phase::WaitingToImplement.can_transition_to(&Phase::Cancelled));
     assert!(Phase::RepoStateUpdateRunning.can_transition_to(&Phase::Cancelled));
     assert!(!Phase::WaitingToImplement.can_transition_to(&Phase::WaitingToImplement));

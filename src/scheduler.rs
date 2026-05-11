@@ -272,6 +272,41 @@ pub fn evaluate_tick(scanned: &[ScannedSession]) -> SchedulerTick {
     }
 }
 
+/// Decision for a `WaitingToImplement` head when the implementation lane is
+/// idle: should the scheduler launch a repo-state update first, or dispatch
+/// straight to sharding?
+///
+/// Spec § Repo-state update stage: compare the session's recorded
+/// `planned_after_session_id` with the newest-earlier-`Done` baseline at
+/// scheduler-tick time. They are considered to match when they are equal
+/// (including both `None`); otherwise the update must run. A baseline
+/// recorded against a session that no longer exists looks the same as
+/// "different from current baseline" — both fall to `RepoStateUpdate`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WaitingDispatch {
+    /// Baselines agree — go straight to sharding.
+    Sharding,
+    /// Baselines disagree — run the non-interactive repo-state update first.
+    RepoStateUpdate,
+}
+
+/// Pure repo-state-update gating decision.
+///
+/// `planned_after_session_id` is what the session has persisted; `current_baseline`
+/// is the newest earlier non-archived `Done` session at this tick (or `None`
+/// when no such session exists yet). Both `None` is the "fresh queue, no
+/// earlier work to reconcile against" case and routes to `Sharding`.
+pub fn decide_waiting_dispatch(
+    planned_after_session_id: Option<&str>,
+    current_baseline: Option<&str>,
+) -> WaitingDispatch {
+    if planned_after_session_id == current_baseline {
+        WaitingDispatch::Sharding
+    } else {
+        WaitingDispatch::RepoStateUpdate
+    }
+}
+
 /// Manual-retry gating per spec § Auto-launch rules: a retry of an
 /// implementation-lane stage is allowed only when the lane is otherwise
 /// idle (other sessions are not in an impl-lane phase). Retries of
@@ -559,6 +594,45 @@ mod tests {
             "01-sharding",
             &scan
         ));
+    }
+
+    #[test]
+    fn waiting_dispatch_routes_to_sharding_when_baselines_match() {
+        assert_eq!(
+            decide_waiting_dispatch(None, None),
+            WaitingDispatch::Sharding
+        );
+        assert_eq!(
+            decide_waiting_dispatch(
+                Some("20260511-090000-000000001"),
+                Some("20260511-090000-000000001")
+            ),
+            WaitingDispatch::Sharding
+        );
+    }
+
+    #[test]
+    fn waiting_dispatch_routes_to_repo_state_update_when_baselines_differ() {
+        // Recorded baseline is older than current — new Done sessions landed
+        // since planning, so the update must reconcile.
+        assert_eq!(
+            decide_waiting_dispatch(
+                Some("20260511-090000-000000001"),
+                Some("20260511-091000-000000001"),
+            ),
+            WaitingDispatch::RepoStateUpdate
+        );
+        // Planned with no prior baseline; a Done session has since appeared.
+        assert_eq!(
+            decide_waiting_dispatch(None, Some("20260511-091000-000000001")),
+            WaitingDispatch::RepoStateUpdate
+        );
+        // Planned against a session that has since disappeared (e.g. archived);
+        // current baseline is None — still a divergence.
+        assert_eq!(
+            decide_waiting_dispatch(Some("20260511-090000-000000001"), None),
+            WaitingDispatch::RepoStateUpdate
+        );
     }
 
     #[test]

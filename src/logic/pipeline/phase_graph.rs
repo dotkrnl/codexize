@@ -87,6 +87,7 @@ const TRANSITION_EDGES: &[TransitionEdge] = &[
     TransitionEdge::new(P::WaitingToImplement, P::ShardingRunning),
     TransitionEdge::new(P::WaitingToImplement, P::Cancelled),
     TransitionEdge::new(P::RepoStateUpdateRunning, P::ShardingRunning),
+    TransitionEdge::new(P::RepoStateUpdateRunning, P::BlockedNeedsUser),
     TransitionEdge::new(P::RepoStateUpdateRunning, P::Cancelled),
     TransitionEdge::guarded(
         P::ShardingRunning,

@@ -463,7 +463,8 @@ mod tests {
                 .filter(|p| *p == &path)
                 .count();
             assert_eq!(
-                occurrences, 1,
+                occurrences,
+                1,
                 "{} must not be duplicated on a second invocation",
                 path.display()
             );

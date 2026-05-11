@@ -534,7 +534,9 @@ enum ConflictBanner {
     MtimeAdvanced,
     /// Centered modal asking the user how to leave with unsaved
     /// changes. `selected` indexes into [`EXIT_OPTIONS`].
-    ExitPrompt { selected: usize },
+    ExitPrompt {
+        selected: usize,
+    },
     RegenerateTopicPrompt,
 }
 
@@ -612,11 +614,7 @@ impl ConfigPanelState {
     /// Pre-positions the panel on `initial_section` if the name resolves;
     /// otherwise falls back to the default section. Used by `:config`,
     /// `:config <section>`, and the App's last-viewed-section memory.
-    pub(crate) fn open_at(
-        config: &Config,
-        path: PathBuf,
-        initial_section: Option<&str>,
-    ) -> Self {
+    pub(crate) fn open_at(config: &Config, path: PathBuf, initial_section: Option<&str>) -> Self {
         let opened_mtime = mtime(&path);
         let selected_section = initial_section
             .and_then(resolve_section_name)
@@ -991,10 +989,9 @@ impl ConfigPanelState {
                     KeyCode::Char('d') | KeyCode::Char('D') => {
                         Some(self.execute_exit_choice(ExitChoice::Discard))
                     }
-                    KeyCode::Char('c')
-                    | KeyCode::Char('C')
-                    | KeyCode::Char('q')
-                    | KeyCode::Esc => Some(self.execute_exit_choice(ExitChoice::Cancel)),
+                    KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Char('q') | KeyCode::Esc => {
+                        Some(self.execute_exit_choice(ExitChoice::Cancel))
+                    }
                     _ => Some(PanelOutcome::KeepOpen),
                 }
             }
@@ -1010,10 +1007,7 @@ impl ConfigPanelState {
                     self.conflict = None;
                     Some(PanelOutcome::KeepOpen)
                 }
-                KeyCode::Char('n')
-                | KeyCode::Char('N')
-                | KeyCode::Char('q')
-                | KeyCode::Esc => {
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') | KeyCode::Esc => {
                     self.conflict = None;
                     self.status = "unchanged".to_string();
                     Some(PanelOutcome::KeepOpen)
@@ -1353,7 +1347,9 @@ impl ConfigPanelState {
                 // Cursor never lands here (skipped by `move_field`); this
                 // arm is a defensive no-op.
             }
-            providers::ProvidersLine::Provider { entry, is_baked, .. } => {
+            providers::ProvidersLine::Provider {
+                entry, is_baked, ..
+            } => {
                 let entry = entry.clone();
                 let is_baked = *is_baked;
                 self.editing = Some(Editing::ProviderDetail {
@@ -1955,7 +1951,9 @@ fn focus_span(focused: bool) -> Span<'static> {
     if focused {
         Span::styled(
             "▌".to_string(),
-            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(COLOR_FOCUS)
+                .add_modifier(Modifier::BOLD),
         )
     } else {
         Span::raw(" ")
@@ -2020,7 +2018,9 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
     let render_row = |field: providers::AddProviderField, label: &str| -> Line<'static> {
         let focused = editor.focus == field;
         let value_style = if focused {
-            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(COLOR_FOCUS)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -2085,7 +2085,9 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
                 .border_style(Style::default().fg(COLOR_FOCUS))
                 .title(Span::styled(
                     " New model ".to_string(),
-                    Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(COLOR_FOCUS)
+                        .add_modifier(Modifier::BOLD),
                 )),
         )
         .render(rect, buf);
@@ -2155,7 +2157,9 @@ fn render_add_provider_dropdown(
                 Span::styled(
                     opt.clone(),
                     if focused {
-                        Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(COLOR_FOCUS)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default()
                     },
@@ -2194,20 +2198,13 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
     let subscription_label =
         crate::logic::selection::subscription::subscription_kind_to_str(entry.subscription)
             .to_string();
-    let title = format!(
-        " {} · {} ",
-        subscription_label, entry.model,
-    );
+    let title = format!(" {} · {} ", subscription_label, entry.model,);
     let source = if *is_baked { "built-in" } else { "custom" };
 
     let row_count = PROVIDER_TOGGLES.len();
     let overlay_h = (row_count as u16) + 6; // border + title row + chrome
     let overlay_h = overlay_h.min(area.height);
-    let overlay_w = area
-        .width
-        .saturating_sub(10)
-        .max(56)
-        .min(area.width);
+    let overlay_w = area.width.saturating_sub(10).max(56).min(area.width);
     let overlay_x = area.x + (area.width.saturating_sub(overlay_w)) / 2;
     let overlay_y = area.y + (area.height.saturating_sub(overlay_h)) / 2;
     let rect = Rect::new(overlay_x, overlay_y, overlay_w, overlay_h);
@@ -2244,7 +2241,9 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
         spans.push(Span::styled(check_glyph.to_string(), check_style));
         spans.push(Span::raw(" "));
         let label_style = if focused {
-            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(COLOR_FOCUS)
+                .add_modifier(Modifier::BOLD)
         } else if locked {
             Style::default().fg(COLOR_READONLY)
         } else {
@@ -2280,7 +2279,9 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
                 .border_style(Style::default().fg(COLOR_FOCUS))
                 .title(Span::styled(
                     title,
-                    Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(COLOR_FOCUS)
+                        .add_modifier(Modifier::BOLD),
                 )),
         )
         .render(rect, buf);
@@ -2321,11 +2322,15 @@ fn render_exit_prompt_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Bu
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
             format!("[{}]", key),
-            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(COLOR_FOCUS)
+                .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::raw(" "));
         let label_style = if focused {
-            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(COLOR_FOCUS)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -2406,7 +2411,9 @@ fn render_search_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer)
     lines.push(Line::from(vec![
         Span::styled(
             "/ ".to_string(),
-            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(COLOR_FOCUS)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!("{}_", search.query)),
     ]));
@@ -2439,7 +2446,9 @@ fn render_search_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer)
                 Span::styled(
                     meta.label.to_string(),
                     if focused {
-                        Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(COLOR_FOCUS)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default()
                     },
@@ -2462,7 +2471,9 @@ fn render_search_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer)
                 .border_style(Style::default().fg(COLOR_FOCUS))
                 .title(Span::styled(
                     " Search ".to_string(),
-                    Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(COLOR_FOCUS)
+                        .add_modifier(Modifier::BOLD),
                 )),
         )
         .render(rect, buf);
@@ -2544,7 +2555,9 @@ fn render_dropdown(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
                 Span::styled(
                     opt.clone(),
                     if focused {
-                        Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(COLOR_FOCUS)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default()
                     },
@@ -2614,7 +2627,7 @@ fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line
         }
 
         // Merge panes into full-width lines.
-        for (left, right) in left_lines.into_iter().zip(right_lines.into_iter()) {
+        for (left, right) in left_lines.into_iter().zip(right_lines) {
             lines.push(merge_two_pane_line(left, right, left_w, right_w, sep));
         }
     } else {
@@ -2628,7 +2641,10 @@ fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line
 
         // Body content
         if is_providers_section(state.current_section()) {
-            for body_line in providers_body_lines(state, w, content_h).into_iter().take(content_h) {
+            for body_line in providers_body_lines(state, w, content_h)
+                .into_iter()
+                .take(content_h)
+            {
                 lines.push(body_line);
             }
         } else {
@@ -2686,7 +2702,11 @@ fn section_header_line(state: &ConfigPanelState, width: usize) -> Line<'static> 
     if override_count > 0 {
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
-            format!("({} override{})", override_count, if override_count == 1 { "" } else { "s" }),
+            format!(
+                "({} override{})",
+                override_count,
+                if override_count == 1 { "" } else { "s" }
+            ),
             Style::default().fg(COLOR_OVERRIDE),
         ));
     }
@@ -2695,16 +2715,17 @@ fn section_header_line(state: &ConfigPanelState, width: usize) -> Line<'static> 
     let used: usize = spans.iter().map(|s| s.content.width()).sum();
     let remaining = width.saturating_sub(used);
     if remaining > 0 {
-        spans.push(Span::styled(
-            " ".repeat(remaining),
-            Style::default(),
-        ));
+        spans.push(Span::styled(" ".repeat(remaining), Style::default()));
     }
 
     Line::from(spans)
 }
 
-fn details_panel_lines(state: &ConfigPanelState, width: usize, height: usize) -> Vec<Line<'static>> {
+fn details_panel_lines(
+    state: &ConfigPanelState,
+    width: usize,
+    height: usize,
+) -> Vec<Line<'static>> {
     if width < 10 || height == 0 {
         return vec![Line::from("")];
     }
@@ -2732,7 +2753,10 @@ fn details_panel_lines(state: &ConfigPanelState, width: usize, height: usize) ->
             out.push(Line::from(Span::raw(format!("│{}│", " ".repeat(inner_w)))));
         }
         let bottom = format!("└{}┘", "─".repeat(inner_w));
-        out.push(Line::from(Span::styled(bottom, Style::default().fg(COLOR_DIM))));
+        out.push(Line::from(Span::styled(
+            bottom,
+            Style::default().fg(COLOR_DIM),
+        )));
         return out;
     };
 
@@ -2780,7 +2804,10 @@ fn details_panel_lines(state: &ConfigPanelState, width: usize, height: usize) ->
     }
 
     let bottom = format!("└{}┘", "─".repeat(inner_w));
-    out.push(Line::from(Span::styled(bottom, Style::default().fg(COLOR_DIM))));
+    out.push(Line::from(Span::styled(
+        bottom,
+        Style::default().fg(COLOR_DIM),
+    )));
     out
 }
 
@@ -2805,7 +2832,9 @@ fn merge_two_pane_line(
     let mut right = right;
     let right_used = right.width();
     if right_used < right_w {
-        right.spans.push(Span::raw(" ".repeat(right_w - right_used)));
+        right
+            .spans
+            .push(Span::raw(" ".repeat(right_w - right_used)));
     }
     spans.extend(right.spans);
     Line::from(spans)
@@ -2822,7 +2851,11 @@ fn tab_bar_lines(state: &ConfigPanelState, width: usize) -> Vec<Line<'static>> {
         // Account for brackets around active tab
         let bracket_extra = if active { 2 } else { 0 };
         let plain_w = title.width() + bracket_extra + if dirty { 2 } else { 0 };
-        let sep_w = if current_spans.is_empty() { 1 } else { TAB_SEPARATOR.width() };
+        let sep_w = if current_spans.is_empty() {
+            1
+        } else {
+            TAB_SEPARATOR.width()
+        };
         if !current_spans.is_empty() && current_w + sep_w + plain_w > width {
             lines.push(Line::from(std::mem::take(&mut current_spans)));
             current_w = 0;
@@ -2880,8 +2913,10 @@ fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> Line<'static
     let meta = &FIELDS[idx];
     let focused = idx == state.selected_field;
     let is_override = state.source_for(meta) == "override";
-    let field_locked =
-        matches!(meta.kind, FieldKind::ReadOnly | FieldKind::List | FieldKind::Map);
+    let field_locked = matches!(
+        meta.kind,
+        FieldKind::ReadOnly | FieldKind::List | FieldKind::Map
+    );
 
     let value_text = if focused && matches!(state.editing, Some(Editing::Integer | Editing::String))
     {
@@ -2903,15 +2938,15 @@ fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> Line<'static
     let label_style = if field_locked {
         Style::default().fg(COLOR_READONLY)
     } else if focused {
-        Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(COLOR_FOCUS)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default()
     };
     let value_style = if field_locked {
         Style::default().fg(COLOR_READONLY)
-    } else if focused
-        && matches!(state.editing, Some(Editing::Integer | Editing::String))
-    {
+    } else if focused && matches!(state.editing, Some(Editing::Integer | Editing::String)) {
         Style::default()
             .fg(COLOR_FOCUS)
             .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
@@ -3036,7 +3071,11 @@ fn help_text(state: &ConfigPanelState, width: usize) -> Line<'static> {
     } else if state.dirty {
         (
             "● ",
-            format!("{} change{} · ^S to save", dirty_count(state), if dirty_count(state) == 1 { "" } else { "s" }),
+            format!(
+                "{} change{} · ^S to save",
+                dirty_count(state),
+                if dirty_count(state) == 1 { "" } else { "s" }
+            ),
             COLOR_OVERRIDE,
         )
     } else {
@@ -3068,7 +3107,10 @@ fn help_text(state: &ConfigPanelState, width: usize) -> Line<'static> {
             ));
         }
         spans.push(Span::styled(
-            ellipsize_end(&status_text, width.saturating_sub(desc_budget + sep_w + icon_w).max(1)),
+            ellipsize_end(
+                &status_text,
+                width.saturating_sub(desc_budget + sep_w + icon_w).max(1),
+            ),
             Style::default().fg(status_color),
         ));
         Line::from(spans)
@@ -3412,8 +3454,7 @@ fn providers_body_lines(
     // Reserve one row for each scroll indicator we'll need to draw.
     let inner_h = body_h.max(1);
     let needs_top_indicator = |scroll: usize| scroll > 0;
-    let needs_bottom_indicator =
-        |scroll: usize, capacity: usize| scroll + capacity < total;
+    let needs_bottom_indicator = |scroll: usize, capacity: usize| scroll + capacity < total;
 
     // Snap so cursor sits in the visible window. Account for the indicators
     // that will render once we know the final scroll position.
@@ -3447,10 +3488,7 @@ fn providers_body_lines(
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut budget = inner_h;
     if needs_top_indicator(scroll) {
-        out.push(Line::from(dim(format!(
-            "  ↑ {} more above",
-            scroll
-        ))));
+        out.push(Line::from(dim(format!("  ↑ {} more above", scroll))));
         budget = budget.saturating_sub(1);
     }
     let bottom_reserved = if scroll + budget < total { 1 } else { 0 };
@@ -3499,9 +3537,7 @@ mod tests {
             "$HOME/.codexize/sessions/with/a/very/long/path/that/wraps",
         )
         .unwrap();
-        ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), None,
-        )
+        ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), None)
     }
 
     #[test]
@@ -3552,7 +3588,9 @@ mod tests {
         // common operation (Space, Space) still flips availability.
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -3576,7 +3614,10 @@ mod tests {
         };
         assert!(!entry.enabled, "space in drawer should flip availability");
         assert!(state.dirty);
-        assert!(matches!(state.editing, Some(Editing::ProviderDetail { .. })));
+        assert!(matches!(
+            state.editing,
+            Some(Editing::ProviderDetail { .. })
+        ));
     }
 
     #[test]
@@ -3601,7 +3642,9 @@ mod tests {
             },
         ]);
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -3643,10 +3686,7 @@ mod tests {
         // Footer renders `<key> <label>` pairs. High-frequency keys must
         // survive narrower widths; trailing entries are dropped first when
         // the line gets crowded.
-        assert!(
-            text.contains("Enter edit"),
-            "missing Enter edit: {text}"
-        );
+        assert!(text.contains("Enter edit"), "missing Enter edit: {text}");
         assert!(
             text.contains("Space toggle"),
             "missing Space toggle: {text}"
@@ -3747,14 +3787,20 @@ mod tests {
         let section_before = state.selected_section;
 
         state.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-        assert_eq!(state.selected_section, (section_before + 1) % SECTIONS.len());
+        assert_eq!(
+            state.selected_section,
+            (section_before + 1) % SECTIONS.len()
+        );
         assert!(state.editing.is_none());
 
         state.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
         assert_eq!(state.selected_section, section_before);
 
         state.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
-        assert_eq!(state.selected_section, (section_before + 1) % SECTIONS.len());
+        assert_eq!(
+            state.selected_section,
+            (section_before + 1) % SECTIONS.len()
+        );
 
         state.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
         assert_eq!(state.selected_section, section_before);
@@ -4003,7 +4049,9 @@ mod tests {
             },
         ]);
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -4011,7 +4059,10 @@ mod tests {
         let text = render_to_text(&state, 120, 18);
         // Vendor and model headers render on separate lines (no longer
         // "claude · claude-opus-4.7" together).
-        assert!(text.contains("▾ claude"), "missing claude vendor header: {text}");
+        assert!(
+            text.contains("▾ claude"),
+            "missing claude vendor header: {text}"
+        );
         assert!(
             text.contains("▾ claude-opus-4.7"),
             "missing model header under vendor: {text}"
@@ -4036,7 +4087,9 @@ mod tests {
     fn providers_section_shows_baked_models_by_default() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -4062,7 +4115,9 @@ mod tests {
     fn providers_section_render_does_not_panic_at_multibyte_boundaries() {
         let config = Config::baked_defaults();
         let state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
 
         for width in MIN_WIDTH..=140 {
@@ -4080,7 +4135,9 @@ mod tests {
     fn add_provider_modal_populates_models_from_baked_universe() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -4183,7 +4240,9 @@ mod tests {
         config.providers = crate::data::config::schema::Override::explicit(overrides);
 
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -4191,7 +4250,10 @@ mod tests {
         let text = render_to_text(&state, 120, 80);
         // With the new tree layout, vendor and model render on separate
         // lines: "▾ kimi" / "  ▾ kimi-k2.6".
-        assert!(text.contains("▾ kimi"), "expected kimi vendor header: {text}");
+        assert!(
+            text.contains("▾ kimi"),
+            "expected kimi vendor header: {text}"
+        );
         assert!(
             text.contains("▾ kimi-k2.6"),
             "expected kimi-k2.6 model header under vendor: {text}"
@@ -4216,7 +4278,9 @@ mod tests {
         // focused row stays visible and the bottom indicator updates.
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -4248,7 +4312,9 @@ mod tests {
     fn providers_pagination_indicator_visible_when_overflowing() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -4265,7 +4331,9 @@ mod tests {
         // ModelHeader is purely structural — cursor walks past it.
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -4302,7 +4370,9 @@ mod tests {
         // rows so j/k always lands on something Space can flip.
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -4337,7 +4407,9 @@ mod tests {
     fn providers_page_render_snapshot() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -4352,7 +4424,9 @@ mod tests {
     fn provider_detail_drawer_render_snapshot() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -4372,7 +4446,9 @@ mod tests {
         // then Tab to CLI and cycle to Opencode, then type the launch name.
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
@@ -4453,17 +4529,18 @@ mod tests {
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(state.editing.is_none(), "modal should close after commit");
 
-        let added = state
-            .config
-            .providers
-            .value()
-            .iter()
-            .find(|e| {
-                e.model == "kimi-k2.6"
-                    && matches!(e.cli, crate::selection::CliKind::Opencode)
-                    && matches!(e.subscription, crate::selection::SubscriptionKind::OpencodeGo)
-            });
-        assert!(added.is_some(), "opencode-routed kimi entry should be persisted");
+        let added = state.config.providers.value().iter().find(|e| {
+            e.model == "kimi-k2.6"
+                && matches!(e.cli, crate::selection::CliKind::Opencode)
+                && matches!(
+                    e.subscription,
+                    crate::selection::SubscriptionKind::OpencodeGo
+                )
+        });
+        assert!(
+            added.is_some(),
+            "opencode-routed kimi entry should be persisted"
+        );
     }
 
     const SUBSCRIPTION_OPTIONS_COUNT: usize = 6; // SubscriptionKind variants
@@ -4485,11 +4562,16 @@ mod tests {
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(matches!(state.editing, Some(Editing::Choice { .. })));
         state.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
-        assert!(state.editing.is_none(), "q should close the choice dropdown");
+        assert!(
+            state.editing.is_none(),
+            "q should close the choice dropdown"
+        );
 
         // Provider detail drawer: q closes.
         let mut state = ConfigPanelState::open_at(
-            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
         );
         state.expand_all_vendors_for_test();
         state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors)
@@ -4497,7 +4579,10 @@ mod tests {
             .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
             .unwrap();
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(matches!(state.editing, Some(Editing::ProviderDetail { .. })));
+        assert!(matches!(
+            state.editing,
+            Some(Editing::ProviderDetail { .. })
+        ));
         state.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
         assert!(state.editing.is_none(), "q should close the detail drawer");
 
@@ -4509,8 +4594,10 @@ mod tests {
         assert!(matches!(state.editing, Some(Editing::String)));
         let before_len = state.edit_buffer.len();
         state.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
-        assert!(matches!(state.editing, Some(Editing::String)),
-            "q in string edit must be a literal — editing must remain open");
+        assert!(
+            matches!(state.editing, Some(Editing::String)),
+            "q in string edit must be a literal — editing must remain open"
+        );
         assert_eq!(
             state.edit_buffer.len(),
             before_len + 1,
@@ -4670,11 +4757,8 @@ mod tests {
         // Panel opens directly editable: Enter on the first numeric
         // field enters inline-edit without any prior `e` keystroke.
         let config = Config::baked_defaults();
-        let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            None,
-        );
+        let mut state =
+            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), None);
         // Move to a known integer field.
         focus_field(&mut state, "ntfy.retry_attempts");
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -4784,9 +4868,7 @@ mod tests {
 
         let lines = providers::get_lines(&state.config, &state.folded_vendors);
         let (target, folded): (String, bool) = match &lines[0] {
-            providers::ProvidersLine::VendorHeader { vendor, folded } => {
-                (vendor.clone(), *folded)
-            }
+            providers::ProvidersLine::VendorHeader { vendor, folded } => (vendor.clone(), *folded),
             _ => panic!("expected first line to be a vendor header"),
         };
         assert!(folded, "vendor must start folded");

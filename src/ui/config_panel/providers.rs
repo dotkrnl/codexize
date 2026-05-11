@@ -152,9 +152,7 @@ impl ProvidersEditor {
                     crate::logic::selection::subscription::subscription_kind_to_str(*s).to_string()
                 })
                 .collect(),
-            AddProviderField::Cli => {
-                CLI_OPTIONS.iter().map(|c| c.as_str().to_string()).collect()
-            }
+            AddProviderField::Cli => CLI_OPTIONS.iter().map(|c| c.as_str().to_string()).collect(),
             AddProviderField::Official | AddProviderField::Free | AddProviderField::LaunchName => {
                 Vec::new()
             }
@@ -268,10 +266,15 @@ pub(crate) enum ProvidersLine {
     /// Top-level vendor section. `folded` is true when the user has
     /// collapsed the section — only this header line renders, all the
     /// child models and providers are filtered out by `get_lines`.
-    VendorHeader { vendor: String, folded: bool },
+    VendorHeader {
+        vendor: String,
+        folded: bool,
+    },
     /// Model header nested under a vendor — purely structural, never
     /// folded or actionable. Cursor navigation skips it.
-    ModelHeader { model: String },
+    ModelHeader {
+        model: String,
+    },
     Provider {
         entry: ProviderEntry,
         is_baked: bool,
@@ -303,7 +306,10 @@ pub(crate) fn get_lines(
     let providers = baked::merge_with_overrides(config.providers.value());
     let mut buckets: Vec<((String, String), Vec<ProviderEntry>)> = Vec::new();
     for entry in providers {
-        let key = (vendor_for(&entry.model, entry.subscription), entry.model.clone());
+        let key = (
+            vendor_for(&entry.model, entry.subscription),
+            entry.model.clone(),
+        );
         if let Some(bucket) = buckets.iter_mut().find(|(k, _)| *k == key) {
             bucket.1.push(entry);
         } else {
@@ -367,7 +373,9 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
             let focus_glyph = if focused {
                 Span::styled(
                     "▌".to_string(),
-                    Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(COLOR_FOCUS)
+                        .add_modifier(Modifier::BOLD),
                 )
             } else {
                 Span::raw(" ")
@@ -410,7 +418,9 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
             let focus_glyph = if focused {
                 Span::styled(
                     "▌".to_string(),
-                    Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(COLOR_FOCUS)
+                        .add_modifier(Modifier::BOLD),
                 )
             } else {
                 Span::raw(" ")
@@ -423,7 +433,9 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
             };
 
             let primary_style = if focused {
-                Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(COLOR_FOCUS)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -500,13 +512,17 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
             let focus = if focused {
                 Span::styled(
                     "▌".to_string(),
-                    Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(COLOR_FOCUS)
+                        .add_modifier(Modifier::BOLD),
                 )
             } else {
                 Span::raw(" ")
             };
             let style = if focused {
-                Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(COLOR_FOCUS)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(COLOR_DIM)
             };

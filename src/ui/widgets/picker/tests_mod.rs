@@ -964,3 +964,197 @@ fn palette_config_handles_loader_error() {
         }
     }
 }
+
+#[test]
+fn create_session_sets_planned_after_session_id_to_none_when_no_earlier_done() {
+    with_temp_codexize_root(|| {
+        let session_id = create_session("first idea", crate::state::Modes::default(), None)
+            .expect("create_session succeeds");
+
+        let state = SessionState::load(&session_id).expect("load new session");
+        assert!(
+            state.planned_after_session_id.is_none(),
+            "first session has no earlier Done baseline"
+        );
+    });
+}
+
+#[test]
+fn create_session_sets_planned_after_session_id_to_newest_earlier_done() {
+    with_temp_codexize_root(|| {
+        // Create an earlier session and mark it Done.
+        let earlier_id = create_session("earlier idea", crate::state::Modes::default(), None)
+            .expect("create earlier session");
+        let mut earlier = SessionState::load(&earlier_id).unwrap();
+        earlier.current_phase = Phase::Done;
+        earlier.save().unwrap();
+
+        // Create a later session — it should baseline to the earlier Done one.
+        let later_id = create_session("later idea", crate::state::Modes::default(), None)
+            .expect("create later session");
+        let later = SessionState::load(&later_id).expect("load later session");
+        assert_eq!(
+            later.planned_after_session_id,
+            Some(earlier_id),
+            "later session should baseline to the earlier Done session"
+        );
+    });
+}
+
+#[test]
+fn create_session_ignores_archived_done_sessions_for_baseline() {
+    with_temp_codexize_root(|| {
+        // Create an earlier session, mark it Done and archived.
+        let archived_id = create_session("archived idea", crate::state::Modes::default(), None)
+            .expect("create archived session");
+        let mut archived = SessionState::load(&archived_id).unwrap();
+        archived.current_phase = Phase::Done;
+        archived.archived = true;
+        archived.save().unwrap();
+
+        // Create a later session — archived Done sessions are excluded.
+        let later_id = create_session("later idea", crate::state::Modes::default(), None)
+            .expect("create later session");
+        let later = SessionState::load(&later_id).expect("load later session");
+        assert!(
+            later.planned_after_session_id.is_none(),
+            "archived Done session must not be used as baseline"
+        );
+    });
+}
+
+#[test]
+fn scan_sessions_by_creation_order_sorts_ascending() {
+    with_temp_codexize_root(|| {
+        let gamma = SessionState::new("20260101-000000-000000000".to_string());
+        gamma.save().unwrap();
+        let alpha = SessionState::new("20250101-000000-000000000".to_string());
+        alpha.save().unwrap();
+        let beta = SessionState::new("20250601-000000-000000000".to_string());
+        beta.save().unwrap();
+
+        let entries = crate::data::picker_io::scan_sessions_by_creation_order(
+            &crate::state::codexize_root().join("sessions"),
+        )
+        .unwrap();
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].session_id, "20250101-000000-000000000");
+        assert_eq!(entries[1].session_id, "20250601-000000-000000000");
+        assert_eq!(entries[2].session_id, "20260101-000000-000000000");
+    });
+}
+
+#[test]
+fn newest_earlier_done_baseline_selects_newest_earlier_done() {
+    let sessions = vec![
+        SessionEntry {
+            session_id: "20250101-000000-000000000".to_string(),
+            idea_summary: "a".to_string(),
+            current_phase: Phase::Done,
+            modes: crate::state::Modes::default(),
+            last_modified: SystemTime::now(),
+            archived: false,
+        },
+        SessionEntry {
+            session_id: "20250601-000000-000000000".to_string(),
+            idea_summary: "b".to_string(),
+            current_phase: Phase::BrainstormRunning,
+            modes: crate::state::Modes::default(),
+            last_modified: SystemTime::now(),
+            archived: false,
+        },
+        SessionEntry {
+            session_id: "20250801-000000-000000000".to_string(),
+            idea_summary: "c".to_string(),
+            current_phase: Phase::Done,
+            modes: crate::state::Modes::default(),
+            last_modified: SystemTime::now(),
+            archived: false,
+        },
+    ];
+
+    let baseline = crate::data::picker_io::newest_earlier_done_baseline(
+        "20251001-000000-000000000",
+        &sessions,
+    );
+    assert_eq!(
+        baseline,
+        Some("20250801-000000-000000000".to_string()),
+        "newest earlier Done baseline should be the most recent Done before current"
+    );
+}
+
+#[test]
+fn newest_earlier_done_baseline_returns_none_when_no_earlier_done() {
+    let sessions = vec![SessionEntry {
+        session_id: "20250101-000000-000000000".to_string(),
+        idea_summary: "a".to_string(),
+        current_phase: Phase::BrainstormRunning,
+        modes: crate::state::Modes::default(),
+        last_modified: SystemTime::now(),
+        archived: false,
+    }];
+
+    let baseline = crate::data::picker_io::newest_earlier_done_baseline(
+        "20251001-000000-000000000",
+        &sessions,
+    );
+    assert!(baseline.is_none());
+}
+
+#[test]
+fn newest_earlier_done_baseline_ignores_later_sessions() {
+    let sessions = vec![
+        SessionEntry {
+            session_id: "20250101-000000-000000000".to_string(),
+            idea_summary: "a".to_string(),
+            current_phase: Phase::Done,
+            modes: crate::state::Modes::default(),
+            last_modified: SystemTime::now(),
+            archived: false,
+        },
+        SessionEntry {
+            session_id: "20251201-000000-000000000".to_string(),
+            idea_summary: "b".to_string(),
+            current_phase: Phase::Done,
+            modes: crate::state::Modes::default(),
+            last_modified: SystemTime::now(),
+            archived: false,
+        },
+    ];
+
+    let baseline = crate::data::picker_io::newest_earlier_done_baseline(
+        "20250601-000000-000000000",
+        &sessions,
+    );
+    assert_eq!(
+        baseline,
+        Some("20250101-000000-000000000".to_string()),
+        "later Done sessions must not be used as baseline"
+    );
+}
+
+#[test]
+fn phase_badge_for_waiting_to_implement() {
+    let (text, color, symbol) = phase_badge(Phase::WaitingToImplement);
+    assert_eq!(text, "waiting");
+    assert_eq!(color, Color::Yellow);
+    assert_eq!(symbol, "○");
+}
+
+#[test]
+fn phase_badge_for_repo_state_update_running() {
+    let (text, color, symbol) = phase_badge(Phase::RepoStateUpdateRunning);
+    assert_eq!(text, "updating plan");
+    assert_eq!(color, Color::Cyan);
+    assert_eq!(symbol, "●");
+}
+
+#[test]
+fn phase_badge_for_cancelled() {
+    let (text, color, symbol) = phase_badge(Phase::Cancelled);
+    assert_eq!(text, "cancelled");
+    assert_eq!(color, Color::DarkGray);
+    assert_eq!(symbol, "✗");
+}

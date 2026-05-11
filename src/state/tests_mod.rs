@@ -153,7 +153,7 @@ fn test_message_kind_started_deserializes() {
 }
 
 #[test]
-fn test_session_state_schema_v3() {
+fn test_session_state_schema_v3_migrates_to_v4() {
     with_temp_root(|| {
         let mut state = SessionState::new("test-session".to_string());
         state.schema_version = 3;
@@ -182,18 +182,37 @@ fn test_session_state_schema_v3() {
         state.save().unwrap();
         let loaded = SessionState::load("test-session").unwrap();
 
-        assert_eq!(loaded.schema_version, 3);
+        assert_eq!(loaded.schema_version, 4);
+        assert!(loaded.planned_after_session_id.is_none());
         assert_eq!(loaded.agent_runs.len(), 1);
         assert_eq!(loaded.agent_runs[0].id, 1);
     });
 }
 
 #[test]
-fn test_new_session_defaults_to_v3_with_zero_validation_attempts() {
+fn test_archived_v3_migrates_to_v4_identically_to_active() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("archived-v3".to_string());
+        state.schema_version = 3;
+        state.archived = true;
+        state.current_phase = Phase::Done;
+        state.save().unwrap();
+
+        let loaded = SessionState::load("archived-v3").unwrap();
+        assert_eq!(loaded.schema_version, 4);
+        assert!(loaded.planned_after_session_id.is_none());
+        assert!(loaded.archived);
+        assert_eq!(loaded.current_phase, Phase::Done);
+    });
+}
+
+#[test]
+fn test_new_session_defaults_to_v4_with_zero_validation_attempts() {
     let state = SessionState::new("fresh".to_string());
-    assert_eq!(state.schema_version, 3);
+    assert_eq!(state.schema_version, 4);
     assert_eq!(state.validation_attempts, 0);
     assert!(state.block_origin.is_none());
+    assert!(state.planned_after_session_id.is_none());
 }
 
 #[test]

@@ -176,3 +176,58 @@ fn final_validation_inbound_edges_only_simplification_or_block() {
     }
     assert!(!Phase::ImplementationRound(1).can_transition_to(&Phase::FinalValidation(1)));
 }
+
+#[test]
+fn waiting_to_implement_transitions() {
+    assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::WaitingToImplement));
+    assert!(Phase::PlanReviewPaused.can_transition_to(&Phase::WaitingToImplement));
+    assert!(Phase::WaitingToImplement.can_transition_to(&Phase::ShardingRunning));
+    assert!(Phase::WaitingToImplement.can_transition_to(&Phase::RepoStateUpdateRunning));
+    assert!(Phase::RepoStateUpdateRunning.can_transition_to(&Phase::ShardingRunning));
+    assert!(Phase::WaitingToImplement.can_transition_to(&Phase::Cancelled));
+    assert!(Phase::RepoStateUpdateRunning.can_transition_to(&Phase::Cancelled));
+    assert!(!Phase::WaitingToImplement.can_transition_to(&Phase::WaitingToImplement));
+    assert!(!Phase::RepoStateUpdateRunning.can_transition_to(&Phase::RepoStateUpdateRunning));
+}
+
+#[test]
+fn cancelled_is_terminal() {
+    assert!(!Phase::Cancelled.can_transition_to(&Phase::Done));
+    assert!(!Phase::Cancelled.can_transition_to(&Phase::BrainstormRunning));
+    assert!(!Phase::Cancelled.can_transition_to(&Phase::WaitingToImplement));
+    assert!(!Phase::Cancelled.can_transition_to(&Phase::RepoStateUpdateRunning));
+    assert!(!Phase::Cancelled.can_transition_to(&Phase::Cancelled));
+}
+
+#[test]
+fn new_phase_labels() {
+    assert_eq!(Phase::WaitingToImplement.label(), "Waiting to implement");
+    assert_eq!(Phase::RepoStateUpdateRunning.label(), "Updating plan");
+    assert_eq!(Phase::Cancelled.label(), "Cancelled");
+    assert_eq!(
+        format!("{}", Phase::WaitingToImplement),
+        "Waiting to implement"
+    );
+    assert_eq!(
+        format!("{}", Phase::RepoStateUpdateRunning),
+        "Updating plan"
+    );
+    assert_eq!(format!("{}", Phase::Cancelled), "Cancelled");
+}
+
+#[test]
+fn running_phases_can_transition_to_cancelled() {
+    assert!(Phase::BrainstormRunning.can_transition_to(&Phase::Cancelled));
+    assert!(Phase::SpecReviewRunning.can_transition_to(&Phase::Cancelled));
+    assert!(Phase::PlanningRunning.can_transition_to(&Phase::Cancelled));
+    assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::Cancelled));
+    assert!(Phase::ShardingRunning.can_transition_to(&Phase::Cancelled));
+    assert!(Phase::ImplementationRound(1).can_transition_to(&Phase::Cancelled));
+    assert!(Phase::ReviewRound(1).can_transition_to(&Phase::Cancelled));
+    assert!(Phase::BuilderRecovery(1).can_transition_to(&Phase::Cancelled));
+    assert!(Phase::BuilderRecoveryPlanReview(1).can_transition_to(&Phase::Cancelled));
+    assert!(Phase::BuilderRecoverySharding(1).can_transition_to(&Phase::Cancelled));
+    assert!(Phase::FinalValidation(1).can_transition_to(&Phase::Cancelled));
+    assert!(Phase::Dreaming(1).can_transition_to(&Phase::Cancelled));
+    assert!(Phase::Simplification(1).can_transition_to(&Phase::Cancelled));
+}

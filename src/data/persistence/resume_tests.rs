@@ -55,3 +55,46 @@ fn resume_skip_to_impl_pending_with_overlength_proposal_keeps_modal() {
         assert_eq!(stored_rationale.chars().count(), 500);
     });
 }
+
+#[test]
+fn resume_waiting_to_implement_leaves_idle() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("resume-waiting".to_string());
+        state.current_phase = Phase::WaitingToImplement;
+        state.save().unwrap();
+
+        resume_session(&mut state).expect("resume should succeed");
+
+        assert_eq!(state.current_phase, Phase::WaitingToImplement);
+    });
+}
+
+#[test]
+fn resume_repo_state_update_running_reverts_to_waiting() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("resume-repo-update".to_string());
+        state.current_phase = Phase::RepoStateUpdateRunning;
+        state.save().unwrap();
+
+        resume_session(&mut state).expect("resume should succeed");
+
+        assert_eq!(state.current_phase, Phase::WaitingToImplement);
+        // The reverted state should also be persisted.
+        let loaded = SessionState::load("resume-repo-update").unwrap();
+        assert_eq!(loaded.current_phase, Phase::WaitingToImplement);
+    });
+}
+
+#[test]
+fn resume_cancelled_is_rejected() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("resume-cancelled".to_string());
+        state.current_phase = Phase::Cancelled;
+
+        let result = resume_session(&mut state);
+        assert!(
+            result.is_err(),
+            "resume of a cancelled session must be rejected"
+        );
+    });
+}

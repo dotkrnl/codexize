@@ -131,7 +131,7 @@ async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
     }
 
     let cache_dir = temp.path().join(".codexize").join("cache");
-    let (models, errors) = assemble_with_refresh(
+    let (models, errors) = assemble_with_refresh_unlocked(
         &cache_dir,
         loaded_cache_with_resets(dashboard, quotas, resets),
         &available,

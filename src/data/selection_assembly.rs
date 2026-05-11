@@ -5,6 +5,7 @@
 //! these directly (see `scripts/check-layers.sh`).
 use crate::cache::{self, LoadedCache};
 use crate::dashboard::{self, LoadOutcome};
+use crate::data::cache_lock;
 use crate::data::config::schema::ProviderEntry;
 use crate::data::selection_quota as quota;
 use crate::logic::selection::assemble as pure;
@@ -18,7 +19,50 @@ pub async fn assemble_models_async(
     providers: &[ProviderEntry],
 ) -> (Vec<CachedModel>, Vec<QuotaError>) {
     let loaded = cache::load(cache_dir);
-    assemble_with_refresh(cache_dir, loaded, available_clis, providers).await
+    let has_expired = loaded.dashboard.as_ref().map(|s| s.expired).unwrap_or(true)
+        || loaded.quotas.as_ref().map(|s| s.expired).unwrap_or(true)
+        || loaded.quota_resets.as_ref().map(|s| s.expired).unwrap_or(false);
+    if !has_expired {
+        return (assemble_from_loaded(&loaded, available_clis, providers), Vec::new());
+    }
+    let lock = cache::lock_path(cache_dir);
+    match cache_lock::try_acquire(&lock) {
+        Ok(true) => {
+            tracing::info!(
+                event = "cache_publisher_elected",
+                lock_path = %lock.display(),
+                "acquired lock for cache refresh"
+            );
+            let result =
+                assemble_with_refresh_unlocked(cache_dir, loaded, available_clis, providers).await;
+            if let Err(e) = cache_lock::release(&lock) {
+                tracing::warn!(
+                    event = "cache_lock_release_failed",
+                    lock_path = %lock.display(),
+                    error = %e,
+                    "failed to release cache lock after refresh"
+                );
+            }
+            result
+        }
+        Ok(false) => {
+            tracing::info!(
+                event = "cache_follower_skipped_refresh",
+                lock_path = %lock.display(),
+                "lock held by live PID, rendering cached data"
+            );
+            (assemble_from_loaded(&loaded, available_clis, providers), Vec::new())
+        }
+        Err(e) => {
+            tracing::warn!(
+                event = "cache_lock_error",
+                lock_path = %lock.display(),
+                error = %e,
+                "lock acquisition failed, falling back to cached data"
+            );
+            (assemble_from_loaded(&loaded, available_clis, providers), Vec::new())
+        }
+    }
 }
 
 pub fn assemble_from_cached_only(
@@ -65,7 +109,7 @@ fn assemble_from_loaded_with_available(
     models
 }
 
-async fn assemble_with_refresh(
+async fn assemble_with_refresh_unlocked(
     cache_dir: &Path,
     loaded: LoadedCache,
     available_clis: &BTreeSet<CliKind>,
@@ -94,7 +138,7 @@ async fn assemble_with_refresh(
             }) => {
                 quota_errors.extend(pure::dashboard_warnings_to_quota_errors(warnings));
                 let entries = pure::dashboard_models_to_entries(&fresh);
-                let _ = cache::save_dashboard(cache_dir, &entries);
+                let _ = cache::save_dashboard_unlocked(cache_dir, &entries);
                 entries
             }
             Err(e) => {
@@ -136,8 +180,8 @@ async fn assemble_with_refresh(
         quota_errors.extend(fresh_errors);
         quota_payload = pure::merge_quota_payload(&cached_quota, fresh_quotas, &failed_vendors);
         reset_payload = pure::merge_reset_payload(&cached_resets, fresh_resets);
-        let _ = cache::save_quotas(cache_dir, &quota_payload);
-        let _ = cache::save_quota_resets(cache_dir, &reset_payload);
+        let _ = cache::save_quotas_unlocked(cache_dir, &quota_payload);
+        let _ = cache::save_quota_resets_unlocked(cache_dir, &reset_payload);
     } else {
         quota_payload = cached_quota;
         reset_payload = cached_resets;

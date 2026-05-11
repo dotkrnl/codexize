@@ -43,32 +43,24 @@ pub async fn assemble_models_async(
                     "failed to release cache lock after refresh"
                 );
             }
-            result
+            return result;
         }
-        Ok(false) => {
-            tracing::info!(
-                event = "cache_follower_skipped_refresh",
-                lock_path = %lock.display(),
-                "lock held by live PID, rendering cached data"
-            );
-            (
-                assemble_from_loaded(&loaded, available_clis, providers),
-                Vec::new(),
-            )
-        }
-        Err(e) => {
-            tracing::warn!(
-                event = "cache_lock_error",
-                lock_path = %lock.display(),
-                error = %e,
-                "lock acquisition failed, falling back to cached data"
-            );
-            (
-                assemble_from_loaded(&loaded, available_clis, providers),
-                Vec::new(),
-            )
-        }
+        Ok(false) => tracing::info!(
+            event = "cache_follower_skipped_refresh",
+            lock_path = %lock.display(),
+            "lock held by live PID, rendering cached data"
+        ),
+        Err(e) => tracing::warn!(
+            event = "cache_lock_error",
+            lock_path = %lock.display(),
+            error = %e,
+            "lock acquisition failed, falling back to cached data"
+        ),
     }
+    (
+        assemble_from_loaded(&loaded, available_clis, providers),
+        Vec::new(),
+    )
 }
 
 pub fn assemble_from_cached_only(

@@ -104,7 +104,7 @@ impl LaunchModes {
     pub fn effort_for(self, requested: EffortLevel, phase: SelectionPhase) -> EffortLevel {
         if self.cheap {
             EffortLevel::Low
-        } else if self.yolo && matches!(phase, SelectionPhase::Idea | SelectionPhase::Planning) {
+        } else if matches!(phase, SelectionPhase::Idea | SelectionPhase::Planning) {
             EffortLevel::Tough
         } else {
             requested

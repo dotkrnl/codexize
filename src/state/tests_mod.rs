@@ -35,60 +35,76 @@ fn session_modes_round_trip() {
 }
 
 #[test]
-fn effort_for_uses_tough_only_for_yolo_idea_and_planning() {
-    let modes = LaunchModes {
-        yolo: true,
-        cheap: false,
-        interactive: false,
-    };
+fn effort_for_promotes_idea_and_planning_to_tough_when_not_cheap() {
+    // Tough is the default for the two operator-facing thinking stages
+    // regardless of yolo — the prior carve-out gated this on yolo, but the
+    // operator wants brainstorm/plan to always lean on a tougher model unless
+    // cheap mode is explicitly requested.
+    for yolo in [false, true] {
+        let modes = LaunchModes {
+            yolo,
+            cheap: false,
+            interactive: false,
+        };
 
-    assert_eq!(
-        modes.effort_for(EffortLevel::Normal, crate::selection::SelectionPhase::Idea),
-        EffortLevel::Tough
-    );
-    assert_eq!(
-        modes.effort_for(EffortLevel::Low, crate::selection::SelectionPhase::Planning),
-        EffortLevel::Tough
-    );
-}
-
-#[test]
-fn effort_for_preserves_requested_effort_for_build_and_review_under_yolo() {
-    let modes = LaunchModes {
-        yolo: true,
-        cheap: false,
-        interactive: false,
-    };
-
-    for requested in [EffortLevel::Low, EffortLevel::Normal, EffortLevel::Tough] {
         assert_eq!(
-            modes.effort_for(requested, crate::selection::SelectionPhase::Build),
-            requested
+            modes.effort_for(EffortLevel::Normal, crate::selection::SelectionPhase::Idea),
+            EffortLevel::Tough,
+            "Idea must be Tough when !cheap (yolo={yolo})"
         );
         assert_eq!(
-            modes.effort_for(requested, crate::selection::SelectionPhase::Review),
-            requested
+            modes.effort_for(EffortLevel::Low, crate::selection::SelectionPhase::Planning),
+            EffortLevel::Tough,
+            "Planning must be Tough when !cheap (yolo={yolo})"
         );
     }
 }
 
 #[test]
-fn effort_for_cheap_mode_wins_over_yolo_for_all_phases() {
-    let modes = LaunchModes {
-        yolo: true,
-        cheap: true,
-        interactive: false,
-    };
+fn effort_for_preserves_requested_effort_for_build_and_review() {
+    for yolo in [false, true] {
+        let modes = LaunchModes {
+            yolo,
+            cheap: false,
+            interactive: false,
+        };
 
-    for phase in crate::selection::SelectionPhase::ALL {
-        assert_eq!(
-            modes.effort_for(EffortLevel::Tough, phase),
-            EffortLevel::Low
-        );
-        assert_eq!(
-            modes.effort_for(EffortLevel::Normal, phase),
-            EffortLevel::Low
-        );
+        for requested in [EffortLevel::Low, EffortLevel::Normal, EffortLevel::Tough] {
+            assert_eq!(
+                modes.effort_for(requested, crate::selection::SelectionPhase::Build),
+                requested,
+                "Build must pass through requested effort (yolo={yolo})"
+            );
+            assert_eq!(
+                modes.effort_for(requested, crate::selection::SelectionPhase::Review),
+                requested,
+                "Review must pass through requested effort (yolo={yolo})"
+            );
+        }
+    }
+}
+
+#[test]
+fn effort_for_cheap_mode_short_circuits_to_low_for_every_phase() {
+    for yolo in [false, true] {
+        let modes = LaunchModes {
+            yolo,
+            cheap: true,
+            interactive: false,
+        };
+
+        for phase in crate::selection::SelectionPhase::ALL {
+            assert_eq!(
+                modes.effort_for(EffortLevel::Tough, phase),
+                EffortLevel::Low,
+                "cheap mode must collapse Tough → Low (phase={phase:?}, yolo={yolo})"
+            );
+            assert_eq!(
+                modes.effort_for(EffortLevel::Normal, phase),
+                EffortLevel::Low,
+                "cheap mode must collapse Normal → Low (phase={phase:?}, yolo={yolo})"
+            );
+        }
     }
 }
 

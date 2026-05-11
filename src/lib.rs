@@ -26,6 +26,7 @@ pub use crate::ui::preflight;
 pub use crate::ui::widgets::picker::state as picker;
 pub mod review;
 pub use crate::data::runner;
+pub mod scheduler;
 pub mod selection;
 pub mod simplification;
 pub use crate::data::snapshot as smoke;

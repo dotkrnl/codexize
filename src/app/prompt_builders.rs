@@ -106,11 +106,6 @@ pub(crate) fn planning_prompt(
     meta: PromptMeta,
 ) -> String {
     let mut ctx = PromptCtx::new(meta);
-    // Planner runs strictly against the spec — spec-review findings land in
-    // spec.md via the interactive spec-review stage, so no review fanout is
-    // spliced here. The `{reviews}` slot is preserved as an empty hint until
-    // the prompt template itself is rewritten in a follow-on task.
-    let reviews = "(planner runs strictly against the spec — no reviews spliced)".to_string();
     let template = if yolo {
         include_str!("prompts/planning_yolo.md")
     } else {
@@ -118,7 +113,6 @@ pub(crate) fn planning_prompt(
     };
     let prior_block = prior_attempts_block(&ctx, prior_attempts_path);
     ctx.path_arg("spec", spec_path)
-        .set("reviews", reviews)
         .path_arg("plan", plan_path)
         .set("prior_attempts_block", prior_block)
         .memory_arg(spec_path)

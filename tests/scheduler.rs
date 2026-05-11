@@ -7,9 +7,10 @@
 use codexize::app::AppStartupOrigin;
 use codexize::app_shell::AppShell;
 use codexize::data::config::Config;
-use codexize::data::picker_io::scan_sessions_for_scheduler;
+use codexize::data::picker_io::{newest_earlier_done_baseline, scan_sessions_for_scheduler};
 use codexize::scheduler::{
-    ImplementationDecision, ScannedSession, evaluate_tick, manual_retry_allowed,
+    ImplementationDecision, ScannedSession, WaitingDispatch, decide_waiting_dispatch,
+    evaluate_tick, manual_retry_allowed,
 };
 use codexize::state::{Phase, SessionState};
 use serial_test::serial;
@@ -317,6 +318,192 @@ fn manual_retry_rejected_for_sharding_when_other_session_occupies_lane() {
             &scan
         ));
     });
+}
+
+fn save_session_with_baseline(id: &str, phase: Phase, planned_after: Option<&str>) -> SessionState {
+    let mut state = SessionState::new(id.to_string());
+    state.idea_text = Some(format!("idea for {id}"));
+    state.current_phase = phase;
+    state.planned_after_session_id = planned_after.map(str::to_string);
+    state.save().expect("save session");
+    state
+}
+
+#[test]
+#[serial]
+fn dispatch_waiting_routes_to_sharding_when_baseline_matches_recorded() {
+    // Spec § Repo-state update: when `planned_after_session_id` equals the
+    // current newest-earlier-Done baseline, the WaitingToImplement head
+    // skips repo-state update and goes straight to sharding.
+    with_temp_root(|sessions_root| {
+        save_session("20260511-090000-000000001", Phase::Done);
+        save_session_with_baseline(
+            "20260511-091000-000000001",
+            Phase::WaitingToImplement,
+            Some("20260511-090000-000000001"),
+        );
+
+        let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
+        let tick = evaluate_tick(&scan);
+        let session_id = match tick.implementation {
+            ImplementationDecision::DispatchWaiting { session_id } => session_id,
+            other => panic!("expected DispatchWaiting, got {other:?}"),
+        };
+        let entries = codexize::data::picker_io::scan_sessions_by_creation_order(&sessions_root)
+            .expect("scan by creation order");
+        let baseline = newest_earlier_done_baseline(&session_id, &entries);
+        let state = SessionState::load(&session_id).expect("load");
+        assert_eq!(
+            decide_waiting_dispatch(
+                state.planned_after_session_id.as_deref(),
+                baseline.as_deref(),
+            ),
+            WaitingDispatch::Sharding
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn dispatch_waiting_routes_to_repo_state_update_when_baseline_advanced() {
+    // A newer Done session has landed since the head was planned, so the
+    // baseline-comparison says "different" and the stage must run before
+    // sharding.
+    with_temp_root(|sessions_root| {
+        save_session("20260511-088000-000000001", Phase::Done);
+        save_session("20260511-090000-000000001", Phase::Done);
+        save_session_with_baseline(
+            "20260511-091000-000000001",
+            Phase::WaitingToImplement,
+            Some("20260511-088000-000000001"),
+        );
+
+        let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
+        let tick = evaluate_tick(&scan);
+        let session_id = match tick.implementation {
+            ImplementationDecision::DispatchWaiting { session_id } => session_id,
+            other => panic!("expected DispatchWaiting, got {other:?}"),
+        };
+        let entries = codexize::data::picker_io::scan_sessions_by_creation_order(&sessions_root)
+            .expect("scan by creation order");
+        let baseline = newest_earlier_done_baseline(&session_id, &entries);
+        let state = SessionState::load(&session_id).expect("load");
+        assert_eq!(
+            decide_waiting_dispatch(
+                state.planned_after_session_id.as_deref(),
+                baseline.as_deref(),
+            ),
+            WaitingDispatch::RepoStateUpdate
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn dispatch_waiting_routes_to_repo_state_update_when_recorded_baseline_missing() {
+    // The recorded baseline points at a session that has since been deleted
+    // or archived (here, simply never present); the stage must still run
+    // against the current state of the queue.
+    with_temp_root(|sessions_root| {
+        save_session("20260511-090000-000000001", Phase::Done);
+        save_session_with_baseline(
+            "20260511-091000-000000001",
+            Phase::WaitingToImplement,
+            Some("20260511-089000-000000001"), // never existed
+        );
+
+        let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
+        let tick = evaluate_tick(&scan);
+        let ImplementationDecision::DispatchWaiting { session_id } = tick.implementation else {
+            panic!("expected DispatchWaiting");
+        };
+        let entries = codexize::data::picker_io::scan_sessions_by_creation_order(&sessions_root)
+            .expect("scan by creation order");
+        let baseline = newest_earlier_done_baseline(&session_id, &entries);
+        let state = SessionState::load(&session_id).expect("load");
+        assert_eq!(
+            decide_waiting_dispatch(
+                state.planned_after_session_id.as_deref(),
+                baseline.as_deref(),
+            ),
+            WaitingDispatch::RepoStateUpdate
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn dispatch_waiting_skips_repo_state_update_when_no_earlier_done_exists() {
+    // Both baselines are None — no prior Done session has been observed and
+    // none exists now, so direct sharding is the right call.
+    with_temp_root(|sessions_root| {
+        save_session_with_baseline("20260511-090000-000000001", Phase::WaitingToImplement, None);
+
+        let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
+        let tick = evaluate_tick(&scan);
+        let ImplementationDecision::DispatchWaiting { session_id } = tick.implementation else {
+            panic!("expected DispatchWaiting");
+        };
+        let entries = codexize::data::picker_io::scan_sessions_by_creation_order(&sessions_root)
+            .expect("scan by creation order");
+        let baseline = newest_earlier_done_baseline(&session_id, &entries);
+        let state = SessionState::load(&session_id).expect("load");
+        assert_eq!(baseline, None);
+        assert_eq!(state.planned_after_session_id, None);
+        assert_eq!(
+            decide_waiting_dispatch(
+                state.planned_after_session_id.as_deref(),
+                baseline.as_deref(),
+            ),
+            WaitingDispatch::Sharding
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn repo_state_update_policy_restricts_allowed_writes() {
+    // Spec § Repo-state update: outputs are restricted to current session
+    // spec.md, plan.md, the repo-state-update.toml report, the live summary,
+    // and bounded memory updates. The policy's shell allowlist must allow
+    // only read-only git inspection commands. Workspace must stay read-only.
+    use codexize::acp::{AcpLaunchPolicy, AcpShellCommandPolicy};
+    let policy = AcpLaunchPolicy::repo_state_update(
+        std::path::Path::new("/s/artifacts/spec.md"),
+        std::path::Path::new("/s/artifacts/plan.md"),
+        std::path::Path::new("/s/artifacts/repo-state-update.toml"),
+        std::path::Path::new("/s/artifacts/live_summary.txt"),
+    );
+    assert!(policy.enforce_readonly_workspace);
+    let allowed: Vec<&str> = policy
+        .allowed_write_paths
+        .iter()
+        .map(|p| p.to_str().unwrap_or(""))
+        .collect();
+    assert!(allowed.iter().any(|p| p.ends_with("spec.md")));
+    assert!(allowed.iter().any(|p| p.ends_with("plan.md")));
+    assert!(
+        allowed
+            .iter()
+            .any(|p| p.ends_with("repo-state-update.toml"))
+    );
+    assert!(allowed.iter().any(|p| p.ends_with("live_summary.txt")));
+    // No tasks.toml or other-session paths leaked into the write set.
+    assert!(
+        !allowed.iter().any(|p| p.ends_with("tasks.toml")),
+        "tasks.toml must be read-only for the reconciliation agent"
+    );
+    let shell = match policy.shell_policy {
+        AcpShellCommandPolicy::Allowlist(list) => list,
+        AcpShellCommandPolicy::FullAccess => panic!("repo-state update must allowlist shell"),
+    };
+    assert!(shell.iter().any(|cmd| cmd == "git status"));
+    assert!(shell.iter().any(|cmd| cmd == "git diff"));
+    assert!(shell.iter().any(|cmd| cmd == "git rev-parse"));
+    assert!(
+        !shell.iter().any(|cmd| cmd == "git commit"),
+        "shell allowlist must not include mutating git commands"
+    );
 }
 
 #[test]

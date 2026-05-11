@@ -20,7 +20,7 @@ pub struct Task {
     #[serde(default)]
     pub plan_refs: Vec<Ref>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Ref {
     pub path: String,
     pub lines: String,

@@ -60,12 +60,14 @@ impl App {
             "planning",
             1,
         );
+        let earlier_specs = self.earlier_waiting_specs();
         let prompt = planning_prompt(
             &spec_path,
             &plan_path,
             &live_summary_path,
             modes.yolo,
             prior_attempts_path.as_deref(),
+            &earlier_specs,
             self.prompt_meta(),
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {

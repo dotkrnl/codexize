@@ -78,6 +78,7 @@ impl App {
             "brainstorm",
             1,
         );
+        let earlier_specs = self.earlier_waiting_specs();
         let prompt = brainstorm_prompt(
             &idea,
             &spec_path.display().to_string(),
@@ -85,6 +86,7 @@ impl App {
             &live_summary_path.display().to_string(),
             modes.yolo,
             prior_attempts_path.as_deref(),
+            &earlier_specs,
             self.prompt_meta(),
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {

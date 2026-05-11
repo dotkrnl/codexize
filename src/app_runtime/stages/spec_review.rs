@@ -85,10 +85,12 @@ impl App {
         ) = chosen;
         let attempt = self.attempt_for("spec-review", None, round);
         let live_summary_path = self.live_summary_path_for_run("spec-review", None, round, attempt);
+        let earlier_specs = self.earlier_waiting_specs();
         let prompt = spec_review_prompt(
             &spec_path.display().to_string(),
             &review_path.display().to_string(),
             &live_summary_path.display().to_string(),
+            &earlier_specs,
             self.prompt_meta(),
         );
         if let Some(parent) = prompt_path.parent() {

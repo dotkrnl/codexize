@@ -57,6 +57,37 @@ fn acquire(path: &Path) -> Result<()> {
         }
     }
 }
+
+/// Non-blocking publisher election. Attempts a single `O_CREAT|O_EXCL`; on
+/// `AlreadyExists` it evaluates the holder via [`try_break_stale`] and, if the
+/// lock was stale, retries exactly once. Returns `Ok(true)` when the caller
+/// now owns the lock and must eventually call [`release`]; `Ok(false)` when
+/// the lock is held by a live PID (follower mode) or a racing peer grabbed
+/// the lock between the stale-break and the retry. I/O errors other than
+/// `AlreadyExists` propagate.
+pub fn try_acquire(path: &Path) -> Result<bool> {
+    match try_create(path) {
+        Ok(()) => return Ok(true),
+        Err(err) if err.kind() == ErrorKind::AlreadyExists => {}
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to create lock file at {}", path.display()));
+        }
+    }
+    if !try_break_stale(path) {
+        // Holder is a live PID under the 60 s age threshold — follower.
+        return Ok(false);
+    }
+    match try_create(path) {
+        Ok(()) => Ok(true),
+        // A peer raced us between break and retry; spec §Roles says fall back
+        // to follower rather than looping.
+        Err(err) if err.kind() == ErrorKind::AlreadyExists => Ok(false),
+        Err(err) => {
+            Err(err).with_context(|| format!("failed to create lock file at {}", path.display()))
+        }
+    }
+}
 fn try_create(path: &Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -89,11 +120,22 @@ fn try_break_stale(path: &Path) -> bool {
     let pid_dead = !is_process_alive(pid);
     if age_exceeded || pid_dead {
         let _ = fs::remove_file(path);
+        warn!(
+            event = "cache_stale_lock_broken",
+            lock_path = %path.display(),
+            holder_pid = pid,
+            age_secs = now_secs().saturating_sub(created_at),
+            pid_dead,
+            "broke stale cache lock"
+        );
         return true;
     }
     false
 }
-fn release(path: &Path) -> Result<()> {
+/// Release a lock previously obtained via [`try_acquire`] (or the internal
+/// [`acquire`] used by [`with_lock`]). The PID check ensures a process never
+/// removes another process's lockfile.
+pub fn release(path: &Path) -> Result<()> {
     if let Ok(contents) = fs::read_to_string(path)
         && let Some(pid_str) = contents.lines().next()
         && let Ok(pid) = pid_str.parse::<u32>()

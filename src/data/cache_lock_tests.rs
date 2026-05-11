@@ -83,6 +83,47 @@ fn eperm_from_signal_probe_counts_as_live_process() {
 }
 
 #[test]
+fn try_acquire_returns_false_when_live_pid_holds_lock() {
+    let dir = TempDir::new().unwrap();
+    let path = lock_path(&dir);
+    // Use our own PID — guaranteed alive — with a fresh timestamp so the
+    // stale-break check rejects it and try_acquire must return follower.
+    fs::write(&path, format!("{}\n{}\n", std::process::id(), now_secs())).unwrap();
+
+    let elected = try_acquire(&path).expect("try_acquire should not error");
+    assert!(!elected, "live-PID lock must yield follower (Ok(false))");
+    // The held lock must remain untouched for the live holder.
+    let contents = fs::read_to_string(&path).unwrap();
+    assert!(
+        contents.starts_with(&format!("{}\n", std::process::id())),
+        "live holder's lock contents must be preserved"
+    );
+}
+
+#[test]
+fn try_acquire_succeeds_when_unheld() {
+    let dir = TempDir::new().unwrap();
+    let path = lock_path(&dir);
+    let elected = try_acquire(&path).expect("try_acquire should not error");
+    assert!(elected, "unheld lock must elect caller as publisher");
+    assert!(path.exists(), "lock file must be created on success");
+    release(&path).unwrap();
+    assert!(!path.exists(), "release must remove our lock");
+}
+
+#[test]
+fn try_acquire_breaks_stale_lock_and_retries() {
+    let dir = TempDir::new().unwrap();
+    let path = lock_path(&dir);
+    // PID 1_999_999 is almost certainly dead — stale-break kicks in, retry
+    // succeeds.
+    fs::write(&path, format!("1999999\n{}\n", now_secs())).unwrap();
+    let elected = try_acquire(&path).expect("try_acquire should not error");
+    assert!(elected, "stale lock must be broken and reacquired");
+    release(&path).unwrap();
+}
+
+#[test]
 fn release_only_removes_own_lock() {
     let dir = TempDir::new().unwrap();
     let path = lock_path(&dir);

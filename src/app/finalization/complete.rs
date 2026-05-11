@@ -15,6 +15,7 @@ impl App {
             Phase::SpecReviewRunning => self.finalize_spec_review_success(run)?,
             Phase::PlanningRunning => self.finalize_planning_success(run)?,
             Phase::PlanReviewRunning => self.finalize_plan_review_success(run)?,
+            Phase::RepoStateUpdateRunning => self.finalize_repo_state_update_success(run)?,
             Phase::ShardingRunning => self.finalize_sharding_success(run)?,
             Phase::ImplementationRound(round) => self.finalize_coder_success(run, round)?,
             Phase::ReviewRound(round) => self.finalize_reviewer_success(run, round)?,
@@ -32,7 +33,6 @@ impl App {
             | Phase::SpecReviewPaused
             | Phase::PlanReviewPaused
             | Phase::WaitingToImplement
-            | Phase::RepoStateUpdateRunning
             | Phase::BlockedNeedsUser
             | Phase::SkipToImplPending
             | Phase::GitGuardPending

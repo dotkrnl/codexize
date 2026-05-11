@@ -20,6 +20,7 @@ mod planning;
 mod recovery;
 mod recovery_plan_review;
 mod recovery_sharding;
+mod repo_state_update;
 mod reviewer;
 mod sharding;
 mod simplification;

@@ -31,6 +31,7 @@ impl App {
             Phase::SpecReviewRunning => self.launch_spec_review(),
             Phase::PlanningRunning => self.launch_planning(),
             Phase::PlanReviewRunning => self.launch_plan_review(),
+            Phase::RepoStateUpdateRunning => self.launch_repo_state_update(),
             Phase::ShardingRunning => self.launch_sharding(),
             Phase::ImplementationRound(_) => self.launch_coder(),
             Phase::ReviewRound(_) => self.launch_reviewer(),

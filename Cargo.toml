@@ -12,7 +12,7 @@ dashmap = "6.1"
 getrandom = "0.3"
 indoc = "2.0"
 itertools = "0.14"
-nix = { version = "0.28.0", features = ["signal", "process"] }
+nix = { version = "0.28.0", features = ["hostname", "signal", "process"] }
 notify = "7.0"
 parking_lot = "0.12"
 ratatui = "0.30.0"

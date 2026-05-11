@@ -1,6 +1,6 @@
 use super::prompt_ctx::{PromptCtx, PromptMeta, resolved_agent_path};
 use indoc::formatdoc;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Render the `{prior_attempts_block}` slot used by every interactive
 /// stage prompt (brainstorm, planning, recovery). When the caller has a
@@ -99,7 +99,6 @@ pub(crate) fn brainstorm_prompt(
 }
 pub(crate) fn planning_prompt(
     spec_path: &Path,
-    review_paths: &[PathBuf],
     plan_path: &Path,
     live_summary_path: &Path,
     yolo: bool,
@@ -107,16 +106,11 @@ pub(crate) fn planning_prompt(
     meta: PromptMeta,
 ) -> String {
     let mut ctx = PromptCtx::new(meta);
-    let reviews = if review_paths.is_empty() {
-        "(no spec reviews available — work from the spec alone)".to_string()
-    } else {
-        review_paths
-            .iter()
-            .enumerate()
-            .map(|(i, p)| format!("  - review {}: {}", i + 1, ctx.path(p)))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
+    // Planner runs strictly against the spec — spec-review findings land in
+    // spec.md via the interactive spec-review stage, so no review fanout is
+    // spliced here. The `{reviews}` slot is preserved as an empty hint until
+    // the prompt template itself is rewritten in a follow-on task.
+    let reviews = "(planner runs strictly against the spec — no reviews spliced)".to_string();
     let template = if yolo {
         include_str!("prompts/planning_yolo.md")
     } else {

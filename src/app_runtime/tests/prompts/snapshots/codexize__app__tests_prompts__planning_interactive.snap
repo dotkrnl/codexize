@@ -24,8 +24,7 @@ Do not invoke any skill or follow harness-loaded skill instructions; this prompt
 Inputs:
   Spec:    /tmp/codexize-prompt-fixture/session/artifacts/spec.md
   Reviews:
-  - review 1: /tmp/codexize-prompt-fixture/session/artifacts/spec-review-1.md
-  - review 2: /tmp/codexize-prompt-fixture/session/artifacts/spec-review-2.md
+(planner runs strictly against the spec — no reviews spliced)
 
 Triage reviews first. They may contradict each other AND are written by AI
 agents — be skeptical, accept only what genuinely improves the spec or plan,

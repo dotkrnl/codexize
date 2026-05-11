@@ -157,33 +157,13 @@ fn prompt_insta_snapshots_match_fixtures() {
             ),
         );
 
-        let spec_reviews = vec![
-            artifacts.join("spec-review-1.md"),
-            artifacts.join("spec-review-2.md"),
-        ];
         assert_prompt_insta_snapshot(
             "planning_interactive",
-            &planning_prompt(
-                &spec,
-                &spec_reviews,
-                &plan,
-                &live,
-                false,
-                None,
-                PromptMeta::with_topics(6),
-            ),
+            &planning_prompt(&spec, &plan, &live, false, None, PromptMeta::with_topics(6)),
         );
         assert_prompt_insta_snapshot(
             "planning_yolo",
-            &planning_prompt(
-                &spec,
-                &spec_reviews,
-                &plan,
-                &live,
-                true,
-                None,
-                PromptMeta::with_topics(6),
-            ),
+            &planning_prompt(&spec, &plan, &live, true, None, PromptMeta::with_topics(6)),
         );
         assert_prompt_insta_snapshot(
             "sharding",

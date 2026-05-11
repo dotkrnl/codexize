@@ -78,6 +78,45 @@ fn brainstorm_prompt_omits_prior_attempts_block_when_none() {
 }
 
 #[test]
+fn planning_prompt_does_not_splice_spec_review_paths_or_bodies() {
+    // The planner now runs strictly against the spec. The builder must
+    // neither accept nor render any spec-review-*.md content even if such
+    // a file exists on disk next to the spec.
+    let session_dir = PathBuf::from("/tmp/codexize-test-planning-no-reviews");
+    let artifacts = session_dir.join("artifacts");
+    let spec = artifacts.join("spec.md");
+    let plan = artifacts.join("plan.md");
+    let live = artifacts.join("live.txt");
+
+    let prompt = planning_prompt(&spec, &plan, &live, false, None, PromptMeta::with_topics(6));
+
+    assert!(
+        prompt.contains(&spec.display().to_string()),
+        "planner prompt must reference the spec path:\n{prompt}"
+    );
+    assert!(
+        !prompt.contains("spec-review-"),
+        "planner prompt must not name any spec-review-*.md file:\n{prompt}"
+    );
+}
+
+#[test]
+fn planning_prompt_yolo_variant_also_omits_spec_review_splice() {
+    let session_dir = PathBuf::from("/tmp/codexize-test-planning-no-reviews-yolo");
+    let artifacts = session_dir.join("artifacts");
+    let spec = artifacts.join("spec.md");
+    let plan = artifacts.join("plan.md");
+    let live = artifacts.join("live.txt");
+
+    let prompt = planning_prompt(&spec, &plan, &live, true, None, PromptMeta::with_topics(6));
+
+    assert!(
+        !prompt.contains("spec-review-"),
+        "yolo planner prompt must not name any spec-review-*.md file:\n{prompt}"
+    );
+}
+
+#[test]
 fn simplifier_prompt_omits_refine_block_when_empty() {
     let session_dir = PathBuf::from("/tmp/codexize-test-session");
     let review_scope = session_dir.join("rounds/001/review_scope.toml");

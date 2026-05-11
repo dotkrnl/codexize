@@ -2,7 +2,7 @@ use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::planning_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, Phase, RunStatus};
+use crate::state::{self as session_state, Phase};
 use anyhow::Result;
 impl App {
     pub(crate) fn launch_planning(&mut self) {
@@ -26,18 +26,6 @@ impl App {
         let session_dir = session_state::session_dir(&session_id);
         let spec_path = session_dir.join("artifacts").join("spec.md");
         let plan_path = session_dir.join("artifacts").join("plan.md");
-        let review_paths: Vec<std::path::PathBuf> = self
-            .state
-            .agent_runs
-            .iter()
-            .filter(|run| run.stage == "spec-review" && run.status == RunStatus::Done)
-            .map(|run| {
-                session_dir
-                    .join("artifacts")
-                    .join(format!("spec-review-{}.md", run.round))
-            })
-            .filter(|path| path.exists())
-            .collect();
         let modes = self.state.launch_modes();
         let phase = Self::phase_for_stage("planning");
         let effort = modes.effort_for(EffortLevel::Normal, phase);
@@ -74,7 +62,6 @@ impl App {
         );
         let prompt = planning_prompt(
             &spec_path,
-            &review_paths,
             &plan_path,
             &live_summary_path,
             modes.yolo,

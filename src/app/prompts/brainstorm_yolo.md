@@ -90,5 +90,5 @@ Hard rules:
   - No VCS mutations; files stay untracked, a later phase commits.
   - Don't ask whether to continue or run follow-up skills. When files are
     written, STOP — the orchestrator drives stage transitions.
-{memory_context}
+{cross_session_context}{memory_context}
 {instr}

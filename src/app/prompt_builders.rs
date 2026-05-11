@@ -1,6 +1,6 @@
 use super::prompt_ctx::{PromptCtx, PromptMeta, resolved_agent_path};
 use indoc::formatdoc;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Render the `{prior_attempts_block}` slot used by every interactive
 /// stage prompt (brainstorm, planning, recovery). When the caller has a
@@ -20,15 +20,53 @@ fn prior_attempts_block(ctx: &PromptCtx, prior_attempts_path: Option<&Path>) -> 
         None => String::new(),
     }
 }
+
+/// Render the `{cross_session_context}` slot for brainstorm, spec review, and
+/// planning. Frames specs from earlier waiting sessions as the expected
+/// future repository state.
+fn cross_session_context_block(ctx: &PromptCtx, earlier_specs: &[PathBuf], planning: bool) -> String {
+    if earlier_specs.is_empty() {
+        return String::new();
+    }
+    let mut block = formatdoc!(
+        "
+        Expected future repository state:
+        Earlier sessions in the queue have already been planned. Treat their \
+        specs as the repository state you are {} against.
+        ",
+        if planning {
+            "planning"
+        } else {
+            "designing"
+        }
+    );
+    if !planning {
+        block.push_str(
+            "If your design or findings conflict with these earlier specs \
+             (e.g., touching the same surfaces in contradictory ways), you \
+             MUST flag the conflict to the operator.\n",
+        );
+    }
+    block.push_str("\nEarlier specs:\n");
+    for spec in earlier_specs {
+        block.push_str(&format!("  - {}\n", ctx.path(spec)));
+    }
+    block.push('\n');
+    block
+}
+
 pub(crate) fn spec_review_prompt(
     spec_path: &str,
     review_path: &str,
     live_summary_path: &str,
+    earlier_specs: &[PathBuf],
     meta: PromptMeta,
 ) -> String {
     let mut ctx = PromptCtx::new(meta);
+    let cross_session_block = cross_session_context_block(&ctx, earlier_specs, false);
     ctx.path_arg("spec_path", spec_path)
         .path_arg("review_path", review_path)
+        .set("cross_session_context", cross_session_block)
         .memory_arg(spec_path)
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/spec_review.md"))
@@ -74,6 +112,7 @@ pub(crate) fn brainstorm_prompt(
     live_summary_path: &str,
     yolo: bool,
     prior_attempts_path: Option<&Path>,
+    earlier_specs: &[PathBuf],
     meta: PromptMeta,
 ) -> String {
     let mut ctx = PromptCtx::new(meta);
@@ -88,11 +127,13 @@ pub(crate) fn brainstorm_prompt(
         include_str!("prompts/brainstorm_interactive.md")
     };
     let prior_block = prior_attempts_block(&ctx, prior_attempts_path);
+    let cross_session_block = cross_session_context_block(&ctx, earlier_specs, false);
     ctx.set("idea", idea)
         .path_arg("spec_path", spec_path)
         .set("summary_path", summary_path)
         .path_arg("skip_proposal_path", skip_proposal_path)
         .set("prior_attempts_block", prior_block)
+        .set("cross_session_context", cross_session_block)
         .memory_arg(spec_path)
         .live_arg(live_summary_path, !yolo)
         .render(template)
@@ -103,6 +144,7 @@ pub(crate) fn planning_prompt(
     live_summary_path: &Path,
     yolo: bool,
     prior_attempts_path: Option<&Path>,
+    earlier_specs: &[PathBuf],
     meta: PromptMeta,
 ) -> String {
     let mut ctx = PromptCtx::new(meta);
@@ -112,9 +154,11 @@ pub(crate) fn planning_prompt(
         include_str!("prompts/planning_interactive.md")
     };
     let prior_block = prior_attempts_block(&ctx, prior_attempts_path);
+    let cross_session_block = cross_session_context_block(&ctx, earlier_specs, true);
     ctx.path_arg("spec", spec_path)
         .path_arg("plan", plan_path)
         .set("prior_attempts_block", prior_block)
+        .set("cross_session_context", cross_session_block)
         .memory_arg(spec_path)
         .live_arg(live_summary_path, !yolo)
         .render(template)

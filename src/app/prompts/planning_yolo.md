@@ -93,5 +93,5 @@ Hard rules:
   - No code/config edits, no VCS, no test runs.
   - Don't ask whether to continue. When {plan} is written, STOP — the
     orchestrator drives stage transitions.
-{memory_context}
+{cross_session_context}{memory_context}
 {instr}

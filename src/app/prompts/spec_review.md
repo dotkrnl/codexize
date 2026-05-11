@@ -113,5 +113,5 @@ Stage completion — ONLY once the queue is drained and {review_path} is
 written: end that final message with a line asking the operator to
 enter `/exit` if they have no further comments. While you are still
 waiting for the operator's input on a finding, never include this cue.
-{memory_context}
+{cross_session_context}{memory_context}
 {instr}

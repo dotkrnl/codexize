@@ -262,5 +262,8 @@ fn atomic_write(dir: &Path, file: &CacheFile) -> Result<()> {
     fs::rename(&tmp_path, &final_path).context("failed to rename temp cache file")?;
     Ok(())
 }
+pub mod watcher;
+pub use watcher::{CACHE_POLL_INTERVAL, CacheWatcher, CacheWatcherOutcome};
+
 #[cfg(test)]
 mod tests_mod;

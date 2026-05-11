@@ -22,6 +22,7 @@ use crate::app::prompts::{
 use crate::app::{App, guard};
 use crate::artifacts::ArtifactKind;
 use crate::repo_state_update::{RepoStateUpdateReport, RepoStateUpdateStatus};
+use crate::scheduler::{WaitingDispatch, decide_waiting_dispatch};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, BlockOrigin, Phase};
 use anyhow::{Context, Result};
@@ -320,6 +321,32 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// Production dispatch out of `Phase::WaitingToImplement`: pure phase
+    /// transition that the per-tick auto-launch loop consumes. Compares
+    /// the session's recorded `planned_after_session_id` with the current
+    /// newest-earlier-`Done` baseline and transitions to either
+    /// `RepoStateUpdateRunning` (baselines differ) or `ShardingRunning`
+    /// (baselines match, including both `None`).
+    ///
+    /// This is the production wiring for the scheduler's
+    /// `decide_waiting_dispatch` helper; the launch of the resulting stage
+    /// is left to the next auto-launch tick so the same code path covers
+    /// resumed sessions where the phase was already advanced.
+    pub(crate) fn dispatch_waiting_to_implement(&mut self) {
+        let (current_baseline, _) = self.compute_repo_state_update_inputs();
+        let decision = decide_waiting_dispatch(
+            self.state.planned_after_session_id.as_deref(),
+            current_baseline.as_deref(),
+        );
+        let next_phase = match decision {
+            WaitingDispatch::Sharding => Phase::ShardingRunning,
+            WaitingDispatch::RepoStateUpdate => Phase::RepoStateUpdateRunning,
+        };
+        if let Err(err) = self.transition_to_phase(next_phase) {
+            self.surface_boundary_error(format!("failed to dispatch waiting session: {err}"), true);
+        }
     }
 
     /// Public for tests that exercise finalize directly: snapshot the
@@ -821,6 +848,90 @@ rewrote_plan = true
             let entry = &newly[0];
             assert!(entry.tasks_toml.ends_with("tasks.toml"));
             assert_eq!(entry.final_validation_paths.len(), 1);
+        });
+    }
+
+    #[test]
+    fn waiting_to_implement_dispatch_routes_to_sharding_when_baselines_match() {
+        // Production wiring: a `WaitingToImplement` session whose recorded
+        // baseline matches the current newest-earlier-`Done` baseline must
+        // skip the repo-state update and transition straight to sharding.
+        with_temp_root(|| {
+            save_done_session("20260511-080000-000000001");
+            let session_id = "20260511-090000-000000001";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::WaitingToImplement;
+            state.planned_after_session_id = Some("20260511-080000-000000001".to_string());
+            state.save().unwrap();
+            let mut app = mk_app(state);
+            // `maybe_auto_launch` is the per-tick entry; the dispatch must
+            // fire from there even with no models loaded yet. mk_app
+            // defaults `run_launched=true`; flip it so the auto-launch
+            // guard lets dispatch run.
+            app.run_launched = false;
+            app.maybe_auto_launch();
+            assert_eq!(app.state.current_phase, Phase::ShardingRunning);
+            // The transition was persisted to disk.
+            let reloaded = SessionState::load(session_id).unwrap();
+            assert_eq!(reloaded.current_phase, Phase::ShardingRunning);
+        });
+    }
+
+    #[test]
+    fn waiting_to_implement_dispatch_routes_to_repo_state_update_when_baselines_differ() {
+        // A new `Done` session has landed since this session was planned;
+        // the recorded baseline points at the older one, so the stage must
+        // run to reconcile spec/plan against the new repo state.
+        with_temp_root(|| {
+            save_done_session("20260511-080000-000000001");
+            save_done_session("20260511-081000-000000001");
+            let session_id = "20260511-090000-000000001";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::WaitingToImplement;
+            state.planned_after_session_id = Some("20260511-080000-000000001".to_string());
+            state.save().unwrap();
+            let mut app = mk_app(state);
+            app.run_launched = false;
+            app.maybe_auto_launch();
+            assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
+            let reloaded = SessionState::load(session_id).unwrap();
+            assert_eq!(reloaded.current_phase, Phase::RepoStateUpdateRunning);
+        });
+    }
+
+    #[test]
+    fn waiting_to_implement_dispatch_routes_to_sharding_when_no_earlier_done() {
+        // Both baselines `None` is the "fresh queue, no earlier work to
+        // reconcile against" case and routes to sharding.
+        with_temp_root(|| {
+            let session_id = "20260511-090000-000000001";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::WaitingToImplement;
+            state.planned_after_session_id = None;
+            state.save().unwrap();
+            let mut app = mk_app(state);
+            app.run_launched = false;
+            app.maybe_auto_launch();
+            assert_eq!(app.state.current_phase, Phase::ShardingRunning);
+        });
+    }
+
+    #[test]
+    fn waiting_to_implement_dispatch_runs_when_recorded_baseline_is_missing() {
+        // Spec § Failure and edge behavior: when the recorded
+        // `planned_after_session_id` references a session that no longer
+        // exists, the stage must still run against the current baseline.
+        with_temp_root(|| {
+            save_done_session("20260511-080000-000000001");
+            let session_id = "20260511-090000-000000001";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::WaitingToImplement;
+            state.planned_after_session_id = Some("does-not-exist".to_string());
+            state.save().unwrap();
+            let mut app = mk_app(state);
+            app.run_launched = false;
+            app.maybe_auto_launch();
+            assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
         });
     }
 

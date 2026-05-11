@@ -19,7 +19,20 @@ impl App {
         if self.startup_origin == AppStartupOrigin::PickerCreated {
             return;
         }
-        if self.run_launched || self.state.agent_error.is_some() || self.models.is_empty() {
+        if self.run_launched || self.state.agent_error.is_some() {
+            return;
+        }
+        // The repo-state-update gating decision is a pure phase transition
+        // that the per-tick auto-launch loop consumes on the *next* tick.
+        // It does not need a launch-capable model list, so it must run
+        // even before models finish loading; otherwise a freshly resumed
+        // `WaitingToImplement` session stays parked until the model
+        // refresh lands.
+        if self.state.current_phase == Phase::WaitingToImplement {
+            self.dispatch_waiting_to_implement();
+            return;
+        }
+        if self.models.is_empty() {
             return;
         }
         match self.state.current_phase {

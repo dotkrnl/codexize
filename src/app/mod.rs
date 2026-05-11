@@ -225,7 +225,7 @@ impl App {
     /// spec review, and planning stages must consider.
     pub(crate) fn earlier_waiting_specs(&self) -> Vec<std::path::PathBuf> {
         let Ok(scanned) =
-            crate::data::picker_io::scan_sessions_for_scheduler(&self.paths.sessions_root)
+            crate::data::picker_io::scan_sessions_for_scheduler(&self.sessions_root())
         else {
             return Vec::new();
         };

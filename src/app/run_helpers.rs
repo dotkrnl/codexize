@@ -26,12 +26,20 @@ impl App {
     /// so the App reads from the same project-local `.codexize/sessions`
     /// tree the runner stages and `state::session_dir(...)` write to.
     pub(crate) fn session_dir(&self) -> std::path::PathBuf {
-        let root = if self.config.paths.sessions_root.is_explicit() {
+        self.sessions_root().join(&self.state.session_id)
+    }
+
+    /// Resolve the sessions root (`.codexize/sessions`) the App is reading
+    /// against. Mirrors `session_dir` semantics: an explicit
+    /// `paths.sessions_root` config wins; otherwise we follow
+    /// `state::codexize_root()` so tests pinning `CODEXIZE_ROOT` and the
+    /// production app share the same single source of truth.
+    pub(crate) fn sessions_root(&self) -> std::path::PathBuf {
+        if self.config.paths.sessions_root.is_explicit() {
             self.paths.sessions_root.clone()
         } else {
             session_state::codexize_root().join("sessions")
-        };
-        root.join(&self.state.session_id)
+        }
     }
 
     /// Build a per-call `PromptMeta` from this App's loaded `Config`.
@@ -171,7 +179,7 @@ impl App {
         match stage {
             "brainstorm" => SelectionPhase::Idea,
             "spec-review" | "plan-review" | "reviewer" => SelectionPhase::Review,
-            "planning" | "sharding" | "recovery" => SelectionPhase::Planning,
+            "planning" | "sharding" | "recovery" | "repo-state-update" => SelectionPhase::Planning,
             _ => SelectionPhase::Build,
         }
     }

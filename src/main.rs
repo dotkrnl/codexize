@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use codexize::{
-    app, app_runtime,
+    app, app_shell,
     data::{app_lock, config::cli as config_cli},
     picker, preflight,
     state::{self},
@@ -225,20 +225,16 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
     let config = std::sync::Arc::new(load_config_for_launch()?);
     // Acquire `<.codexize>/app.lock` before the terminal switches to raw
     // mode so the spec-pinned refusal messages reach a normal stderr.
-    // The guard is held for the lifetime of `try_main_async`; a clean exit
-    // (or any unwinding `?`) drops it, removing the lock — the existing
-    // single-session shutdown awaits the runner before returning, matching
-    // the spec's "stop active runners before lock removal" rule. Multi-
-    // runner coordination lives in the AppShell layer arriving in a later
-    // milestone and will replace this drop with an explicit release.
+    // The guard is moved into AppShell after the startup picker selects the
+    // first session. Terminal shutdown still waits for active runners before
+    // the shell drops, so the lock is removed after runner finalization.
     let project_root = std::env::current_dir()
         .map_err(|e| anyhow::anyhow!("failed to read current directory: {e}"))?;
     let lock_path = state::codexize_root().join(app_lock::APP_LOCK_FILENAME);
-    let _app_lock_guard =
-        app_lock::acquire(&lock_path, &project_root).map_err(|err| match err {
-            app_lock::AcquireError::Io(io_err) => io_err,
-            other => anyhow::Error::new(other),
-        })?;
+    let app_lock_guard = app_lock::acquire(&lock_path, &project_root).map_err(|err| match err {
+        app_lock::AcquireError::Io(io_err) => io_err,
+        other => anyhow::Error::new(other),
+    })?;
     let mut terminal_guard = TerminalGuard::start()?;
     // When running inside tmux, label the active window with the working
     // directory so an operator with several codexize panes can tell them
@@ -316,9 +312,14 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
     }
     let mut state = state::SessionState::load(&session_id)?;
     let _ = state::resume_session(&mut state);
-    let mut app = app::App::new_with_startup_origin_and_config(state, startup_origin, config);
+    let mut shell = app_shell::AppShell::new_with_app_lock(
+        state,
+        startup_origin,
+        config,
+        Some(app_lock_guard),
+    )?;
     let mut terminal = terminal_guard.into_terminal();
-    let result = app_runtime::run_terminal_app(&mut app, &mut terminal);
+    let result = shell.run_focused_terminal_app(&mut terminal);
     tui::stop(&mut terminal)?;
     result
 }

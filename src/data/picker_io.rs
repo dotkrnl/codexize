@@ -1,10 +1,34 @@
 use crate::{
     picker::SessionEntry,
-    state::{self, SessionState},
+    state::{self, Phase, SessionState},
 };
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
+
+/// Scan non-archived sessions and return them sorted by session-id creation
+/// order (ascending). The session-id timestamp format makes this a simple
+/// lexicographic sort.
+pub fn scan_sessions_by_creation_order(sessions_dir: &Path) -> Result<Vec<SessionEntry>> {
+    let mut entries = scan_sessions(sessions_dir)?;
+    entries.retain(|e| !e.archived);
+    entries.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+    Ok(entries)
+}
+
+/// Compute the "newest earlier Done baseline" for `session_id` from a list of
+/// sessions sorted by creation order.
+///
+/// Definition (spec § Data model / Session fields): the newest non-archived
+/// session whose session id sorts earlier than `session_id` and whose phase is
+/// `Done`.
+pub fn newest_earlier_done_baseline(session_id: &str, sessions: &[SessionEntry]) -> Option<String> {
+    sessions
+        .iter()
+        .filter(|e| e.session_id.as_str() < session_id && e.current_phase == Phase::Done)
+        .map(|e| e.session_id.clone())
+        .next_back()
+}
 pub fn scan_sessions(sessions_dir: &Path) -> Result<Vec<SessionEntry>> {
     if !sessions_dir.exists() {
         fs::create_dir_all(sessions_dir)?;

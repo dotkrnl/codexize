@@ -525,6 +525,13 @@ pub fn create_session(
     let session_id = generate_session_id();
     let mut state = SessionState::new(session_id.clone());
     session_state::prepare_new_session_for_brainstorm(&mut state, idea, modes);
+    // Compute the newest earlier Done baseline and persist it with the new
+    // session so the scheduler can gate repo-state updates later.
+    let sessions_root = session_state::codexize_root().join("sessions");
+    if let Ok(sessions) = crate::data::picker_io::scan_sessions_by_creation_order(&sessions_root) {
+        state.planned_after_session_id =
+            crate::data::picker_io::newest_earlier_done_baseline(&session_id, &sessions);
+    }
     state.save()?;
     let memory_root = match memory_root_override {
         Some(root) => root.to_path_buf(),

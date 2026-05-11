@@ -417,7 +417,12 @@ impl App {
                     let _ = self.transition_to_phase(target);
                 }
             }
-            Phase::IdeaInput | Phase::BlockedNeedsUser | Phase::Done => {}
+            Phase::IdeaInput
+            | Phase::BlockedNeedsUser
+            | Phase::WaitingToImplement
+            | Phase::RepoStateUpdateRunning
+            | Phase::Done
+            | Phase::Cancelled => {}
         }
         self.clear_agent_error();
         self.run_launched = false;

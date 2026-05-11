@@ -36,6 +36,10 @@ pub enum Phase {
     PlanReviewRunning,
     #[strum(to_string = "Plan Review")]
     PlanReviewPaused,
+    #[strum(to_string = "Waiting to implement")]
+    WaitingToImplement,
+    #[strum(to_string = "Updating plan")]
+    RepoStateUpdateRunning,
     #[strum(to_string = "Sharding")]
     ShardingRunning,
     #[strum(to_string = "Skip Confirmation")]
@@ -83,6 +87,8 @@ pub enum Phase {
     Simplification(u32),
     #[strum(to_string = "Done")]
     Done,
+    #[strum(to_string = "Cancelled")]
+    Cancelled,
     #[strum(to_string = "Blocked")]
     BlockedNeedsUser,
 }
@@ -113,6 +119,8 @@ impl Phase {
             Phase::SpecReviewRunning | Phase::SpecReviewPaused => "Spec Review".to_string(),
             Phase::PlanningRunning => "Planning".to_string(),
             Phase::PlanReviewRunning | Phase::PlanReviewPaused => "Plan Review".to_string(),
+            Phase::WaitingToImplement => "Waiting to implement".to_string(),
+            Phase::RepoStateUpdateRunning => "Updating plan".to_string(),
             Phase::ShardingRunning => "Sharding".to_string(),
             Phase::ImplementationRound(r) => format!("Round {r} Coder"),
             Phase::ReviewRound(r) => format!("Round {r} Reviewer"),
@@ -120,6 +128,7 @@ impl Phase {
             Phase::BuilderRecoveryPlanReview(_) => "Recovery Plan Review".to_string(),
             Phase::BuilderRecoverySharding(_) => "Recovery Sharding".to_string(),
             Phase::Done => "Done".to_string(),
+            Phase::Cancelled => "Cancelled".to_string(),
             Phase::BlockedNeedsUser => "Blocked".to_string(),
             Phase::SkipToImplPending => "Skip Confirmation".to_string(),
             Phase::GitGuardPending => "Guard Decision".to_string(),

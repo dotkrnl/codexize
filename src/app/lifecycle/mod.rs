@@ -461,12 +461,15 @@ impl App {
             Phase::IdeaInput
             | Phase::Done
             | Phase::BlockedNeedsUser
+            | Phase::WaitingToImplement
+            | Phase::RepoStateUpdateRunning
             | Phase::SkipToImplPending
             | Phase::GitGuardPending
             | Phase::FinalValidation(_)
             | Phase::DreamingPending
             | Phase::Dreaming(_)
-            | Phase::Simplification(_) => {
+            | Phase::Simplification(_)
+            | Phase::Cancelled => {
                 return None;
             }
         };

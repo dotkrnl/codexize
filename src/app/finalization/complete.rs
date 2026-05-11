@@ -31,11 +31,14 @@ impl App {
             Phase::IdeaInput
             | Phase::SpecReviewPaused
             | Phase::PlanReviewPaused
+            | Phase::WaitingToImplement
+            | Phase::RepoStateUpdateRunning
             | Phase::BlockedNeedsUser
             | Phase::SkipToImplPending
             | Phase::GitGuardPending
             | Phase::DreamingPending
-            | Phase::Done => {}
+            | Phase::Done
+            | Phase::Cancelled => {}
         }
         Ok(())
     }

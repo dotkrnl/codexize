@@ -166,37 +166,46 @@ pub fn load(dir: &Path) -> LoadedCache {
     }
 }
 pub fn save_dashboard(dir: &Path, entries: &[DashboardEntry]) -> Result<()> {
-    let lock = dir.join("models.json.lock");
-    cache_lock::with_lock(&lock, || {
-        let mut file = load_raw_or_default(dir);
-        file.dashboard = Some(Section {
-            fetched_at: now_secs(),
-            data: entries.to_vec(),
-        });
-        atomic_write(dir, &file)
-    })
+    cache_lock::with_lock(&lock_path(dir), || save_dashboard_unlocked(dir, entries))
 }
 pub fn save_quotas(dir: &Path, payload: &QuotaPayload) -> Result<()> {
-    let lock = dir.join("models.json.lock");
-    cache_lock::with_lock(&lock, || {
-        let mut file = load_raw_or_default(dir);
-        file.quotas = Some(Section {
-            fetched_at: now_secs(),
-            data: payload.clone(),
-        });
-        atomic_write(dir, &file)
-    })
+    cache_lock::with_lock(&lock_path(dir), || save_quotas_unlocked(dir, payload))
 }
 pub fn save_quota_resets(dir: &Path, payload: &ResetPayload) -> Result<()> {
-    let lock = dir.join("models.json.lock");
-    cache_lock::with_lock(&lock, || {
-        let mut file = load_raw_or_default(dir);
-        file.quota_resets = Some(Section {
-            fetched_at: now_secs(),
-            data: payload.clone(),
-        });
-        atomic_write(dir, &file)
-    })
+    cache_lock::with_lock(&lock_path(dir), || save_quota_resets_unlocked(dir, payload))
+}
+
+/// Path to the on-disk lock that serializes writers to `models.json`.
+pub fn lock_path(dir: &Path) -> std::path::PathBuf {
+    dir.join("models.json.lock")
+}
+
+/// Variants used by the publisher path, which has already acquired the lock
+/// via `cache_lock::try_acquire` and would deadlock if the save routines
+/// reacquired it. Callers MUST hold the cache lock for `dir`.
+pub fn save_dashboard_unlocked(dir: &Path, entries: &[DashboardEntry]) -> Result<()> {
+    let mut file = load_raw_or_default(dir);
+    file.dashboard = Some(Section {
+        fetched_at: now_secs(),
+        data: entries.to_vec(),
+    });
+    atomic_write(dir, &file)
+}
+pub fn save_quotas_unlocked(dir: &Path, payload: &QuotaPayload) -> Result<()> {
+    let mut file = load_raw_or_default(dir);
+    file.quotas = Some(Section {
+        fetched_at: now_secs(),
+        data: payload.clone(),
+    });
+    atomic_write(dir, &file)
+}
+pub fn save_quota_resets_unlocked(dir: &Path, payload: &ResetPayload) -> Result<()> {
+    let mut file = load_raw_or_default(dir);
+    file.quota_resets = Some(Section {
+        fetched_at: now_secs(),
+        data: payload.clone(),
+    });
+    atomic_write(dir, &file)
 }
 // ---------------------------------------------------------------------------
 // Internal helpers

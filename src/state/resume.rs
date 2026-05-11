@@ -16,6 +16,9 @@ pub fn can_resume(state: &SessionState) -> Result<(), ResumeError> {
         Phase::Done => Err(ResumeError::InvalidState(
             "Cannot resume a completed session".to_string(),
         )),
+        Phase::Cancelled => Err(ResumeError::InvalidState(
+            "Cannot resume a cancelled session".to_string(),
+        )),
         Phase::IdeaInput => Err(ResumeError::InvalidState(
             "No work to resume from IdeaInput phase".to_string(),
         )),

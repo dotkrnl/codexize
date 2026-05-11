@@ -8,40 +8,57 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
     state
         .log_event("resuming session")
         .map_err(|e| ResumeError::InvalidState(format!("Failed to log resume event: {e}")))?;
-    if state.current_phase == Phase::SkipToImplPending {
-        let path = session_dir(&state.session_id)
-            .join("artifacts")
-            .join(ArtifactKind::SkipToImpl.filename());
-        match SkipToImplProposal::read_from_path(&path) {
-            Ok((Some(p), warnings)) if p.proposed => {
-                for w in warnings {
-                    let _ = state.log_event(format!("resume: skip_proposal.toml: {w}"));
+    match state.current_phase {
+        Phase::RepoStateUpdateRunning => {
+            // Not safely resumable: partial writes to spec.md/plan.md may have
+            // occurred. Revert to WaitingToImplement so the scheduler restarts
+            // the update from current inputs on the next eligible tick.
+            let _ =
+                state.log_event("resume: reverting RepoStateUpdateRunning to WaitingToImplement");
+            state.current_phase = Phase::WaitingToImplement;
+            let _ = state.save();
+        }
+        Phase::WaitingToImplement => {
+            // Idle phase; leave as-is and let the scheduler re-evaluate on the
+            // next tick.
+            let _ = state.log_event("resume: WaitingToImplement left idle");
+        }
+        Phase::SkipToImplPending => {
+            let path = session_dir(&state.session_id)
+                .join("artifacts")
+                .join(ArtifactKind::SkipToImpl.filename());
+            match SkipToImplProposal::read_from_path(&path) {
+                Ok((Some(p), warnings)) if p.proposed => {
+                    for w in warnings {
+                        let _ = state.log_event(format!("resume: skip_proposal.toml: {w}"));
+                    }
+                    state.skip_to_impl_rationale = Some(p.rationale);
+                    state.skip_to_impl_kind = Some(p.status);
                 }
-                state.skip_to_impl_rationale = Some(p.rationale);
-                state.skip_to_impl_kind = Some(p.status);
-            }
-            Ok((_, warnings)) => {
-                for w in warnings {
-                    let _ = state.log_event(format!("resume: skip_proposal.toml: {w}"));
+                Ok((_, warnings)) => {
+                    for w in warnings {
+                        let _ = state.log_event(format!("resume: skip_proposal.toml: {w}"));
+                    }
+                    let _ = state.log_event(
+                        "resume: skip_to_impl artifact missing or not proposed, falling through to SpecReviewRunning",
+                    );
+                    state.skip_to_impl_rationale = None;
+                    state.skip_to_impl_kind = None;
+                    state.current_phase = Phase::SpecReviewRunning;
+                    let _ = state.save();
                 }
-                let _ = state.log_event(
-                    "resume: skip_to_impl artifact missing or not proposed, falling through to SpecReviewRunning",
-                );
-                state.skip_to_impl_rationale = None;
-                state.skip_to_impl_kind = None;
-                state.current_phase = Phase::SpecReviewRunning;
-                let _ = state.save();
-            }
-            Err(err) => {
-                let _ = state.log_event(format!(
-                    "resume: skip_to_impl artifact malformed, falling through to SpecReviewRunning: {err:#}"
-                ));
-                state.skip_to_impl_rationale = None;
-                state.skip_to_impl_kind = None;
-                state.current_phase = Phase::SpecReviewRunning;
-                let _ = state.save();
+                Err(err) => {
+                    let _ = state.log_event(format!(
+                        "resume: skip_to_impl artifact malformed, falling through to SpecReviewRunning: {err:#}"
+                    ));
+                    state.skip_to_impl_rationale = None;
+                    state.skip_to_impl_kind = None;
+                    state.current_phase = Phase::SpecReviewRunning;
+                    let _ = state.save();
+                }
             }
         }
+        _ => {}
     }
     Ok(())
 }

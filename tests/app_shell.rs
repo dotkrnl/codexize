@@ -1,5 +1,6 @@
 use codexize::app::AppStartupOrigin;
-use codexize::app_shell::{AppShell, ShellEvent};
+use codexize::app_runtime::{AppCommand, UiKey, UiKeyCode};
+use codexize::app_shell::{AppShell, ShellCommandOutcome, ShellEvent, ShellFocus};
 use codexize::data::config::Config;
 use codexize::state::{Phase, SessionState};
 use serial_test::serial;
@@ -42,6 +43,14 @@ fn shell_for(initial: SessionState) -> AppShell {
         Arc::new(Config::baked_defaults()),
     )
     .expect("shell")
+}
+
+fn key(code: UiKeyCode) -> AppCommand {
+    AppCommand::KeyPress(UiKey {
+        code,
+        ctrl: false,
+        alt: false,
+    })
 }
 
 #[test]
@@ -201,5 +210,141 @@ fn sidebar_lists_non_archived_non_cancelled_sessions_in_creation_order() {
                 "20260511-093000-000000001",
             ]
         );
+    });
+}
+
+#[test]
+#[serial]
+fn sessions_palette_command_toggles_only_sidebar_and_returns_focus_to_workspace() {
+    with_temp_root(|| {
+        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+        let mut shell = shell_for(initial);
+
+        assert_eq!(
+            shell
+                .execute_shell_palette_command("sessions")
+                .expect("open"),
+            ShellCommandOutcome::Consumed
+        );
+        shell.focus_sidebar();
+        assert!(shell.sidebar_view().visible);
+        assert_eq!(shell.sidebar_view().focus, ShellFocus::Sidebar);
+        assert_eq!(shell.focused_session_id(), "20260511-090000-000000001");
+        assert_eq!(shell.open_workspace_count(), 1);
+
+        assert_eq!(
+            shell
+                .execute_shell_palette_command("sessions")
+                .expect("hide"),
+            ShellCommandOutcome::Consumed
+        );
+        assert!(!shell.sidebar_view().visible);
+        assert_eq!(shell.sidebar_view().focus, ShellFocus::Workspace);
+        assert_eq!(shell.focused_session_id(), "20260511-090000-000000001");
+        assert_eq!(shell.open_workspace_count(), 1);
+    });
+}
+
+#[test]
+#[serial]
+fn sidebar_focus_switching_is_active_only_while_sidebar_visible() {
+    with_temp_root(|| {
+        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+        let mut shell = shell_for(initial);
+
+        assert_eq!(
+            shell
+                .handle_shell_command(key(UiKeyCode::Right))
+                .expect("right"),
+            ShellCommandOutcome::Unhandled
+        );
+        assert_eq!(shell.sidebar_view().focus, ShellFocus::Workspace);
+
+        shell.toggle_sessions_sidebar().expect("toggle");
+        assert_eq!(
+            shell
+                .handle_shell_command(key(UiKeyCode::Right))
+                .expect("right"),
+            ShellCommandOutcome::Consumed
+        );
+        assert_eq!(shell.sidebar_view().focus, ShellFocus::Sidebar);
+
+        assert_eq!(
+            shell
+                .handle_shell_command(key(UiKeyCode::Left))
+                .expect("left"),
+            ShellCommandOutcome::Consumed
+        );
+        assert_eq!(shell.sidebar_view().focus, ShellFocus::Workspace);
+    });
+}
+
+#[test]
+#[serial]
+fn sidebar_keyboard_navigation_selects_and_opens_without_eager_loading() {
+    with_temp_root(|| {
+        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+        save_session("20260511-091000-000000001", Phase::BlockedNeedsUser);
+        save_session("20260511-092000-000000001", Phase::Done);
+        let mut shell = shell_for(initial);
+
+        shell.toggle_sessions_sidebar().expect("toggle");
+        shell.focus_sidebar();
+        assert_eq!(shell.sidebar_view().rows.len(), 3);
+        assert_eq!(shell.open_workspace_count(), 1);
+
+        shell
+            .handle_shell_command(key(UiKeyCode::Down))
+            .expect("down");
+        assert_eq!(shell.sidebar_view().selected_index, 1);
+        assert_eq!(shell.open_workspace_count(), 1);
+
+        shell.handle_shell_command(key(UiKeyCode::Up)).expect("up");
+        assert_eq!(shell.sidebar_view().selected_index, 0);
+
+        shell
+            .handle_shell_command(key(UiKeyCode::Down))
+            .expect("down");
+        shell
+            .handle_shell_command(key(UiKeyCode::Enter))
+            .expect("enter");
+
+        assert_eq!(shell.focused_session_id(), "20260511-091000-000000001");
+        assert_eq!(shell.open_workspace_count(), 2);
+        assert_eq!(shell.sidebar_view().focus, ShellFocus::Workspace);
+    });
+}
+
+#[test]
+#[serial]
+fn esc_from_sidebar_focus_hides_sidebar_after_modal_gets_first_chance() {
+    with_temp_root(|| {
+        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+        let mut shell = shell_for(initial);
+
+        shell.toggle_sessions_sidebar().expect("toggle");
+        shell.focus_sidebar();
+        shell
+            .focused_workspace_mut()
+            .expect("workspace")
+            .set_modal_probe_open(true);
+
+        shell
+            .handle_shell_command(key(UiKeyCode::Esc))
+            .expect("esc");
+        assert!(shell.sidebar_view().visible);
+        assert_eq!(shell.sidebar_view().focus, ShellFocus::Sidebar);
+        assert!(
+            !shell
+                .workspace("20260511-090000-000000001")
+                .expect("workspace")
+                .modal_probe_open()
+        );
+
+        shell
+            .handle_shell_command(key(UiKeyCode::Esc))
+            .expect("esc");
+        assert!(!shell.sidebar_view().visible);
+        assert_eq!(shell.sidebar_view().focus, ShellFocus::Workspace);
     });
 }

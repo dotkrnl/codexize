@@ -7,6 +7,7 @@
 //! workspaces through an in-process event path.
 
 use crate::app::{App, AppStartupOrigin};
+use crate::app_runtime::{AppCommand, UiKeyCode};
 use crate::data::app_lock::AppLockGuard;
 use crate::data::config::Config;
 use crate::state::{Message, Phase, RunStatus, SessionState};
@@ -20,6 +21,12 @@ use tokio::sync::broadcast;
 pub enum ShellFocus {
     Workspace,
     Sidebar,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellCommandOutcome {
+    Consumed,
+    Unhandled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,6 +102,9 @@ pub struct SessionWorkspace {
     viewport_top: usize,
     split_run_id: Option<u64>,
     live_summary_cached_text: String,
+    // Until the full focus-local App modal stack is embedded in SessionWorkspace,
+    // keep the shell-level Esc precedence explicit and testable.
+    modal_probe_open: bool,
 }
 
 impl SessionWorkspace {
@@ -115,6 +125,7 @@ impl SessionWorkspace {
             viewport_top: 0,
             split_run_id: None,
             live_summary_cached_text: String::new(),
+            modal_probe_open: false,
         }
     }
 
@@ -156,6 +167,22 @@ impl SessionWorkspace {
             self.viewport_top,
             self.split_run_id,
         )
+    }
+
+    pub fn set_modal_probe_open(&mut self, open: bool) {
+        self.modal_probe_open = open;
+    }
+
+    pub fn modal_probe_open(&self) -> bool {
+        self.modal_probe_open
+    }
+
+    fn consume_modal_escape_if_open(&mut self) -> bool {
+        if self.modal_probe_open {
+            self.modal_probe_open = false;
+            return true;
+        }
+        false
     }
 
     fn replace_state(&mut self, state: SessionState) {
@@ -305,6 +332,59 @@ impl AppShell {
         Ok(())
     }
 
+    pub fn execute_shell_palette_command(&mut self, name: &str) -> Result<ShellCommandOutcome> {
+        match name {
+            "sessions" => {
+                self.toggle_sessions_sidebar()?;
+                Ok(ShellCommandOutcome::Consumed)
+            }
+            _ => Ok(ShellCommandOutcome::Unhandled),
+        }
+    }
+
+    pub fn handle_shell_command(&mut self, command: AppCommand) -> Result<ShellCommandOutcome> {
+        let AppCommand::KeyPress(key) = command else {
+            return Ok(ShellCommandOutcome::Unhandled);
+        };
+        if key.ctrl || key.alt {
+            return Ok(ShellCommandOutcome::Unhandled);
+        }
+        match key.code {
+            UiKeyCode::Left | UiKeyCode::Right if self.sidebar_visible => {
+                self.toggle_sidebar_focus();
+                Ok(ShellCommandOutcome::Consumed)
+            }
+            UiKeyCode::Up if self.sidebar_visible && self.sidebar_focus == ShellFocus::Sidebar => {
+                self.move_sidebar_selection(-1);
+                Ok(ShellCommandOutcome::Consumed)
+            }
+            UiKeyCode::Down
+                if self.sidebar_visible && self.sidebar_focus == ShellFocus::Sidebar =>
+            {
+                self.move_sidebar_selection(1);
+                Ok(ShellCommandOutcome::Consumed)
+            }
+            UiKeyCode::Enter
+                if self.sidebar_visible && self.sidebar_focus == ShellFocus::Sidebar =>
+            {
+                self.open_selected_sidebar_session()?;
+                Ok(ShellCommandOutcome::Consumed)
+            }
+            UiKeyCode::Esc if self.sidebar_focus == ShellFocus::Sidebar => {
+                if self
+                    .focused_workspace_mut()
+                    .is_some_and(SessionWorkspace::consume_modal_escape_if_open)
+                {
+                    return Ok(ShellCommandOutcome::Consumed);
+                }
+                self.sidebar_visible = false;
+                self.sidebar_focus = ShellFocus::Workspace;
+                Ok(ShellCommandOutcome::Consumed)
+            }
+            _ => Ok(ShellCommandOutcome::Unhandled),
+        }
+    }
+
     pub fn focus_sidebar(&mut self) {
         if self.sidebar_visible {
             self.sidebar_focus = ShellFocus::Sidebar;
@@ -313,6 +393,29 @@ impl AppShell {
 
     pub fn focus_workspace(&mut self) {
         self.sidebar_focus = ShellFocus::Workspace;
+    }
+
+    fn toggle_sidebar_focus(&mut self) {
+        self.sidebar_focus = match self.sidebar_focus {
+            ShellFocus::Workspace => ShellFocus::Sidebar,
+            ShellFocus::Sidebar => ShellFocus::Workspace,
+        };
+    }
+
+    fn move_sidebar_selection(&mut self, delta: isize) {
+        if self.sidebar_rows.is_empty() {
+            self.sidebar_selected_index = 0;
+            return;
+        }
+        let max = self.sidebar_rows.len() - 1;
+        self.sidebar_selected_index = if delta.is_negative() {
+            self.sidebar_selected_index
+                .saturating_sub(delta.unsigned_abs())
+        } else {
+            self.sidebar_selected_index
+                .saturating_add(delta as usize)
+                .min(max)
+        };
     }
 
     pub fn select_sidebar_session(&mut self, session_id: &str) -> Result<()> {

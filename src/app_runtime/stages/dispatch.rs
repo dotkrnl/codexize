@@ -71,7 +71,17 @@ impl App {
             RetryLaunch::SpecReview => self.launch_spec_review(),
             RetryLaunch::Planning => self.launch_planning(),
             RetryLaunch::PlanReview => self.launch_plan_review(),
-            RetryLaunch::Sharding => self.launch_sharding(),
+            RetryLaunch::Sharding => {
+                // A retry of sharding must land in WaitingToImplement so the
+                // scheduler re-verifies the repo-state baseline before any
+                // sharding launch — spec §Data model line 96.
+                self.clear_agent_error();
+                self.current_run_id = None;
+                self.run_launched = false;
+                self.live_summary_cached_text.clear();
+                self.live_summary_cached_mtime = None;
+                let _ = self.transition_to_phase(Phase::WaitingToImplement);
+            }
             RetryLaunch::Recovery => self.launch_recovery(),
             RetryLaunch::RecoveryPlanReview => self.launch_recovery_plan_review(),
             RetryLaunch::RecoverySharding => self.launch_recovery_sharding(),
@@ -93,7 +103,17 @@ impl App {
             StageId::SpecReview => self.launch_spec_review(),
             StageId::Planning => self.launch_planning(),
             StageId::PlanReview => self.launch_plan_review(),
-            StageId::Sharding => self.launch_sharding(),
+            StageId::Sharding => {
+                // Stage-error modal retry for sharding must route through
+                // WaitingToImplement so the scheduler re-verifies baseline
+                // state before any sharding launch — spec §Data model line 96.
+                self.clear_agent_error();
+                self.current_run_id = None;
+                self.run_launched = false;
+                self.live_summary_cached_text.clear();
+                self.live_summary_cached_mtime = None;
+                let _ = self.transition_to_phase(Phase::WaitingToImplement);
+            }
             StageId::Implementation => self.launch_coder(),
             StageId::Review => self.launch_reviewer(),
             StageId::FinalValidation => self.launch_final_validation(),

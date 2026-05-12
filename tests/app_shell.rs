@@ -342,3 +342,112 @@ fn esc_from_sidebar_focus_hides_sidebar_after_modal_gets_first_chance() {
         assert_eq!(shell.sidebar_view().focus, ShellFocus::Workspace);
     });
 }
+
+#[test]
+#[serial]
+fn sidebar_shows_every_non_archived_non_cancelled_phase() {
+    // AC-8 / spec §"Sidebar list": the sidebar must list non-archived sessions
+    // only and show enough state to distinguish focused, open, waiting,
+    // running, blocked, done, and cancelled rows. Cancelled sessions are
+    // excluded. Verify that every non-archived, non-cancelled phase appears.
+    with_temp_root(|| {
+        let phases: Vec<Phase> = vec![
+            Phase::IdeaInput,
+            Phase::BrainstormRunning,
+            Phase::SpecReviewRunning,
+            Phase::SpecReviewPaused,
+            Phase::PlanningRunning,
+            Phase::PlanReviewRunning,
+            Phase::PlanReviewPaused,
+            Phase::WaitingToImplement,
+            Phase::RepoStateUpdateRunning,
+            Phase::ShardingRunning,
+            Phase::ImplementationRound(1),
+            Phase::ReviewRound(1),
+            Phase::BuilderRecovery(1),
+            Phase::BuilderRecoveryPlanReview(1),
+            Phase::BuilderRecoverySharding(1),
+            Phase::Simplification(1),
+            Phase::FinalValidation(1),
+            Phase::DreamingPending,
+            Phase::Dreaming(1),
+            Phase::BlockedNeedsUser,
+            Phase::Done,
+        ];
+
+        for (i, phase) in phases.iter().enumerate() {
+            let id = format!("20260511-{:02}0000-000000001", i);
+            save_session(&id, phase.clone());
+        }
+
+        let initial = session("20260511-000000-000000001", Phase::WaitingToImplement);
+        let mut shell = shell_for(initial);
+        shell.toggle_sessions_sidebar().expect("toggle");
+        let view = shell.sidebar_view();
+
+        let row_phases: Vec<Phase> = view.rows.iter().map(|r| r.phase.clone()).collect();
+        for phase in &phases {
+            assert!(row_phases.contains(phase), "sidebar must include {phase:?}");
+        }
+        // Cancelled must NOT appear.
+        assert!(
+            !row_phases.contains(&Phase::Cancelled),
+            "sidebar must exclude Cancelled"
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn background_run_continues_when_focus_switches_to_another_session() {
+    // AC-8 / spec §"Focused vs running": a background implementation run
+    // continues when the operator focuses another session. The running
+    // session's shell-level tracking must be preserved while focus changes.
+    with_temp_root(|| {
+        let running = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+        let mut shell = shell_for(running);
+
+        // Simulate a background run starting on the first session.
+        shell.apply_event(ShellEvent::RunStarted {
+            session_id: "20260511-090000-000000001".into(),
+            run_id: 42,
+        });
+        assert_eq!(
+            shell.running_session_id(),
+            Some("20260511-090000-000000001")
+        );
+
+        // Focus the second session — the background run must continue.
+        shell
+            .focus_session("20260511-091000-000000001")
+            .expect("focus");
+        assert_eq!(shell.focused_session_id(), "20260511-091000-000000001");
+        assert_eq!(
+            shell.running_session_id(),
+            Some("20260511-090000-000000001"),
+            "running session must not change on focus switch"
+        );
+
+        // The sidebar must still mark the running session correctly.
+        shell.toggle_sessions_sidebar().expect("toggle");
+        let rows = shell.sidebar_view().rows;
+        let running_row = rows
+            .iter()
+            .find(|r| r.session_id == "20260511-090000-000000001")
+            .expect("running session in sidebar");
+        assert!(
+            running_row.running,
+            "running session must have running indicator"
+        );
+        let focused_row = rows
+            .iter()
+            .find(|r| r.session_id == "20260511-091000-000000001")
+            .expect("focused session in sidebar");
+        assert!(
+            focused_row.focused,
+            "focused session must have focused indicator"
+        );
+        assert!(!focused_row.running, "focused session must not be running");
+    });
+}

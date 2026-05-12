@@ -3,7 +3,7 @@ agent_runs = [
 ]
 archived = false
 current_phase = "IdeaInput"
-schema_version = 3
+schema_version = 4
 session_id = "<SESSION_ID>"
 show_noninteractive_texts = false
 show_thinking_texts = false

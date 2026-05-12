@@ -74,14 +74,11 @@ const TRANSITION_EDGES: &[TransitionEdge] = &[
     TransitionEdge::new(P::SkipToImplPending, P::BrainstormRunning),
     TransitionEdge::new(P::PlanningRunning, P::PlanReviewRunning),
     TransitionEdge::new(P::PlanningRunning, P::WaitingToImplement),
-
     TransitionEdge::new(P::PlanningRunning, P::BlockedNeedsUser),
     TransitionEdge::new(P::PlanReviewRunning, P::WaitingToImplement),
-
     TransitionEdge::new(P::PlanReviewRunning, P::BlockedNeedsUser),
     TransitionEdge::new(P::PlanReviewPaused, P::PlanReviewRunning),
     TransitionEdge::new(P::PlanReviewPaused, P::WaitingToImplement),
-
     TransitionEdge::new(P::PlanReviewPaused, P::BlockedNeedsUser),
     TransitionEdge::new(P::PlanReviewPaused, P::Cancelled),
     TransitionEdge::new(P::BlockedNeedsUser, P::PlanReviewRunning),
@@ -96,6 +93,7 @@ const TRANSITION_EDGES: &[TransitionEdge] = &[
         P::ImplementationRound,
         RoundGuard::ToRound(1),
     ),
+    TransitionEdge::new(P::ShardingRunning, P::WaitingToImplement),
     TransitionEdge::new(P::ShardingRunning, P::BlockedNeedsUser),
     TransitionEdge::guarded(P::ImplementationRound, P::ReviewRound, RoundGuard::Same),
     TransitionEdge::guarded(P::ImplementationRound, P::BuilderRecovery, RoundGuard::Same),
@@ -140,7 +138,7 @@ const TRANSITION_EDGES: &[TransitionEdge] = &[
     TransitionEdge::new(P::BlockedNeedsUser, P::BrainstormRunning),
     TransitionEdge::new(P::BlockedNeedsUser, P::SpecReviewRunning),
     TransitionEdge::new(P::BlockedNeedsUser, P::PlanningRunning),
-    TransitionEdge::new(P::BlockedNeedsUser, P::ShardingRunning),
+    TransitionEdge::new(P::BlockedNeedsUser, P::WaitingToImplement),
     TransitionEdge::new(P::BlockedNeedsUser, P::ImplementationRound),
     TransitionEdge::new(P::BlockedNeedsUser, P::ReviewRound),
     TransitionEdge::new(P::BlockedNeedsUser, P::BuilderRecovery),
@@ -210,6 +208,11 @@ const TRANSITION_EDGES: &[TransitionEdge] = &[
     TransitionEdge::guarded(
         P::ImplementationRound,
         P::BrainstormRunning,
+        RoundGuard::FromAtMost(1),
+    ),
+    TransitionEdge::guarded(
+        P::ImplementationRound,
+        P::WaitingToImplement,
         RoundGuard::FromAtMost(1),
     ),
     TransitionEdge::guarded(

@@ -11,7 +11,9 @@ pub fn retry_phase_for_stage(stage: &str) -> Option<Phase> {
         "spec-review" => Some(Phase::SpecReviewRunning),
         "planning" => Some(Phase::PlanningRunning),
         "plan-review" => Some(Phase::PlanReviewRunning),
-        "sharding" => Some(Phase::ShardingRunning),
+        // Spec §Data model line 96: manual retry of sharding must pause in
+        // WaitingToImplement so the scheduler re-verifies baseline state.
+        "sharding" => Some(Phase::WaitingToImplement),
         _ => None,
     }
 }

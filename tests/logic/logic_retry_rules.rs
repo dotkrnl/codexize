@@ -12,6 +12,16 @@ fn retry_phase_for_stage_keeps_stage_to_phase_mapping_pure() {
 }
 
 #[test]
+fn retry_sharding_returns_waiting_to_implement_not_sharding_running() {
+    // Spec §Data model line 96: manual retry of sharding must pause in
+    // WaitingToImplement so the scheduler re-verifies baseline state.
+    assert_eq!(
+        retry_phase_for_stage("sharding"),
+        Some(Phase::WaitingToImplement)
+    );
+}
+
+#[test]
 fn retry_target_for_run_prefers_task_and_falls_back_to_stage() {
     let task_run = RunRecord {
         id: 7,

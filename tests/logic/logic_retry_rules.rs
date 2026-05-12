@@ -1,5 +1,5 @@
 use codexize::logic::pipeline::Phase;
-use codexize::logic::rules::{RetryTarget, retry_phase_for_stage, retry_target_for_run};
+use codexize::logic::rules::{RetryTarget, retry_phase_for_stage, retry_target_for_run, stage_str};
 use codexize::state::{RunRecord, RunStatus};
 
 #[test]
@@ -19,6 +19,19 @@ fn retry_sharding_returns_waiting_to_implement_not_sharding_running() {
         retry_phase_for_stage("sharding"),
         Some(Phase::WaitingToImplement)
     );
+}
+
+#[test]
+fn retry_repo_state_update_returns_repo_state_update_running() {
+    assert_eq!(
+        retry_phase_for_stage("repo-state-update"),
+        Some(Phase::RepoStateUpdateRunning)
+    );
+}
+
+#[test]
+fn stage_str_recognizes_repo_state_update() {
+    assert_eq!(stage_str("repo-state-update"), Some("repo-state-update"));
 }
 
 #[test]

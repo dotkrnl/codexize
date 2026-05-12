@@ -16,11 +16,41 @@ fn plan_review_forward_transitions() {
 }
 
 #[test]
+fn implementation_round_one_can_rewind_to_waiting_to_implement() {
+    // Spec §Data model line 96: go_back from ImplementationRound(1) must
+    // pause in WaitingToImplement so the scheduler re-verifies baseline.
+    assert!(Phase::ImplementationRound(1).can_transition_to(&Phase::WaitingToImplement));
+    assert!(!Phase::ImplementationRound(2).can_transition_to(&Phase::WaitingToImplement));
+}
+
+#[test]
+fn blocked_needs_user_can_transition_to_waiting_to_implement() {
+    // Manual retry of a sharding-stage task from BlockedNeedsUser must land
+    // in WaitingToImplement so the scheduler re-verifies baseline.
+    assert!(Phase::BlockedNeedsUser.can_transition_to(&Phase::WaitingToImplement));
+}
+
+#[test]
+fn sharding_running_can_transition_to_waiting_to_implement() {
+    // Stage-error modal retry for sharding must route back to
+    // WaitingToImplement so the scheduler re-verifies baseline.
+    assert!(Phase::ShardingRunning.can_transition_to(&Phase::WaitingToImplement));
+}
+
+#[test]
+fn blocked_needs_user_cannot_bypass_waiting_to_sharding() {
+    // The BlockedNeedsUser -> ShardingRunning backdoor must be closed;
+    // all sharding launches go through WaitingToImplement.
+    assert!(!Phase::BlockedNeedsUser.can_transition_to(&Phase::ShardingRunning));
+}
+
+#[test]
 fn plan_review_backward_transitions() {
     assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::PlanningRunning));
     assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::PlanReviewPaused));
     assert!(Phase::PlanReviewPaused.can_transition_to(&Phase::PlanningRunning));
     assert!(Phase::ShardingRunning.can_transition_to(&Phase::PlanReviewRunning));
+    assert!(Phase::ShardingRunning.can_transition_to(&Phase::WaitingToImplement));
 }
 
 #[test]

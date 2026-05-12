@@ -199,7 +199,11 @@ impl App {
             KeyCode::Char('y') | KeyCode::Enter => {
                 self.clear_agent_error();
                 self.queue_view_of_current_artifact("plan.md");
-                let _ = self.transition_to_phase(Phase::ShardingRunning);
+                // Spec §Data model line 96: approved plans pause in
+                // `WaitingToImplement` before sharding. The scheduler /
+                // repo-state-update dispatch out of `WaitingToImplement`
+                // owns the actual launch into `ShardingRunning`.
+                let _ = self.transition_to_phase(Phase::WaitingToImplement);
                 false
             }
             KeyCode::Char('n') => {

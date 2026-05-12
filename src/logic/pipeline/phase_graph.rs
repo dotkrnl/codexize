@@ -73,6 +73,7 @@ const TRANSITION_EDGES: &[TransitionEdge] = &[
     TransitionEdge::new(P::SkipToImplPending, P::Done),
     TransitionEdge::new(P::SkipToImplPending, P::BrainstormRunning),
     TransitionEdge::new(P::PlanningRunning, P::PlanReviewRunning),
+    TransitionEdge::new(P::PlanningRunning, P::WaitingToImplement),
     TransitionEdge::new(P::PlanningRunning, P::ShardingRunning),
     TransitionEdge::new(P::PlanningRunning, P::BlockedNeedsUser),
     TransitionEdge::new(P::PlanReviewRunning, P::WaitingToImplement),

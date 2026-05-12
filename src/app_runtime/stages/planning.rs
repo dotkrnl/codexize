@@ -159,7 +159,10 @@ impl App {
     /// Spec line 46 conjoins yolo plan-review skip with `artifacts/plan.md`
     /// existing. The successful-finalization context already implies the
     /// artifact, but the explicit guard protects against a planning agent
-    /// that reports success without writing the file.
+    /// that reports success without writing the file. The yolo skip lands
+    /// on `WaitingToImplement` — spec §Data model line 96 puts the queue
+    /// pause before sharding, so the scheduler/repo-state-update dispatch
+    /// (the only normal route into `ShardingRunning`) remains the sole gate.
     pub(crate) fn finalize_planning_success(
         &mut self,
         run: &crate::state::RunRecord,
@@ -171,7 +174,7 @@ impl App {
             .join("plan.md");
         if run.modes.yolo && Self::artifact_present(&plan_path) {
             self.log_yolo_auto_approved("plan_review_skipped");
-            self.transition_to_phase(Phase::ShardingRunning)?;
+            self.transition_to_phase(Phase::WaitingToImplement)?;
         } else {
             self.transition_to_phase(Phase::PlanReviewRunning)?;
         }

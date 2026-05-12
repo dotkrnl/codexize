@@ -149,7 +149,10 @@ impl App {
         }
         self.clear_agent_error();
         self.queue_view_of_current_artifact("plan.md");
-        let _ = self.transition_to_phase(Phase::ShardingRunning);
+        // Spec §Data model line 96: yolo auto-approval lands in
+        // `WaitingToImplement`; the queue scheduler then dispatches into
+        // sharding (directly or via repo-state update).
+        let _ = self.transition_to_phase(Phase::WaitingToImplement);
     }
     pub(crate) fn record_dirty_worktree_yolo_gate(&mut self, dirty: bool, modes: LaunchModes) {
         if dirty && modes.yolo {

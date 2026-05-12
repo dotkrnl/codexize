@@ -101,20 +101,17 @@ fn row_line(
     let indicators = format!("{}{}", focused_indicator, running_indicator);
     spans.push(Span::styled(indicators, Style::default().fg(Color::Cyan)));
 
-    // Session id (truncate to fit)
-    let id_budget = width.saturating_sub(8).max(4) as usize;
-    let id_text = if row.session_id.chars().count() > id_budget {
-        let truncated: String = row
-            .session_id
-            .chars()
-            .take(id_budget.saturating_sub(1))
-            .collect();
+    // Date + title (truncate to fit)
+    let label = format!("{} {}", row.date_label, row.title.trim());
+    let label_budget = width.saturating_sub(5).max(4) as usize;
+    let label_text = if label.chars().count() > label_budget {
+        let truncated: String = label.chars().take(label_budget.saturating_sub(1)).collect();
         format!("{}…", truncated)
     } else {
-        row.session_id.clone()
+        label
     };
     spans.push(Span::raw(" "));
-    spans.push(Span::styled(id_text, row_style(row)));
+    spans.push(Span::styled(label_text, row_style(row)));
 
     let mut line = Line::from(spans);
     if is_selected {

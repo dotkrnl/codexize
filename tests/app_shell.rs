@@ -217,6 +217,28 @@ fn sidebar_lists_non_archived_non_cancelled_sessions_in_creation_order() {
 
 #[test]
 #[serial]
+fn sidebar_rows_expose_mm_dd_title_labels() {
+    with_temp_root(|| {
+        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+        let mut titled = session("20260512-091000-000000001", Phase::Done);
+        titled.title = Some("Ship queued sharding".to_string());
+        titled.save().expect("save titled");
+        let mut shell = shell_for(initial);
+
+        shell.toggle_sessions_sidebar().expect("toggle");
+        let rows = shell.sidebar_view().rows;
+        let titled_row = rows
+            .iter()
+            .find(|row| row.session_id == "20260512-091000-000000001")
+            .expect("titled row");
+
+        assert_eq!(titled_row.date_label, "05/12");
+        assert_eq!(titled_row.title, "Ship queued sharding");
+    });
+}
+
+#[test]
+#[serial]
 fn sessions_palette_command_toggles_only_sidebar_and_returns_focus_to_workspace() {
     with_temp_root(|| {
         let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);

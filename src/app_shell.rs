@@ -33,6 +33,8 @@ pub enum ShellCommandOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SidebarRow {
     pub session_id: String,
+    pub date_label: String,
+    pub title: String,
     pub phase: Phase,
     pub focused: bool,
     pub open: bool,
@@ -642,6 +644,11 @@ impl AppShell {
     ) -> Result<ShellImplementationAction> {
         match &tick.implementation {
             ImplementationDecision::LaneOccupied { session_id, phase } => {
+                let _ = self.drive_scheduler_session(
+                    session_id,
+                    SchedulerDrive::AutoLaunch,
+                    focused_app,
+                )?;
                 Ok(ShellImplementationAction::LaneOccupied {
                     session_id: session_id.clone(),
                     phase: *phase,
@@ -771,6 +778,8 @@ impl AppShell {
                     focused: session_id == self.focused_session_id,
                     open: self.workspaces.contains_key(&session_id),
                     running: self.running_session_id.as_deref() == Some(session_id.as_str()),
+                    date_label: sidebar_date_label(&session_id),
+                    title: entry.idea_summary,
                     session_id,
                     phase: entry.current_phase,
                 }
@@ -780,6 +789,15 @@ impl AppShell {
             self.sidebar_selected_index = self.sidebar_rows.len().saturating_sub(1);
         }
         Ok(())
+    }
+}
+
+fn sidebar_date_label(session_id: &str) -> String {
+    let bytes = session_id.as_bytes();
+    if bytes.len() >= 8 && bytes[..8].iter().all(u8::is_ascii_digit) {
+        format!("{}/{}", &session_id[4..6], &session_id[6..8])
+    } else {
+        "--/--".to_string()
     }
 }
 
@@ -804,10 +822,18 @@ impl SchedulerDrive {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::{TestLaunchHarness, TestLaunchOutcome};
     use crate::app_runtime::{AppCommand, UiKey, UiKeyCode};
+    use crate::logic::selection::{
+        CachedModel, Candidate, CliKind, IpbrPhaseScores, ScoreSource, SubscriptionKind,
+    };
     use serial_test::serial;
+    use std::collections::VecDeque;
 
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
         let temp = tempfile::TempDir::new().expect("tempdir");
         let prev = std::env::var_os("CODEXIZE_ROOT");
         unsafe {
@@ -829,6 +855,42 @@ mod tests {
         state.current_phase = phase;
         state.save().expect("save session");
         state
+    }
+
+    fn cached_build_model() -> CachedModel {
+        let candidate = Candidate {
+            subscription: SubscriptionKind::Codex,
+            cli: CliKind::Codex,
+            launch_name: "test-build-model".to_string(),
+            quota_percent: Some(80),
+            quota_resets_at: None,
+            display_order: 0,
+            enabled: true,
+            free: false,
+            official: true,
+            quota_disabled: false,
+            cheap_eligible: true,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_mapping: crate::data::config::schema::EffortMapping::default(),
+            quota_failed: false,
+        };
+        CachedModel {
+            subscription: SubscriptionKind::Codex,
+            name: "test-build-model".to_string(),
+            ipbr_phase_scores: IpbrPhaseScores {
+                idea: Some(80.0),
+                planning: Some(80.0),
+                build: Some(80.0),
+                review: Some(80.0),
+            },
+            score_source: ScoreSource::Ipbr,
+            candidates: vec![candidate],
+            selected_candidate: Some(0),
+            quota_percent: Some(80),
+            quota_resets_at: None,
+            display_order: 0,
+        }
     }
 
     // Mirrors the swap point inside `run_focused_terminal_app`: when sidebar
@@ -895,6 +957,55 @@ mod tests {
                 .find(|r| r.session_id == "20260511-090000-000000001")
                 .expect("running session in sidebar");
             assert!(running_row.running);
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn scheduler_tick_auto_launches_idle_implementation_occupant() {
+        with_temp_root(|| {
+            let mut state = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            state.agent_runs.clear();
+            state.save().expect("save without runs");
+            let mut shell = AppShell::new(
+                state.clone(),
+                AppStartupOrigin::Default,
+                Arc::new(Config::baked_defaults()),
+            )
+            .expect("shell");
+            let mut app = crate::app::test_support::mk_app(state);
+            app.run_launched = false;
+            app.current_run_id = None;
+            app.models.push(cached_build_model());
+            app.test_launch_harness = Some(Arc::new(std::sync::Mutex::new(TestLaunchHarness {
+                outcomes: VecDeque::from([TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: None,
+                    launch_error: None,
+                }]),
+            })));
+
+            let tick = SchedulerTick {
+                planning: Vec::new(),
+                implementation: ImplementationDecision::LaneOccupied {
+                    session_id: "20260511-090000-000000001".to_string(),
+                    phase: Phase::ShardingRunning,
+                },
+                skipped_corrupt_later_sessions: Vec::new(),
+            };
+            let action = shell
+                .apply_implementation_decision(&tick, Some(&mut app))
+                .expect("apply");
+
+            assert!(matches!(
+                action,
+                ShellImplementationAction::LaneOccupied {
+                    session_id,
+                    phase: Phase::ShardingRunning,
+                } if session_id == "20260511-090000-000000001"
+            ));
+            assert!(app.run_launched, "idle sharding phase should launch");
+            assert_eq!(app.current_run_id, Some(1));
         });
     }
 }

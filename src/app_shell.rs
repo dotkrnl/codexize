@@ -810,7 +810,10 @@ enum SchedulerDrive {
 impl SchedulerDrive {
     fn apply(self, app: &mut App) {
         match self {
-            Self::AutoLaunch => app.maybe_auto_launch(),
+            Self::AutoLaunch => {
+                app.poll_agent_run();
+                app.maybe_auto_launch();
+            }
             Self::DispatchWaiting => {
                 app.dispatch_waiting_to_implement();
                 app.maybe_auto_launch();
@@ -891,6 +894,66 @@ mod tests {
             quota_resets_at: None,
             display_order: 0,
         }
+    }
+
+    fn running_sharding_run(id: u64) -> crate::state::RunRecord {
+        crate::state::RunRecord {
+            id,
+            stage: "sharding".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "test-model".to_string(),
+            subscription_label: "test-vendor".to_string(),
+            window_name: "[Sharding] test-model".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+            effort: crate::adapters::EffortLevel::Normal,
+            effort_mapping: crate::data::config::schema::EffortMapping::default(),
+            effort_eligible: false,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+            section_path: None,
+        }
+    }
+
+    fn write_finish_stamp(session_id: &str, run_key: &str) {
+        let stamp_path = crate::state::session_dir(session_id)
+            .join("artifacts")
+            .join("run-finish")
+            .join(format!("{run_key}.toml"));
+        let stamp = crate::runner::FinishStamp {
+            finished_at: chrono::Utc::now().to_rfc3339(),
+            exit_code: 0,
+            head_before: "test-base".to_string(),
+            head_after: "test-base".to_string(),
+            head_state: "stable".to_string(),
+            signal_received: String::new(),
+            working_tree_clean: true,
+        };
+        crate::runner::write_finish_stamp(&stamp_path, &stamp).expect("write finish stamp");
+    }
+
+    fn write_tasks(session_id: &str) {
+        let tasks_path = crate::state::session_dir(session_id)
+            .join("artifacts")
+            .join("tasks.toml");
+        std::fs::create_dir_all(tasks_path.parent().expect("tasks parent")).expect("mkdir tasks");
+        std::fs::write(
+            tasks_path,
+            r#"
+[[tasks]]
+id = 1
+title = "Build the feature"
+description = "Implement the requested behavior."
+test = "cargo test"
+estimated_tokens = 100
+"#,
+        )
+        .expect("write tasks");
     }
 
     // Mirrors the swap point inside `run_focused_terminal_app`: when sidebar
@@ -1006,6 +1069,40 @@ mod tests {
             ));
             assert!(app.run_launched, "idle sharding phase should launch");
             assert_eq!(app.current_run_id, Some(1));
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn scheduler_tick_finalizes_finished_background_sharding_run() {
+        with_temp_root(|| {
+            let focused = save_session("20260511-085000-000000001", Phase::Done);
+            let mut sharding = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            sharding.agent_runs.push(running_sharding_run(7));
+            sharding.save().expect("save running sharding");
+            write_tasks("20260511-090000-000000001");
+            write_finish_stamp("20260511-090000-000000001", "sharding-stage-r1-a1");
+
+            let mut shell = AppShell::new(
+                focused,
+                AppStartupOrigin::Default,
+                Arc::new(Config::baked_defaults()),
+            )
+            .expect("shell");
+
+            let report = shell.run_scheduler_tick().expect("tick");
+
+            assert!(matches!(
+                report.implementation,
+                ShellImplementationAction::LaneOccupied {
+                    session_id,
+                    phase: Phase::ShardingRunning,
+                } if session_id == "20260511-090000-000000001"
+            ));
+            let reloaded =
+                SessionState::load("20260511-090000-000000001").expect("load sharding session");
+            assert_eq!(reloaded.current_phase, Phase::ImplementationRound(1));
+            assert_eq!(reloaded.agent_runs[0].status, RunStatus::Done);
         });
     }
 }

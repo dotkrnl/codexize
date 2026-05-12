@@ -95,7 +95,15 @@ pub fn delete_session(session_id: &str) -> Result<()> {
     fs::remove_dir_all(state::session_dir(session_id))?;
     Ok(())
 }
-fn truncate_idea(idea: &Option<String>) -> String {
+/// Shared sidebar/picker fallback for a session whose title is empty.
+///
+/// Lives here (the original home of the picker's `idea_summary` formatting)
+/// so the session-index sidebar projection in
+/// [`crate::data::session_index::indexed_session_from_state`] produces
+/// character-identical output for the same input. Any tweak to the
+/// truncation width or the "(no idea yet)" wording is therefore intentional
+/// and visible to both call sites at once.
+pub(crate) fn truncate_idea(idea: &Option<String>) -> String {
     match idea {
         Some(text) if text.chars().count() > 80 => {
             format!("{}...", text.chars().take(80).collect::<String>())

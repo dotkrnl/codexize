@@ -246,7 +246,7 @@ fn indexed_session_from_state(
         .unwrap_or_default()
         .to_string();
     let idea_summary = if title.is_empty() {
-        truncate_idea(&state.idea_text)
+        super::picker_io::truncate_idea(&state.idea_text)
     } else {
         title.clone()
     };
@@ -308,15 +308,38 @@ fn indexed_same(left: &IndexedSession, right: &IndexedSession) -> bool {
         && left.modes == right.modes
 }
 
-fn truncate_idea(idea: &Option<String>) -> String {
-    match idea {
-        Some(text) if text.chars().count() > 80 => {
-            let mut s: String = text.chars().take(77).collect();
-            s.push_str("...");
-            s
-        }
-        Some(text) => text.clone(),
-        None => "(untitled)".to_string(),
+#[cfg(test)]
+mod truncate_idea_parity_tests {
+    use super::super::picker_io::truncate_idea;
+
+    // Pins the sidebar projection to the picker's pre-refactor output so
+    // future edits to the shared helper trip a test instead of silently
+    // drifting one of the two surfaces. The constants below mirror the
+    // strings the picker produced before task 6 deduplicated the helper.
+    #[test]
+    fn none_falls_back_to_no_idea_yet() {
+        assert_eq!(truncate_idea(&None), "(no idea yet)");
+    }
+
+    #[test]
+    fn short_some_is_returned_verbatim() {
+        let s = "hello".to_string();
+        assert_eq!(truncate_idea(&Some(s.clone())), s);
+    }
+
+    #[test]
+    fn whitespace_only_some_is_returned_verbatim() {
+        let s = "   \t".to_string();
+        assert_eq!(truncate_idea(&Some(s.clone())), s);
+    }
+
+    #[test]
+    fn long_some_is_truncated_to_80_chars_plus_ellipsis() {
+        let long: String = "a".repeat(100);
+        let out = truncate_idea(&Some(long));
+        assert_eq!(out.chars().count(), 83);
+        assert!(out.ends_with("..."));
+        assert!(out.chars().take(80).all(|c| c == 'a'));
     }
 }
 

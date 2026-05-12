@@ -254,7 +254,7 @@ fn sidebar_focus_switching_is_active_only_while_sidebar_visible() {
 
         assert_eq!(
             shell
-                .handle_shell_command(key(UiKeyCode::Right))
+                .handle_shell_command(key(UiKeyCode::Right), false)
                 .expect("right"),
             ShellCommandOutcome::Unhandled
         );
@@ -263,7 +263,7 @@ fn sidebar_focus_switching_is_active_only_while_sidebar_visible() {
         shell.toggle_sessions_sidebar().expect("toggle");
         assert_eq!(
             shell
-                .handle_shell_command(key(UiKeyCode::Right))
+                .handle_shell_command(key(UiKeyCode::Right), false)
                 .expect("right"),
             ShellCommandOutcome::Consumed
         );
@@ -271,7 +271,7 @@ fn sidebar_focus_switching_is_active_only_while_sidebar_visible() {
 
         assert_eq!(
             shell
-                .handle_shell_command(key(UiKeyCode::Left))
+                .handle_shell_command(key(UiKeyCode::Left), false)
                 .expect("left"),
             ShellCommandOutcome::Consumed
         );
@@ -294,19 +294,21 @@ fn sidebar_keyboard_navigation_selects_and_opens_without_eager_loading() {
         assert_eq!(shell.open_workspace_count(), 1);
 
         shell
-            .handle_shell_command(key(UiKeyCode::Down))
+            .handle_shell_command(key(UiKeyCode::Down), false)
             .expect("down");
         assert_eq!(shell.sidebar_view().selected_index, 1);
         assert_eq!(shell.open_workspace_count(), 1);
 
-        shell.handle_shell_command(key(UiKeyCode::Up)).expect("up");
+        shell
+            .handle_shell_command(key(UiKeyCode::Up), false)
+            .expect("up");
         assert_eq!(shell.sidebar_view().selected_index, 0);
 
         shell
-            .handle_shell_command(key(UiKeyCode::Down))
+            .handle_shell_command(key(UiKeyCode::Down), false)
             .expect("down");
         shell
-            .handle_shell_command(key(UiKeyCode::Enter))
+            .handle_shell_command(key(UiKeyCode::Enter), false)
             .expect("enter");
 
         assert_eq!(shell.focused_session_id(), "20260511-091000-000000001");
@@ -324,25 +326,17 @@ fn esc_from_sidebar_focus_hides_sidebar_after_modal_gets_first_chance() {
 
         shell.toggle_sessions_sidebar().expect("toggle");
         shell.focus_sidebar();
-        shell
-            .focused_workspace_mut()
-            .expect("workspace")
-            .set_modal_probe_open(true);
 
+        // Esc with modal_open=true should NOT hide sidebar (modal gets precedence)
         shell
-            .handle_shell_command(key(UiKeyCode::Esc))
+            .handle_shell_command(key(UiKeyCode::Esc), true)
             .expect("esc");
         assert!(shell.sidebar_view().visible);
         assert_eq!(shell.sidebar_view().focus, ShellFocus::Sidebar);
-        assert!(
-            !shell
-                .workspace("20260511-090000-000000001")
-                .expect("workspace")
-                .modal_probe_open()
-        );
 
+        // Esc with modal_open=false SHOULD hide sidebar
         shell
-            .handle_shell_command(key(UiKeyCode::Esc))
+            .handle_shell_command(key(UiKeyCode::Esc), false)
             .expect("esc");
         assert!(!shell.sidebar_view().visible);
         assert_eq!(shell.sidebar_view().focus, ShellFocus::Workspace);

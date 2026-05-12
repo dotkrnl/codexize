@@ -203,7 +203,14 @@ impl App {
             "spec-review" => self.launch_spec_review(),
             "planning" => self.launch_planning(),
             "plan-review" => self.launch_plan_review(),
-            "sharding" => self.launch_sharding(),
+            "sharding" => {
+                // Phase was already set to WaitingToImplement by
+                // retry_phase_for_stage above. The scheduler's
+                // maybe_auto_launch path will dispatch through
+                // dispatch_waiting_to_implement on the next tick so the
+                // repo-state baseline is re-verified before any sharding
+                // launch — spec §Data model line 96.
+            }
             _ => {}
         }
     }

@@ -146,19 +146,21 @@ fn prompt_insta_snapshots_match_fixtures() {
                 PromptMeta::with_topics(6),
             ),
         );
-        assert_prompt_insta_snapshot(
-            "brainstorm_yolo",
-            &brainstorm_prompt(
-                idea,
-                &spec.display().to_string(),
-                &summary.display().to_string(),
-                &live.display().to_string(),
-                true,
-                None,
-                &[],
-                PromptMeta::with_topics(6),
-            ),
+        let brainstorm_yolo = brainstorm_prompt(
+            idea,
+            &spec.display().to_string(),
+            &summary.display().to_string(),
+            &live.display().to_string(),
+            true,
+            None,
+            &[],
+            PromptMeta::with_topics(6),
         );
+        assert!(
+            !brainstorm_yolo.contains("operator"),
+            "brainstorm_yolo prompt should not use operator wording"
+        );
+        assert_prompt_insta_snapshot("brainstorm_yolo", &brainstorm_yolo);
 
         assert_prompt_insta_snapshot(
             "planning_interactive",
@@ -172,18 +174,20 @@ fn prompt_insta_snapshots_match_fixtures() {
                 PromptMeta::with_topics(6),
             ),
         );
-        assert_prompt_insta_snapshot(
-            "planning_yolo",
-            &planning_prompt(
-                &spec,
-                &plan,
-                &live,
-                true,
-                None,
-                &[],
-                PromptMeta::with_topics(6),
-            ),
+        let planning_yolo = planning_prompt(
+            &spec,
+            &plan,
+            &live,
+            true,
+            None,
+            &[],
+            PromptMeta::with_topics(6),
         );
+        assert!(
+            !planning_yolo.contains("operator"),
+            "planning_yolo prompt should not use operator wording"
+        );
+        assert_prompt_insta_snapshot("planning_yolo", &planning_yolo);
         assert_prompt_insta_snapshot(
             "sharding",
             &sharding_prompt(&spec, &plan, &tasks_path, &live, PromptMeta::with_topics(6)),

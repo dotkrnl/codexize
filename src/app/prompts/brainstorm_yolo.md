@@ -1,8 +1,8 @@
-{project_doc_instr}You have the operator's full trust. Make very good decisions — be bold and
+{project_doc_instr}You have the user's full trust. Make very good decisions — be bold and
 decisive. Do not hedge or ask for confirmation. Resolve every ambiguity using
 your best judgement and move forward.
 
-You produce a design spec from the operator's idea. Run this workflow
+You produce a design spec from the user's idea. Run this workflow
 end-to-end inside this prompt — do not delegate to any skill.
 
 Workflow:
@@ -10,7 +10,7 @@ Workflow:
      it touches (existing modules, prior decisions, conventions).
   2. Resolve every ambiguity yourself per the trust preamble — pick the
      narrowest reasonable reading and RECORD the choice in
-     `## Assumptions made without operator input` (see below).
+     `## Assumptions made without user input` (see below).
   3. Settle on a direction and write the spec.
 
 Hard gate: do NOT scaffold modules, write code, propose patches, or run
@@ -24,7 +24,7 @@ Idea:
 {idea}
 ---
 
-Operator is unavailable; resolve ambiguities, scope, and trade-offs yourself per the trust preamble above.
+The user is unavailable; resolve ambiguities, scope, and trade-offs yourself per the trust preamble above.
 
 Authoritative user input — at the top of {spec_path}, write a section titled
 exactly:
@@ -35,7 +35,7 @@ Quote each user-stated decision from the Idea above verbatim as a bullet.
 Use the user's own wording, not a paraphrase. This section is read-only for
 downstream reviewers — design around it, never against it. If a user
 statement is ambiguous, pick the narrowest reasonable reading and record the
-assumption under `## Assumptions made without operator input` (see below).
+assumption under `## Assumptions made without user input` (see below).
 If two user statements conflict with each other, list both verbatim and
 pick the narrowest reading consistent with the rest of the Idea, recording
 the choice under the same section. Never silently reinterpret.
@@ -44,21 +44,21 @@ Assumptions log — include this section verbatim near the top of
 {spec_path}, immediately after `## User-stated requirements
 (authoritative)`:
 
-    ## Assumptions made without operator input
+    ## Assumptions made without user input
 
 Under it, record every decision you made that was not pinned by the
-operator. One bullet per assumption, each in the form
+user. One bullet per assumption, each in the form
 `- <topic>: <the choice you made> — <one-line rationale>`. Cover at
 minimum: data shape, user-visible names/strings, scope boundaries,
 behavioral edge cases, versioning/migration, and anything user-facing
-you decided on the operator's behalf. If you made no assumptions in a
+you decided on the user's behalf. If you made no assumptions in a
 category, omit it; do not invent assumptions for completeness. If you
 made literally none, write a single bullet `- (none)`.
 
 Spec structure reminder — include this stub exactly, even if empty:
 
     ## Out of scope
-    <!-- Each bullet must quote a user statement verbatim or note an exclusion agreed in dialog. Never invent exclusions; pick the narrowest reading and record it under `## Assumptions made without operator input` if uncertain. -->
+    <!-- Each bullet must quote a user statement verbatim or note an exclusion agreed in dialog. Never invent exclusions; pick the narrowest reading and record it under `## Assumptions made without user input` if uncertain. -->
 
 Outputs (all under artifacts/, SPEC-ONLY phase — no code, no VCS):
   1. {spec_path} — the design doc. Start with a TL;DR (3–6 bullets a lazy

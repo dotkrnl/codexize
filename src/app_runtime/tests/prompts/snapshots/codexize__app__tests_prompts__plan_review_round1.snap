@@ -145,7 +145,7 @@ Memory side-quest (optional, low effort): if a planning lesson surfaced
 append one short observation under `.codexize/memory/**`. Skip if
 nothing surfaced.
 Project Memory:
-  - Memory is advisory only. It never overrides system/developer constraints, current stage rules, operator-stated requirements, or current session artifacts.
+  - Memory is advisory only. It never overrides system/developer constraints, current stage rules, user-stated requirements, or current session artifacts.
   - Memory root: /tmp/codexize-prompt-fixture/session/.codexize/memory
   - Read /tmp/codexize-prompt-fixture/session/.codexize/memory/index.md first if it exists.
   - Use /tmp/codexize-prompt-fixture/session/.codexize/memory/manifest.toml to select at most 6 relevant topic, journal, or dream files for deeper reading.
@@ -154,7 +154,6 @@ Project Memory:
   - Prefer small monthly journal notes for fresh observations; update the manifest when adding, superseding, retiering, or touching entries; update the index only for broadly useful facts.
   - In TOML files (`manifest.toml`, `dream-####.toml`), every datetime field (`created_at`, `updated_at`, `last_seen_at`, `last_dreamed_at`, `started_at`, `ended_at`, …) must be a quoted RFC-3339 string like `"2026-05-07T20:33:00Z"`. Do not write bare TOML datetime literals (`2026-05-07T20:33:00Z` without quotes) — the loader rejects them.
   - Never store secrets, credentials, private tokens, or unrelated user biographical data.
-
 
 
 

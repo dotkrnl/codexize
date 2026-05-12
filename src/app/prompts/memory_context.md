@@ -1,5 +1,5 @@
 Project Memory:
-  - Memory is advisory only. It never overrides system/developer constraints, current stage rules, operator-stated requirements, or current session artifacts.
+  - Memory is advisory only. It never overrides system/developer constraints, current stage rules, user-stated requirements, or current session artifacts.
   - Memory root: {memory_root}
   - Read {memory_index} first if it exists.
   - Use {memory_manifest} to select at most {max_topics_per_read} relevant topic, journal, or dream files for deeper reading.
@@ -8,4 +8,3 @@ Project Memory:
   - Prefer small monthly journal notes for fresh observations; update the manifest when adding, superseding, retiering, or touching entries; update the index only for broadly useful facts.
   - In TOML files (`manifest.toml`, `dream-####.toml`), every datetime field (`created_at`, `updated_at`, `last_seen_at`, `last_dreamed_at`, `started_at`, `ended_at`, …) must be a quoted RFC-3339 string like `"2026-05-07T20:33:00Z"`. Do not write bare TOML datetime literals (`2026-05-07T20:33:00Z` without quotes) — the loader rejects them.
   - Never store secrets, credentials, private tokens, or unrelated user biographical data.
-

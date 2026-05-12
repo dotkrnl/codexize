@@ -30,9 +30,26 @@ impl App {
         Self::new_with_startup_origin_and_config(state, startup_origin, config)
     }
     pub fn new_with_startup_origin_and_config(
+        state: SessionState,
+        startup_origin: AppStartupOrigin,
+        config: Arc<crate::data::config::Config>,
+    ) -> Self {
+        Self::new_with_startup_origin_config_and_model_refresh(state, startup_origin, config, true)
+    }
+
+    pub(crate) fn new_with_startup_origin_config_without_model_refresh(
+        state: SessionState,
+        startup_origin: AppStartupOrigin,
+        config: Arc<crate::data::config::Config>,
+    ) -> Self {
+        Self::new_with_startup_origin_config_and_model_refresh(state, startup_origin, config, false)
+    }
+
+    fn new_with_startup_origin_config_and_model_refresh(
         mut state: SessionState,
         startup_origin: AppStartupOrigin,
         config: Arc<crate::data::config::Config>,
+        eager_model_refresh: bool,
     ) -> Self {
         let ntfy_params =
             crate::data::notifications::NotificationParams::from_view(&config.ntfy_view());
@@ -77,13 +94,17 @@ impl App {
             nodes,
             visible_rows: Vec::new(),
             models: Vec::new(),
-            model_refresh: ModelRefreshState::Fetching {
-                rx: spawn_refresh(
-                    paths_view.cache_root.clone(),
-                    acp_config.available_clis(),
-                    providers.clone(),
-                ),
-                started_at: Instant::now(),
+            model_refresh: if eager_model_refresh {
+                ModelRefreshState::Fetching {
+                    rx: spawn_refresh(
+                        paths_view.cache_root.clone(),
+                        acp_config.available_clis(),
+                        providers.clone(),
+                    ),
+                    started_at: Instant::now(),
+                }
+            } else {
+                ModelRefreshState::Idle(Instant::now())
             },
             selected: current,
             selected_key,
@@ -171,27 +192,29 @@ impl App {
                 let _ = app.state.log_event(format!("journal_prune_failed: {err}"));
             }
         }
-        // Populate the model strip immediately from whatever the cache holds.
-        // The background refresh spawned above will replace this if any section
-        // is expired.
-        let loaded = cache::load(&app.paths.cache_root);
-        let cached = crate::data::selection_assembly::assemble_from_loaded(
-            &loaded,
-            &acp_config.available_clis(),
-            &providers,
-        );
-        if !cached.is_empty() {
-            let cache_has_expired_section = startup_cache_has_expired_section(&loaded);
-            app.set_models(cached);
-            if !cache_has_expired_section {
-                app.model_refresh = ModelRefreshState::Idle(Instant::now());
+        if eager_model_refresh {
+            // Populate the model strip immediately from whatever the cache holds.
+            // The background refresh spawned above will replace this if any
+            // section is expired.
+            let loaded = cache::load(&app.paths.cache_root);
+            let cached = crate::data::selection_assembly::assemble_from_loaded(
+                &loaded,
+                &acp_config.available_clis(),
+                &providers,
+            );
+            if !cached.is_empty() {
+                let cache_has_expired_section = startup_cache_has_expired_section(&loaded);
+                app.set_models(cached);
+                if !cache_has_expired_section {
+                    app.model_refresh = ModelRefreshState::Idle(Instant::now());
+                }
             }
+            // Install the cache watcher so atomic publishes from other instances
+            // refresh the model strip without restart. The watcher seeds itself
+            // with the mtime we just loaded; subsequent advances trigger a
+            // single debounced reload.
+            app.setup_cache_watcher();
         }
-        // Install the cache watcher so atomic publishes from other instances
-        // refresh the model strip without restart. The watcher seeds itself
-        // with the mtime we just loaded; subsequent advances trigger a
-        // single debounced reload.
-        app.setup_cache_watcher();
         if let Ok(run_id) = session_state::resume_running_runs(&mut app.state) {
             app.current_run_id = run_id;
             app.run_launched = run_id.is_some();

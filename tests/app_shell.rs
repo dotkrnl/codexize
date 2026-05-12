@@ -4,7 +4,7 @@ use codexize::app_shell::{
     AppShell, ShellCommandOutcome, ShellEvent, ShellFocus, ShellImplementationAction,
 };
 use codexize::data::config::Config;
-use codexize::state::{Phase, SessionState};
+use codexize::state::{Phase, RunRecord, RunStatus, SessionState};
 use serial_test::serial;
 use std::sync::Arc;
 
@@ -38,13 +38,36 @@ fn save_session(id: &str, phase: Phase) -> SessionState {
     state
 }
 
+fn running_state(id: &str, phase: Phase, run_id: u64) -> SessionState {
+    let mut state = session(id, phase);
+    state.agent_runs.push(RunRecord {
+        id: run_id,
+        stage: "sharding".to_string(),
+        task_id: None,
+        round: 1,
+        attempt: 1,
+        model: "test-model".to_string(),
+        subscription_label: "test-vendor".to_string(),
+        window_name: "[Sharding] test-model".to_string(),
+        started_at: chrono::Utc::now(),
+        ended_at: None,
+        status: RunStatus::Running,
+        error: None,
+        effort: codexize::adapters::EffortLevel::Normal,
+        effort_mapping: codexize::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
+        modes: codexize::state::LaunchModes::default(),
+        hostname: None,
+        mount_device_id: None,
+        section_path: None,
+    });
+    state
+}
+
 fn shell_for(initial: SessionState) -> AppShell {
-    AppShell::new(
-        initial,
-        AppStartupOrigin::Default,
-        Arc::new(Config::baked_defaults()),
-    )
-    .expect("shell")
+    let mut config = Config::baked_defaults();
+    config.providers.set(Vec::new());
+    AppShell::new(initial, AppStartupOrigin::Default, Arc::new(config)).expect("shell")
 }
 
 fn key(code: UiKeyCode) -> AppCommand {
@@ -83,11 +106,15 @@ fn sidebar_enter_lazily_opens_and_focuses_without_changing_running_session() {
         let first = save_session("20260511-090000-000000001", Phase::ShardingRunning);
         save_session("20260511-091000-000000001", Phase::WaitingToImplement);
         let mut shell = shell_for(first);
-
-        shell.apply_event(ShellEvent::RunStarted {
+        shell.apply_event(ShellEvent::SessionStateChanged {
             session_id: "20260511-090000-000000001".into(),
-            run_id: 7,
+            state: Box::new(running_state(
+                "20260511-090000-000000001",
+                Phase::ShardingRunning,
+                7,
+            )),
         });
+
         shell.toggle_sessions_sidebar().expect("toggle");
         shell.focus_sidebar();
         shell
@@ -404,7 +431,7 @@ fn sidebar_shows_every_non_archived_non_cancelled_phase() {
             save_session(&id, *phase);
         }
 
-        let initial = session("20260511-000000-000000001", Phase::WaitingToImplement);
+        let initial = save_session("20260511-990000-000000001", Phase::WaitingToImplement);
         let mut shell = shell_for(initial);
         shell.toggle_sessions_sidebar().expect("toggle");
         let view = shell.sidebar_view();
@@ -431,12 +458,15 @@ fn background_run_continues_when_focus_switches_to_another_session() {
         let running = save_session("20260511-090000-000000001", Phase::ShardingRunning);
         save_session("20260511-091000-000000001", Phase::WaitingToImplement);
         let mut shell = shell_for(running);
-
-        // Simulate a background run starting on the first session.
-        shell.apply_event(ShellEvent::RunStarted {
+        shell.apply_event(ShellEvent::SessionStateChanged {
             session_id: "20260511-090000-000000001".into(),
-            run_id: 42,
+            state: Box::new(running_state(
+                "20260511-090000-000000001",
+                Phase::ShardingRunning,
+                42,
+            )),
         });
+
         assert_eq!(
             shell.running_session_id(),
             Some("20260511-090000-000000001")

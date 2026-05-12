@@ -11,8 +11,11 @@ use crate::app_runtime::{AppCommand, UiKeyCode};
 use crate::data::app_lock::AppLockGuard;
 use crate::data::config::Config;
 use crate::data::session_index::SessionIndex;
-use crate::scheduler::{ImplementationDecision, ScannedSession, SchedulerTick, evaluate_tick};
-use crate::state::{Message, Phase, RunStatus, SessionState};
+use crate::scheduler::{
+    ImplementationDecision, ScannedSession, SchedulerTick, evaluate_tick,
+    is_implementation_lane_phase,
+};
+use crate::state::{Phase, RunStatus, SessionState};
 use anyhow::Result;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -81,7 +84,7 @@ impl SidebarModel {
         index: &SessionIndex,
         focused_session_id: &str,
         running_session_id: Option<&str>,
-        workspaces: &BTreeMap<String, SessionWorkspace>,
+        supervisors: &BTreeMap<String, SessionSupervisor>,
     ) {
         if !self.dirty {
             return;
@@ -94,7 +97,7 @@ impl SidebarModel {
                 let session_id = entry.session_id;
                 SidebarRow {
                     focused: session_id == focused_session_id,
-                    open: workspaces.contains_key(&session_id),
+                    open: supervisors.contains_key(&session_id),
                     running: running_session_id == Some(session_id.as_str()),
                     date_label: sidebar_date_label(&session_id),
                     title: entry.idea_summary,
@@ -174,57 +177,69 @@ impl Default for ShellEventBus {
     }
 }
 
-pub struct SessionWorkspace {
-    state: SessionState,
-    startup_origin: AppStartupOrigin,
-    messages: Vec<Message>,
-    current_run_id: Option<u64>,
-    input_buffer: String,
-    input_cursor: usize,
-    viewport_top: usize,
-    split_run_id: Option<u64>,
-    live_summary_cached_text: String,
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SupervisorTick {
+    state_changed: bool,
+    run_started: Option<u64>,
+    run_finished: Option<u64>,
+    live_summary_changed: Option<String>,
 }
 
-impl SessionWorkspace {
-    fn new(state: SessionState, startup_origin: AppStartupOrigin) -> Self {
-        let current_run_id = state
-            .agent_runs
-            .iter()
-            .find(|run| run.status == RunStatus::Running)
-            .map(|run| run.id);
-        let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
+pub struct SessionSupervisor {
+    app: Option<App>,
+}
+
+impl SessionSupervisor {
+    fn new(state: SessionState, startup_origin: AppStartupOrigin, config: Arc<Config>) -> Self {
         Self {
-            state,
-            startup_origin,
-            messages,
-            current_run_id,
-            input_buffer: String::new(),
-            input_cursor: 0,
-            viewport_top: 0,
-            split_run_id: None,
-            live_summary_cached_text: String::new(),
+            app: Some(App::new_with_startup_origin_config_without_model_refresh(
+                state,
+                startup_origin,
+                config,
+            )),
         }
     }
 
+    fn app(&self) -> &App {
+        self.app
+            .as_ref()
+            .expect("session supervisor temporarily lent its App")
+    }
+
+    fn app_mut(&mut self) -> &mut App {
+        self.app
+            .as_mut()
+            .expect("session supervisor temporarily lent its App")
+    }
+
+    fn take_app(&mut self) -> App {
+        self.app
+            .take()
+            .expect("session supervisor cannot lend its App twice")
+    }
+
+    fn replace_app(&mut self, app: App) {
+        self.app = Some(app);
+    }
+
     pub fn session_id(&self) -> &str {
-        &self.state.session_id
+        &self.app().state.session_id
     }
 
     pub fn phase(&self) -> Phase {
-        self.state.current_phase
+        self.app().state.current_phase
     }
 
     pub fn current_run_id(&self) -> Option<u64> {
-        self.current_run_id
+        self.app.as_ref().and_then(|app| app.current_run_id)
     }
 
     pub fn live_summary_text(&self) -> &str {
-        &self.live_summary_cached_text
+        &self.app().live_summary_cached_text
     }
 
     pub fn message_count(&self) -> usize {
-        self.messages.len()
+        self.app().messages.len()
     }
 
     pub fn set_ui_probe_state(
@@ -233,52 +248,63 @@ impl SessionWorkspace {
         viewport_top: usize,
         split_run_id: Option<u64>,
     ) {
-        self.input_buffer = input_buffer.into();
-        self.input_cursor = self.input_buffer.chars().count();
-        self.viewport_top = viewport_top;
-        self.split_run_id = split_run_id;
+        let app = self.app_mut();
+        app.input_buffer = input_buffer.into();
+        app.input_cursor = app.input_buffer.chars().count();
+        app.viewport_top = viewport_top;
+        app.split_target = split_run_id.map(crate::app::split::SplitTarget::Run);
     }
 
     pub fn ui_probe_state(&self) -> (String, usize, Option<u64>) {
-        (
-            self.input_buffer.clone(),
-            self.viewport_top,
-            self.split_run_id,
-        )
+        let app = self.app();
+        let split_run_id = match app.split_target {
+            Some(crate::app::split::SplitTarget::Run(run_id)) => Some(run_id),
+            Some(crate::app::split::SplitTarget::Idea) | None => None,
+        };
+        (app.input_buffer.clone(), app.viewport_top, split_run_id)
     }
 
     fn replace_state(&mut self, state: SessionState) {
-        self.current_run_id = state
+        let app = self.app_mut();
+        app.current_run_id = state
             .agent_runs
             .iter()
             .find(|run| run.status == RunStatus::Running)
             .map(|run| run.id);
-        self.state = state;
+        app.run_launched = app.current_run_id.is_some();
+        app.state = state;
+        app.messages = SessionState::load_messages(&app.state.session_id).unwrap_or_default();
+        app.rebuild_tree_view(None);
     }
 
     fn replace_live_summary(&mut self, text: String) {
-        self.live_summary_cached_text = crate::app::render::sanitize_live_summary(&text);
+        self.app_mut().live_summary_cached_text = crate::app::render::sanitize_live_summary(&text);
     }
 
-    fn rebuild_terminal_app(&self, config: Arc<Config>) -> App {
-        // Build the terminal App only when the workspace is actually run; lazy
-        // sidebar open/focus must not trigger model refreshes or agent launches.
-        App::new_with_startup_origin_and_config(self.state.clone(), self.startup_origin, config)
-    }
-
-    fn absorb_terminal_app(&mut self, app: App) {
-        self.current_run_id = app.current_run_id;
-        self.startup_origin = app.startup_origin;
-        self.state = app.state;
-        self.messages = app.messages;
-        self.input_buffer = app.input_buffer;
-        self.input_cursor = app.input_cursor;
-        self.viewport_top = app.viewport_top;
-        self.split_run_id = match app.split_target {
-            Some(crate::app::split::SplitTarget::Run(run_id)) => Some(run_id),
-            Some(crate::app::split::SplitTarget::Idea) | None => None,
+    fn drive(&mut self, drive: SchedulerDrive) -> (SessionState, SupervisorTick) {
+        let app = self.app_mut();
+        let before_run_id = app.current_run_id;
+        let before_live_summary = app.live_summary_cached_text.clone();
+        drive.apply(app);
+        let after_run_id = app.current_run_id;
+        let live_summary_changed = (app.live_summary_cached_text != before_live_summary)
+            .then(|| app.live_summary_cached_text.clone());
+        let tick = SupervisorTick {
+            state_changed: true,
+            run_started: (before_run_id != after_run_id)
+                .then_some(after_run_id)
+                .flatten(),
+            run_finished: (before_run_id != after_run_id && after_run_id.is_none())
+                .then_some(before_run_id)
+                .flatten(),
+            live_summary_changed,
         };
-        self.live_summary_cached_text = app.live_summary_cached_text;
+        (app.state.clone(), tick)
+    }
+
+    #[cfg(test)]
+    fn app_identity(&self) -> usize {
+        self.app() as *const App as usize
     }
 }
 
@@ -290,9 +316,7 @@ pub struct AppShell {
     #[allow(dead_code)]
     app_lock_guard: Option<AppLockGuard>,
     focused_session_id: String,
-    running_session_id: Option<String>,
-    running_run_id: Option<u64>,
-    workspaces: BTreeMap<String, SessionWorkspace>,
+    supervisors: BTreeMap<String, SessionSupervisor>,
     sidebar: SidebarModel,
     config: Arc<Config>,
     event_bus: ShellEventBus,
@@ -323,19 +347,16 @@ impl AppShell {
     ) -> Result<Self> {
         let sessions_root = crate::picker::sessions_root_for(&config);
         let focused_session_id = initial_state.session_id.clone();
-        let mut workspaces = BTreeMap::new();
-        let initial_workspace = SessionWorkspace::new(initial_state, startup_origin);
-        let running_run_id = initial_workspace.current_run_id();
-        let running_session_id = running_run_id.map(|_| focused_session_id.clone());
-        workspaces.insert(focused_session_id.clone(), initial_workspace);
+        let mut supervisors = BTreeMap::new();
+        let initial_supervisor =
+            SessionSupervisor::new(initial_state, startup_origin, config.clone());
+        supervisors.insert(focused_session_id.clone(), initial_supervisor);
         let mut session_index = SessionIndex::new(sessions_root.clone());
         session_index.refresh()?;
         let mut shell = Self {
             app_lock_guard,
             focused_session_id,
-            running_session_id,
-            running_run_id,
-            workspaces,
+            supervisors,
             sidebar: SidebarModel::new(),
             config,
             event_bus: ShellEventBus::new(),
@@ -354,48 +375,81 @@ impl AppShell {
     }
 
     pub fn running_session_id(&self) -> Option<&str> {
-        self.running_session_id.as_deref()
+        self.running_session_id_with_focused_app(None)
+    }
+
+    fn running_session_id_with_focused_app<'a>(
+        &'a self,
+        focused_app: Option<&'a App>,
+    ) -> Option<&'a str> {
+        let mut first_running = None;
+        if let Some(app) = focused_app
+            && app.current_run_id.is_some()
+        {
+            first_running = Some(app.state.session_id.as_str());
+            if is_implementation_lane_phase(app.state.current_phase) {
+                return first_running;
+            }
+        }
+        for supervisor in self.supervisors.values() {
+            if supervisor.current_run_id().is_none() {
+                continue;
+            }
+            first_running.get_or_insert_with(|| supervisor.session_id());
+            if is_implementation_lane_phase(supervisor.phase()) {
+                return Some(supervisor.session_id());
+            }
+        }
+        first_running
     }
 
     pub fn open_workspace_count(&self) -> usize {
-        self.workspaces.len()
+        self.supervisors.len()
     }
 
-    pub fn workspace(&self, session_id: &str) -> Option<&SessionWorkspace> {
-        self.workspaces.get(session_id)
+    pub fn workspace(&self, session_id: &str) -> Option<&SessionSupervisor> {
+        self.supervisors.get(session_id)
     }
 
-    pub fn workspace_mut(&mut self, session_id: &str) -> Option<&mut SessionWorkspace> {
-        self.workspaces.get_mut(session_id)
+    pub fn workspace_mut(&mut self, session_id: &str) -> Option<&mut SessionSupervisor> {
+        self.supervisors.get_mut(session_id)
     }
 
-    pub fn focused_workspace_mut(&mut self) -> Option<&mut SessionWorkspace> {
-        self.workspaces.get_mut(&self.focused_session_id)
+    pub fn focused_workspace_mut(&mut self) -> Option<&mut SessionSupervisor> {
+        self.supervisors.get_mut(&self.focused_session_id)
     }
 
     /// Returns a mutable reference to the focused workspace.
     ///
     /// # Panics
     /// Panics if there is no focused workspace (this is an invariant violation).
-    fn focused_workspace_unchecked(&mut self) -> &mut SessionWorkspace {
+    fn focused_supervisor_unchecked(&mut self) -> &mut SessionSupervisor {
         self.focused_workspace_mut()
             .expect("AppShell always has a focused workspace")
     }
 
-    /// If the focused session has changed since `app` was built, absorb the old
-    /// app into its workspace and rebuild a fresh `App` for the newly focused
-    /// session. Background run tracking on the shell is untouched.
+    fn take_focused_app(&mut self) -> App {
+        self.focused_supervisor_unchecked().take_app()
+    }
+
+    fn return_app_to_supervisor(&mut self, app: App) {
+        let session_id = app.state.session_id.clone();
+        self.supervisors
+            .get_mut(&session_id)
+            .expect("focused App belongs to an observed supervisor")
+            .replace_app(app);
+    }
+
+    /// If the focused session has changed since `app` was lent to the terminal
+    /// loop, return it to its supervisor and lend out the newly focused App.
     fn swap_focused_app_if_needed(&mut self, app: App) -> App {
         if app.state.session_id == self.focused_session_id {
             return app;
         }
-        let old_session_id = app.state.session_id.clone();
-        if let Some(workspace) = self.workspaces.get_mut(&old_session_id) {
-            workspace.absorb_terminal_app(app);
-        }
-        let config = self.config.clone();
-        self.focused_workspace_unchecked()
-            .rebuild_terminal_app(config)
+        self.return_app_to_supervisor(app);
+        self.sidebar.mark_dirty();
+        let _ = self.refresh_sidebar_rows();
+        self.take_focused_app()
     }
 
     pub fn run_focused_terminal_app(
@@ -406,9 +460,7 @@ impl AppShell {
         use crate::ui::widgets::sidebar::view::render_sidebar;
         use ratatui::layout::Rect;
 
-        let config = self.config.clone();
-        let workspace = self.focused_workspace_unchecked();
-        let mut app = workspace.rebuild_terminal_app(config);
+        let mut app = self.take_focused_app();
         let mut runtime = TerminalRuntime::default();
         let mut input = crate::ui::tui::CrosstermInputAdapter::spawn();
 
@@ -421,7 +473,7 @@ impl AppShell {
             }
             if app.runtime_tick_before_data_drain()? {
                 app.drain_notifications_for_shutdown();
-                self.focused_workspace_unchecked().absorb_terminal_app(app);
+                self.return_app_to_supervisor(app);
                 return Ok(());
             }
             runtime.drain_app_data_events(&mut app);
@@ -472,14 +524,14 @@ impl AppShell {
                     TerminalCommandOutcome::HandledExit => {
                         app.runner_supervisor.shutdown_all_runs();
                         app.drain_notifications_for_shutdown();
-                        self.focused_workspace_unchecked().absorb_terminal_app(app);
+                        self.return_app_to_supervisor(app);
                         return Ok(());
                     }
                     TerminalCommandOutcome::AppOwned(command) => {
                         if app.handle_app_command(command) {
                             app.runner_supervisor.shutdown_all_runs();
                             app.drain_notifications_for_shutdown();
-                            self.focused_workspace_unchecked().absorb_terminal_app(app);
+                            self.return_app_to_supervisor(app);
                             return Ok(());
                         }
                     }
@@ -624,18 +676,19 @@ impl AppShell {
     }
 
     pub fn open_session(&mut self, session_id: &str) -> Result<()> {
-        if !self.workspaces.contains_key(session_id) {
+        if !self.supervisors.contains_key(session_id) {
             let state = SessionState::load(session_id)?;
             self.session_index.update_loaded_state(&state);
-            let workspace = SessionWorkspace::new(state, AppStartupOrigin::Default);
-            self.workspaces.insert(session_id.to_string(), workspace);
+            let supervisor =
+                SessionSupervisor::new(state, AppStartupOrigin::Default, self.config.clone());
+            self.supervisors.insert(session_id.to_string(), supervisor);
             self.sidebar.mark_dirty();
         }
         self.focus_session(session_id)
     }
 
     pub fn focus_session(&mut self, session_id: &str) -> Result<()> {
-        if !self.workspaces.contains_key(session_id) {
+        if !self.supervisors.contains_key(session_id) {
             self.open_session(session_id)?;
             return Ok(());
         }
@@ -660,29 +713,21 @@ impl AppShell {
         match event {
             ShellEvent::SessionStateChanged { session_id, state } => {
                 self.session_index.update_loaded_state(&state);
-                if let Some(workspace) = self.workspaces.get_mut(&session_id) {
-                    workspace.replace_state(*state);
+                if let Some(supervisor) = self.supervisors.get_mut(&session_id) {
+                    supervisor.replace_state(*state);
                 }
                 self.sidebar.mark_dirty();
             }
             ShellEvent::LiveSummaryChanged { session_id, text } => {
-                if let Some(workspace) = self.workspaces.get_mut(&session_id) {
-                    workspace.replace_live_summary(text);
+                if let Some(supervisor) = self.supervisors.get_mut(&session_id) {
+                    supervisor.replace_live_summary(text);
                 }
             }
-            ShellEvent::RunStarted { session_id, run_id } => {
-                self.running_session_id = Some(session_id);
-                self.running_run_id = Some(run_id);
+            ShellEvent::RunStarted { .. } => {
                 self.sidebar.mark_dirty();
             }
-            ShellEvent::RunFinished { session_id, run_id } => {
-                if self.running_session_id.as_deref() == Some(session_id.as_str())
-                    && self.running_run_id == Some(run_id)
-                {
-                    self.running_session_id = None;
-                    self.running_run_id = None;
-                    self.sidebar.mark_dirty();
-                }
+            ShellEvent::RunFinished { .. } => {
+                self.sidebar.mark_dirty();
             }
         }
         let _ = self.refresh_sidebar_rows();
@@ -706,6 +751,13 @@ impl AppShell {
         self.sidebar.rebuild_count
     }
 
+    #[cfg(test)]
+    pub(crate) fn supervisor_app_identity(&self, session_id: &str) -> Option<usize> {
+        self.supervisors
+            .get(session_id)
+            .map(SessionSupervisor::app_identity)
+    }
+
     fn run_scheduler_tick_with_focused_app(
         &mut self,
         mut focused_app: Option<&mut App>,
@@ -717,7 +769,7 @@ impl AppShell {
                 warn!(error = %err, "session index refresh failed during scheduler tick");
             }
         }
-        let scan = self.scan_open_workspaces_for_scheduler(focused_app.as_deref());
+        let scan = self.scan_supervisors_for_scheduler(focused_app.as_deref());
         let tick = evaluate_tick(&scan);
         let mut planning_session_ids = Vec::new();
 
@@ -730,8 +782,12 @@ impl AppShell {
             planning_session_ids.push(planning.session_id.clone());
         }
 
-        let implementation = self.apply_implementation_decision(&tick, focused_app)?;
-        self.refresh_sidebar_rows()?;
+        let implementation =
+            self.apply_implementation_decision(&tick, focused_app.as_deref_mut())?;
+        let running_session_id = self
+            .running_session_id_with_focused_app(focused_app.as_deref())
+            .map(str::to_string);
+        self.refresh_sidebar_rows_with_running(running_session_id.as_deref())?;
         Ok(ShellSchedulerReport {
             planning_session_ids,
             implementation,
@@ -739,7 +795,7 @@ impl AppShell {
         })
     }
 
-    fn scan_open_workspaces_for_scheduler(&self, focused_app: Option<&App>) -> Vec<ScannedSession> {
+    fn scan_supervisors_for_scheduler(&self, focused_app: Option<&App>) -> Vec<ScannedSession> {
         let focused_phase =
             focused_app.map(|app| (app.state.session_id.as_str(), app.state.current_phase));
         self.session_index
@@ -747,7 +803,7 @@ impl AppShell {
             .into_iter()
             .filter_map(|scanned| {
                 let session_id = scanned.session_id().to_string();
-                if !self.workspaces.contains_key(&session_id) {
+                if !self.supervisors.contains_key(&session_id) {
                     return None;
                 }
                 match scanned {
@@ -756,10 +812,10 @@ impl AppShell {
                             && focused_id == session.session_id
                         {
                             session.current_phase = phase;
-                        } else if let Some(workspace) = self.workspaces.get(&session.session_id) {
-                            // Until supervisors replace workspaces, open-session state is the
-                            // in-process override that preserves schedule-only-open behavior.
-                            session.current_phase = workspace.phase();
+                        } else if let Some(supervisor) = self.supervisors.get(&session.session_id)
+                            && supervisor.app.is_some()
+                        {
+                            session.current_phase = supervisor.phase();
                         }
                         Some(ScannedSession::Loaded(session))
                     }
@@ -830,84 +886,107 @@ impl AppShell {
             let before_run_id = app.current_run_id;
             drive.apply(app);
             let state = app.state.clone();
-            self.publish_scheduler_state(session_id, &state, before_run_id, app.current_run_id);
+            let tick = tick_from_run_transition(before_run_id, app.current_run_id);
+            self.publish_supervisor_tick(session_id, &state, tick);
             return Ok(state);
         }
 
-        self.ensure_workspace_loaded(session_id)?;
-        let config = self.config.clone();
-        let workspace = self
-            .workspaces
-            .get(session_id)
-            .expect("workspace loaded before scheduler drive");
-        let mut app = workspace.rebuild_terminal_app(config);
-        // Restore run tracking from the workspace's preserved current_run_id so
-        // a background tick cannot re-launch a session that already has an
-        // active run. `App::new_with_startup_origin_and_config` recovers this
-        // from `state.agent_runs` via `resume_running_runs`, but mirror it
-        // explicitly here: the workspace is the in-process source of truth.
-        app.current_run_id = workspace.current_run_id();
-        app.run_launched = workspace.current_run_id().is_some();
-        let before_run_id = app.current_run_id;
-        drive.apply(&mut app);
-        let state = app.state.clone();
-        let after_run_id = app.current_run_id;
-        self.workspaces
+        self.ensure_supervisor_loaded(session_id)?;
+        let (state, tick) = self
+            .supervisors
             .get_mut(session_id)
-            .expect("workspace loaded before absorb")
-            .absorb_terminal_app(app);
-        self.publish_scheduler_state(session_id, &state, before_run_id, after_run_id);
+            .expect("supervisor loaded before scheduler drive")
+            .drive(drive);
+        self.publish_supervisor_tick(session_id, &state, tick);
         Ok(state)
     }
 
-    fn ensure_workspace_loaded(&mut self, session_id: &str) -> Result<()> {
-        if !self.workspaces.contains_key(session_id) {
+    fn ensure_supervisor_loaded(&mut self, session_id: &str) -> Result<()> {
+        if !self.supervisors.contains_key(session_id) {
             let state = SessionState::load(session_id)?;
             self.session_index.update_loaded_state(&state);
-            let workspace = SessionWorkspace::new(state, AppStartupOrigin::Default);
-            self.workspaces.insert(session_id.to_string(), workspace);
+            let supervisor =
+                SessionSupervisor::new(state, AppStartupOrigin::Default, self.config.clone());
+            self.supervisors.insert(session_id.to_string(), supervisor);
             self.sidebar.mark_dirty();
         }
         Ok(())
     }
 
-    fn publish_scheduler_state(
+    fn publish_supervisor_tick(
         &mut self,
         session_id: &str,
         state: &SessionState,
-        before_run_id: Option<u64>,
-        after_run_id: Option<u64>,
+        tick: SupervisorTick,
     ) {
-        self.apply_event(ShellEvent::SessionStateChanged {
-            session_id: session_id.to_string(),
-            state: Box::new(state.clone()),
-        });
-        if before_run_id != after_run_id {
-            if let Some(run_id) = after_run_id {
-                self.apply_event(ShellEvent::RunStarted {
-                    session_id: session_id.to_string(),
-                    run_id,
-                });
-            }
-            if let Some(run_id) = before_run_id
-                && after_run_id.is_none()
-            {
-                self.apply_event(ShellEvent::RunFinished {
-                    session_id: session_id.to_string(),
-                    run_id,
-                });
-            }
+        if tick.state_changed {
+            self.apply_event(ShellEvent::SessionStateChanged {
+                session_id: session_id.to_string(),
+                state: Box::new(state.clone()),
+            });
+        }
+        if let Some(text) = tick.live_summary_changed {
+            self.apply_event(ShellEvent::LiveSummaryChanged {
+                session_id: session_id.to_string(),
+                text,
+            });
+        }
+        if let Some(run_id) = tick.run_started {
+            self.apply_event(ShellEvent::RunStarted {
+                session_id: session_id.to_string(),
+                run_id,
+            });
+        }
+        if let Some(run_id) = tick.run_finished {
+            self.apply_event(ShellEvent::RunFinished {
+                session_id: session_id.to_string(),
+                run_id,
+            });
         }
     }
 
     fn refresh_sidebar_rows(&mut self) -> Result<()> {
+        let running_session_id = self.running_session_id().map(str::to_string);
+        self.refresh_sidebar_rows_with_running(running_session_id.as_deref())
+    }
+
+    fn refresh_sidebar_rows_with_running(
+        &mut self,
+        running_session_id: Option<&str>,
+    ) -> Result<()> {
         self.sidebar.refresh_if_dirty(
             &self.session_index,
             &self.focused_session_id,
-            self.running_session_id.as_deref(),
-            &self.workspaces,
+            running_session_id,
+            &self.supervisors,
         );
         Ok(())
+    }
+}
+
+impl Drop for AppShell {
+    fn drop(&mut self) {
+        for supervisor in self.supervisors.values() {
+            if let Some(app) = &supervisor.app {
+                app.runner_supervisor.shutdown_all_runs();
+            }
+        }
+    }
+}
+
+fn tick_from_run_transition(
+    before_run_id: Option<u64>,
+    after_run_id: Option<u64>,
+) -> SupervisorTick {
+    SupervisorTick {
+        state_changed: true,
+        run_started: (before_run_id != after_run_id)
+            .then_some(after_run_id)
+            .flatten(),
+        run_finished: (before_run_id != after_run_id && after_run_id.is_none())
+            .then_some(before_run_id)
+            .flatten(),
+        live_summary_changed: None,
     }
 }
 
@@ -1089,31 +1168,24 @@ estimated_tokens = 100
     }
 
     // Mirrors the swap point inside `run_focused_terminal_app`: when sidebar
-    // Enter changes the focused session, the loop must absorb the running
-    // local `App` into the prior workspace, rebuild a fresh `App` for the new
-    // focused workspace, and leave shell-level run tracking untouched.
+    // Enter changes the focused session, the loop must return the running
+    // local `App` to its supervisor and lend out the newly focused App.
     #[test]
     #[serial]
     fn sidebar_enter_swaps_focused_app_and_keeps_running_session_marked() {
         with_temp_root(|| {
-            let first = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            let mut first = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            first.agent_runs.push(running_sharding_run(7));
+            first.save().expect("save running first");
             save_session("20260511-091000-000000001", Phase::WaitingToImplement);
             let mut shell = AppShell::new(
-                first,
+                first.clone(),
                 AppStartupOrigin::Default,
                 Arc::new(Config::baked_defaults()),
             )
             .expect("shell");
 
-            shell.apply_event(ShellEvent::RunStarted {
-                session_id: "20260511-090000-000000001".into(),
-                run_id: 7,
-            });
-
-            let config = shell.config.clone();
-            let mut app = shell
-                .focused_workspace_unchecked()
-                .rebuild_terminal_app(config);
+            let mut app = shell.take_focused_app();
             assert_eq!(app.state.session_id, "20260511-090000-000000001");
 
             // Sidebar Enter on the second row routes through the same command
@@ -1206,6 +1278,88 @@ estimated_tokens = 100
 
     #[test]
     #[serial]
+    fn repeated_background_ticks_keep_one_session_supervisor_app() {
+        with_temp_root(|| {
+            let focused = save_session("20260511-080000-000000001", Phase::Done);
+            let mut running = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            running.agent_runs.push(running_sharding_run(7));
+            running.save().expect("save running candidate");
+            let mut shell = AppShell::new(
+                focused,
+                AppStartupOrigin::Default,
+                Arc::new(Config::baked_defaults()),
+            )
+            .expect("shell");
+            shell
+                .open_session("20260511-090000-000000001")
+                .expect("open background");
+            shell
+                .focus_session("20260511-080000-000000001")
+                .expect("refocus done");
+            let before = shell
+                .supervisor_app_identity("20260511-090000-000000001")
+                .expect("background identity");
+
+            shell.run_scheduler_tick().expect("first background tick");
+            shell.run_scheduler_tick().expect("second background tick");
+
+            assert_eq!(
+                shell.supervisor_app_identity("20260511-090000-000000001"),
+                Some(before),
+                "background ticks must reuse the same session-level App/runner owner"
+            );
+            let supervisor = shell
+                .workspace("20260511-090000-000000001")
+                .expect("background supervisor");
+            assert_eq!(supervisor.current_run_id(), Some(7));
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn background_waiting_dispatch_reuses_existing_supervisor_app() {
+        with_temp_root(|| {
+            let focused = save_session("20260511-080000-000000001", Phase::Done);
+            save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+            let mut shell = AppShell::new(
+                focused,
+                AppStartupOrigin::Default,
+                Arc::new(Config::baked_defaults()),
+            )
+            .expect("shell");
+            shell
+                .open_session("20260511-090000-000000001")
+                .expect("open waiting");
+            shell
+                .focus_session("20260511-080000-000000001")
+                .expect("refocus done");
+            let before = shell
+                .supervisor_app_identity("20260511-090000-000000001")
+                .expect("waiting identity");
+
+            let report = shell.run_scheduler_tick().expect("dispatch tick");
+
+            assert!(
+                matches!(
+                    report.implementation,
+                    ShellImplementationAction::DispatchedWaiting {
+                        ref session_id,
+                        ..
+                    } if session_id == "20260511-090000-000000001"
+                ),
+                "got {:?}",
+                report.implementation
+            );
+            assert_eq!(
+                shell.supervisor_app_identity("20260511-090000-000000001"),
+                Some(before),
+                "non-focused scheduler drive should not rebuild a disposable App"
+            );
+        });
+    }
+
+    #[test]
+    #[serial]
     fn scheduler_tick_ignores_closed_stale_sessions_when_open_session_waits() {
         with_temp_root(|| {
             save_session("20260511-080000-000000001", Phase::BrainstormRunning);
@@ -1277,7 +1431,7 @@ estimated_tokens = 100
             let first =
                 save_session_with_title("20260511-080000-000000001", Phase::Done, "cached title");
             let mut shell = AppShell::new(
-                first,
+                first.clone(),
                 AppStartupOrigin::Default,
                 Arc::new(Config::baked_defaults()),
             )
@@ -1298,9 +1452,11 @@ estimated_tokens = 100
             changed.title = Some("disk-only title".to_string());
             changed.save().expect("save disk-only title");
 
-            shell.apply_event(ShellEvent::RunStarted {
+            let mut event_state = first.clone();
+            event_state.agent_runs.push(running_sharding_run(42));
+            shell.apply_event(ShellEvent::SessionStateChanged {
                 session_id: "20260511-080000-000000001".to_string(),
-                run_id: 42,
+                state: Box::new(event_state),
             });
 
             let rows = shell.sidebar_view().rows;

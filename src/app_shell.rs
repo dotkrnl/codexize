@@ -11,15 +11,13 @@ use crate::app_runtime::{AppCommand, UiKeyCode};
 use crate::data::app_lock::AppLockGuard;
 use crate::data::config::Config;
 use crate::data::session_index::SessionIndex;
-use crate::scheduler::{
-    ImplementationDecision, ScannedSession, SchedulerSession, SchedulerTick, evaluate_tick,
-};
+use crate::scheduler::{ImplementationDecision, ScannedSession, SchedulerTick, evaluate_tick};
 use crate::state::{Message, Phase, RunStatus, SessionState};
 use anyhow::Result;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tracing::warn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellFocus {
@@ -50,6 +48,67 @@ pub struct SidebarView {
     pub focus: ShellFocus,
     pub selected_index: usize,
     pub rows: Vec<SidebarRow>,
+}
+
+#[derive(Debug, Clone)]
+struct SidebarModel {
+    visible: bool,
+    focus: ShellFocus,
+    selected_index: usize,
+    rows: Vec<SidebarRow>,
+    dirty: bool,
+    rebuild_count: usize,
+}
+
+impl SidebarModel {
+    fn new() -> Self {
+        Self {
+            visible: false,
+            focus: ShellFocus::Workspace,
+            selected_index: 0,
+            rows: Vec::new(),
+            dirty: true,
+            rebuild_count: 0,
+        }
+    }
+
+    fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    fn refresh_if_dirty(
+        &mut self,
+        index: &SessionIndex,
+        focused_session_id: &str,
+        running_session_id: Option<&str>,
+        workspaces: &BTreeMap<String, SessionWorkspace>,
+    ) {
+        if !self.dirty {
+            return;
+        }
+        self.rows = index
+            .snapshot_for_sidebar()
+            .into_iter()
+            .filter(|entry| entry.current_phase != Phase::Cancelled)
+            .map(|entry| {
+                let session_id = entry.session_id;
+                SidebarRow {
+                    focused: session_id == focused_session_id,
+                    open: workspaces.contains_key(&session_id),
+                    running: running_session_id == Some(session_id.as_str()),
+                    date_label: sidebar_date_label(&session_id),
+                    title: entry.idea_summary,
+                    session_id,
+                    phase: entry.current_phase,
+                }
+            })
+            .collect();
+        if self.selected_index >= self.rows.len() {
+            self.selected_index = self.rows.len().saturating_sub(1);
+        }
+        self.rebuild_count += 1;
+        self.dirty = false;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,15 +289,11 @@ pub struct AppShell {
     // read directly — the load-bearing behavior is `Drop` ordering.
     #[allow(dead_code)]
     app_lock_guard: Option<AppLockGuard>,
-    sessions_root: PathBuf,
     focused_session_id: String,
     running_session_id: Option<String>,
     running_run_id: Option<u64>,
     workspaces: BTreeMap<String, SessionWorkspace>,
-    sidebar_visible: bool,
-    sidebar_focus: ShellFocus,
-    sidebar_selected_index: usize,
-    sidebar_rows: Vec<SidebarRow>,
+    sidebar: SidebarModel,
     config: Arc<Config>,
     event_bus: ShellEventBus,
     // Mtime-cached projection of every session.toml under `sessions_root`.
@@ -273,18 +328,15 @@ impl AppShell {
         let running_run_id = initial_workspace.current_run_id();
         let running_session_id = running_run_id.map(|_| focused_session_id.clone());
         workspaces.insert(focused_session_id.clone(), initial_workspace);
-        let session_index = SessionIndex::new(sessions_root.clone());
+        let mut session_index = SessionIndex::new(sessions_root.clone());
+        session_index.refresh()?;
         let mut shell = Self {
             app_lock_guard,
-            sessions_root,
             focused_session_id,
             running_session_id,
             running_run_id,
             workspaces,
-            sidebar_visible: false,
-            sidebar_focus: ShellFocus::Workspace,
-            sidebar_selected_index: 0,
-            sidebar_rows: Vec::new(),
+            sidebar: SidebarModel::new(),
             config,
             event_bus: ShellEventBus::new(),
             session_index,
@@ -378,7 +430,7 @@ impl AppShell {
 
             crate::ui::tui::render_app(terminal, &view, |frame| {
                 let full_area = frame.area();
-                if self.sidebar_visible {
+                if self.sidebar.visible {
                     let sidebar_w = crate::ui::widgets::sidebar::view::sidebar_width()
                         .min(full_area.width.saturating_sub(20).max(10));
                     let sidebar_area =
@@ -401,7 +453,7 @@ impl AppShell {
 
             if let Some(command) = input.next_command(app.event_poll_duration(), &view)? {
                 // Shell intercepts sidebar-navigation keys first.
-                if self.sidebar_visible {
+                if self.sidebar.visible {
                     let modal_open = app.current_app_view().modal.is_some();
                     match self.handle_shell_command(command.clone(), modal_open)? {
                         ShellCommandOutcome::Consumed => {
@@ -442,11 +494,12 @@ impl AppShell {
     }
 
     pub fn toggle_sessions_sidebar(&mut self) -> Result<()> {
-        self.sidebar_visible = !self.sidebar_visible;
-        if self.sidebar_visible {
+        self.sidebar.visible = !self.sidebar.visible;
+        self.sidebar.mark_dirty();
+        if self.sidebar.visible {
             self.refresh_sidebar_rows()?;
-        } else if self.sidebar_focus == ShellFocus::Sidebar {
-            self.sidebar_focus = ShellFocus::Workspace;
+        } else if self.sidebar.focus == ShellFocus::Sidebar {
+            self.sidebar.focus = ShellFocus::Workspace;
         }
         Ok(())
     }
@@ -473,33 +526,34 @@ impl AppShell {
             return Ok(ShellCommandOutcome::Unhandled);
         }
         match key.code {
-            UiKeyCode::Left | UiKeyCode::Right if self.sidebar_visible => {
+            UiKeyCode::Left | UiKeyCode::Right if self.sidebar.visible => {
                 self.toggle_sidebar_focus();
                 Ok(ShellCommandOutcome::Consumed)
             }
-            UiKeyCode::Up if self.sidebar_visible && self.sidebar_focus == ShellFocus::Sidebar => {
+            UiKeyCode::Up if self.sidebar.visible && self.sidebar.focus == ShellFocus::Sidebar => {
                 self.move_sidebar_selection(-1);
                 Ok(ShellCommandOutcome::Consumed)
             }
             UiKeyCode::Down
-                if self.sidebar_visible && self.sidebar_focus == ShellFocus::Sidebar =>
+                if self.sidebar.visible && self.sidebar.focus == ShellFocus::Sidebar =>
             {
                 self.move_sidebar_selection(1);
                 Ok(ShellCommandOutcome::Consumed)
             }
             UiKeyCode::Enter
-                if self.sidebar_visible && self.sidebar_focus == ShellFocus::Sidebar =>
+                if self.sidebar.visible && self.sidebar.focus == ShellFocus::Sidebar =>
             {
                 self.open_selected_sidebar_session()?;
                 Ok(ShellCommandOutcome::Consumed)
             }
-            UiKeyCode::Esc if self.sidebar_focus == ShellFocus::Sidebar => {
+            UiKeyCode::Esc if self.sidebar.focus == ShellFocus::Sidebar => {
                 if modal_open {
                     // Esc is owned by the App modal; do not hide the sidebar.
                     return Ok(ShellCommandOutcome::Unhandled);
                 }
-                self.sidebar_visible = false;
-                self.sidebar_focus = ShellFocus::Workspace;
+                self.sidebar.visible = false;
+                self.sidebar.focus = ShellFocus::Workspace;
+                self.sidebar.mark_dirty();
                 Ok(ShellCommandOutcome::Consumed)
             }
             _ => Ok(ShellCommandOutcome::Unhandled),
@@ -507,33 +561,38 @@ impl AppShell {
     }
 
     pub fn focus_sidebar(&mut self) {
-        if self.sidebar_visible {
-            self.sidebar_focus = ShellFocus::Sidebar;
+        if self.sidebar.visible {
+            self.sidebar.focus = ShellFocus::Sidebar;
+            self.sidebar.mark_dirty();
         }
     }
 
     pub fn focus_workspace(&mut self) {
-        self.sidebar_focus = ShellFocus::Workspace;
+        self.sidebar.focus = ShellFocus::Workspace;
+        self.sidebar.mark_dirty();
     }
 
     fn toggle_sidebar_focus(&mut self) {
-        self.sidebar_focus = match self.sidebar_focus {
+        self.sidebar.focus = match self.sidebar.focus {
             ShellFocus::Workspace => ShellFocus::Sidebar,
             ShellFocus::Sidebar => ShellFocus::Workspace,
         };
+        self.sidebar.mark_dirty();
     }
 
     fn move_sidebar_selection(&mut self, delta: isize) {
-        if self.sidebar_rows.is_empty() {
-            self.sidebar_selected_index = 0;
+        if self.sidebar.rows.is_empty() {
+            self.sidebar.selected_index = 0;
             return;
         }
-        let max = self.sidebar_rows.len() - 1;
-        self.sidebar_selected_index = if delta.is_negative() {
-            self.sidebar_selected_index
+        let max = self.sidebar.rows.len() - 1;
+        self.sidebar.selected_index = if delta.is_negative() {
+            self.sidebar
+                .selected_index
                 .saturating_sub(delta.unsigned_abs())
         } else {
-            self.sidebar_selected_index
+            self.sidebar
+                .selected_index
                 .saturating_add(delta as usize)
                 .min(max)
         };
@@ -542,19 +601,21 @@ impl AppShell {
     pub fn select_sidebar_session(&mut self, session_id: &str) -> Result<()> {
         self.refresh_sidebar_rows()?;
         if let Some(index) = self
-            .sidebar_rows
+            .sidebar
+            .rows
             .iter()
             .position(|row| row.session_id == session_id)
         {
-            self.sidebar_selected_index = index;
+            self.sidebar.selected_index = index;
         }
         Ok(())
     }
 
     pub fn open_selected_sidebar_session(&mut self) -> Result<()> {
         let Some(session_id) = self
-            .sidebar_rows
-            .get(self.sidebar_selected_index)
+            .sidebar
+            .rows
+            .get(self.sidebar.selected_index)
             .map(|row| row.session_id.clone())
         else {
             return Ok(());
@@ -565,8 +626,10 @@ impl AppShell {
     pub fn open_session(&mut self, session_id: &str) -> Result<()> {
         if !self.workspaces.contains_key(session_id) {
             let state = SessionState::load(session_id)?;
+            self.session_index.update_loaded_state(&state);
             let workspace = SessionWorkspace::new(state, AppStartupOrigin::Default);
             self.workspaces.insert(session_id.to_string(), workspace);
+            self.sidebar.mark_dirty();
         }
         self.focus_session(session_id)
     }
@@ -577,17 +640,18 @@ impl AppShell {
             return Ok(());
         }
         self.focused_session_id = session_id.to_string();
-        self.sidebar_focus = ShellFocus::Workspace;
+        self.sidebar.focus = ShellFocus::Workspace;
+        self.sidebar.mark_dirty();
         self.refresh_sidebar_rows()?;
         Ok(())
     }
 
     pub fn sidebar_view(&self) -> SidebarView {
         SidebarView {
-            visible: self.sidebar_visible,
-            focus: self.sidebar_focus,
-            selected_index: self.sidebar_selected_index,
-            rows: self.sidebar_rows.clone(),
+            visible: self.sidebar.visible,
+            focus: self.sidebar.focus,
+            selected_index: self.sidebar.selected_index,
+            rows: self.sidebar.rows.clone(),
         }
     }
 
@@ -595,9 +659,11 @@ impl AppShell {
         self.event_bus.publish(event.clone());
         match event {
             ShellEvent::SessionStateChanged { session_id, state } => {
+                self.session_index.update_loaded_state(&state);
                 if let Some(workspace) = self.workspaces.get_mut(&session_id) {
                     workspace.replace_state(*state);
                 }
+                self.sidebar.mark_dirty();
             }
             ShellEvent::LiveSummaryChanged { session_id, text } => {
                 if let Some(workspace) = self.workspaces.get_mut(&session_id) {
@@ -607,6 +673,7 @@ impl AppShell {
             ShellEvent::RunStarted { session_id, run_id } => {
                 self.running_session_id = Some(session_id);
                 self.running_run_id = Some(run_id);
+                self.sidebar.mark_dirty();
             }
             ShellEvent::RunFinished { session_id, run_id } => {
                 if self.running_session_id.as_deref() == Some(session_id.as_str())
@@ -614,6 +681,7 @@ impl AppShell {
                 {
                     self.running_session_id = None;
                     self.running_run_id = None;
+                    self.sidebar.mark_dirty();
                 }
             }
         }
@@ -633,17 +701,22 @@ impl AppShell {
         self.session_index.loader_call_count()
     }
 
+    #[cfg(test)]
+    pub(crate) fn sidebar_rebuild_count(&self) -> usize {
+        self.sidebar.rebuild_count
+    }
+
     fn run_scheduler_tick_with_focused_app(
         &mut self,
         mut focused_app: Option<&mut App>,
     ) -> Result<ShellSchedulerReport> {
-        // Refresh the cached projection up front so subsequent reads
-        // (sidebar refresh below, future supervisor-driven snapshots)
-        // share one bounded disk pass per tick. Refresh failure is
-        // treated as a soft error: the scheduler still runs against the
-        // in-memory workspaces, matching prior behavior where a missing
-        // sessions directory was tolerated.
-        let _ = self.session_index.refresh();
+        match self.session_index.refresh_tracking_changes() {
+            Ok(true) => self.sidebar.mark_dirty(),
+            Ok(false) => {}
+            Err(err) => {
+                warn!(error = %err, "session index refresh failed during scheduler tick");
+            }
+        }
         let scan = self.scan_open_workspaces_for_scheduler(focused_app.as_deref());
         let tick = evaluate_tick(&scan);
         let mut planning_session_ids = Vec::new();
@@ -669,17 +742,29 @@ impl AppShell {
     fn scan_open_workspaces_for_scheduler(&self, focused_app: Option<&App>) -> Vec<ScannedSession> {
         let focused_phase =
             focused_app.map(|app| (app.state.session_id.as_str(), app.state.current_phase));
-        self.workspaces
-            .iter()
-            .map(|(session_id, workspace)| {
-                let current_phase = match focused_phase {
-                    Some((focused_id, phase)) if focused_id == session_id.as_str() => phase,
-                    _ => workspace.phase(),
-                };
-                ScannedSession::Loaded(SchedulerSession {
-                    session_id: session_id.clone(),
-                    current_phase,
-                })
+        self.session_index
+            .snapshot_for_scheduler()
+            .into_iter()
+            .filter_map(|scanned| {
+                let session_id = scanned.session_id().to_string();
+                if !self.workspaces.contains_key(&session_id) {
+                    return None;
+                }
+                match scanned {
+                    ScannedSession::Loaded(mut session) => {
+                        if let Some((focused_id, phase)) = focused_phase
+                            && focused_id == session.session_id
+                        {
+                            session.current_phase = phase;
+                        } else if let Some(workspace) = self.workspaces.get(&session.session_id) {
+                            // Until supervisors replace workspaces, open-session state is the
+                            // in-process override that preserves schedule-only-open behavior.
+                            session.current_phase = workspace.phase();
+                        }
+                        Some(ScannedSession::Loaded(session))
+                    }
+                    ScannedSession::Corrupt { .. } => Some(scanned),
+                }
             })
             .collect()
     }
@@ -778,8 +863,10 @@ impl AppShell {
     fn ensure_workspace_loaded(&mut self, session_id: &str) -> Result<()> {
         if !self.workspaces.contains_key(session_id) {
             let state = SessionState::load(session_id)?;
+            self.session_index.update_loaded_state(&state);
             let workspace = SessionWorkspace::new(state, AppStartupOrigin::Default);
             self.workspaces.insert(session_id.to_string(), workspace);
+            self.sidebar.mark_dirty();
         }
         Ok(())
     }
@@ -814,27 +901,12 @@ impl AppShell {
     }
 
     fn refresh_sidebar_rows(&mut self) -> Result<()> {
-        let sessions =
-            crate::data::picker_io::scan_sessions_by_creation_order(&self.sessions_root)?;
-        self.sidebar_rows = sessions
-            .into_iter()
-            .filter(|entry| entry.current_phase != Phase::Cancelled)
-            .map(|entry| {
-                let session_id = entry.session_id;
-                SidebarRow {
-                    focused: session_id == self.focused_session_id,
-                    open: self.workspaces.contains_key(&session_id),
-                    running: self.running_session_id.as_deref() == Some(session_id.as_str()),
-                    date_label: sidebar_date_label(&session_id),
-                    title: entry.idea_summary,
-                    session_id,
-                    phase: entry.current_phase,
-                }
-            })
-            .collect();
-        if self.sidebar_selected_index >= self.sidebar_rows.len() {
-            self.sidebar_selected_index = self.sidebar_rows.len().saturating_sub(1);
-        }
+        self.sidebar.refresh_if_dirty(
+            &self.session_index,
+            &self.focused_session_id,
+            self.running_session_id.as_deref(),
+            &self.workspaces,
+        );
         Ok(())
     }
 }
@@ -905,6 +977,19 @@ mod tests {
         state.current_phase = phase;
         state.save().expect("save session");
         state
+    }
+
+    fn save_session_with_title(id: &str, phase: Phase, title: &str) -> SessionState {
+        let mut state = SessionState::new(id.to_string());
+        state.idea_text = Some(format!("idea for {id}"));
+        state.title = Some(title.to_string());
+        state.current_phase = phase;
+        state.save().expect("save titled session");
+        state
+    }
+
+    fn advance_mtime_clock() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
 
     fn cached_build_model() -> CachedModel {
@@ -1182,6 +1267,118 @@ estimated_tokens = 100
                 after_warmup,
                 "steady-state scheduler tick must not full-load every session"
             );
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn sidebar_event_refresh_uses_cached_index_not_disk_scan() {
+        with_temp_root(|| {
+            let first =
+                save_session_with_title("20260511-080000-000000001", Phase::Done, "cached title");
+            let mut shell = AppShell::new(
+                first,
+                AppStartupOrigin::Default,
+                Arc::new(Config::baked_defaults()),
+            )
+            .expect("shell");
+
+            shell.toggle_sessions_sidebar().expect("show sidebar");
+            shell.run_scheduler_tick().expect("warm index");
+            assert_eq!(
+                shell.sidebar_view().rows[0].title,
+                "cached title",
+                "warm sidebar row should use the initial index projection"
+            );
+            let after_warmup = shell.session_index_loader_call_count();
+
+            advance_mtime_clock();
+            let mut changed =
+                SessionState::load("20260511-080000-000000001").expect("reload session");
+            changed.title = Some("disk-only title".to_string());
+            changed.save().expect("save disk-only title");
+
+            shell.apply_event(ShellEvent::RunStarted {
+                session_id: "20260511-080000-000000001".to_string(),
+                run_id: 42,
+            });
+
+            let rows = shell.sidebar_view().rows;
+            assert_eq!(
+                rows[0].title, "cached title",
+                "supervisor events rebuild sidebar rows from SessionIndex, not a fresh disk scan"
+            );
+            assert!(rows[0].running);
+            assert_eq!(
+                shell.session_index_loader_call_count(),
+                after_warmup,
+                "event-only sidebar refresh must not reparse session.toml"
+            );
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn sidebar_rebuilds_only_when_dirty_inputs_change() {
+        with_temp_root(|| {
+            let first = save_session_with_title("20260511-080000-000000001", Phase::Done, "first");
+            save_session_with_title("20260511-090000-000000001", Phase::Done, "second");
+            let mut shell = AppShell::new(
+                first,
+                AppStartupOrigin::Default,
+                Arc::new(Config::baked_defaults()),
+            )
+            .expect("shell");
+
+            shell.toggle_sessions_sidebar().expect("show sidebar");
+            shell.run_scheduler_tick().expect("warm index");
+            let after_warmup = shell.sidebar_rebuild_count();
+
+            shell.run_scheduler_tick().expect("no-op tick");
+            assert_eq!(
+                shell.sidebar_rebuild_count(),
+                after_warmup,
+                "unchanged index and shell state should not rebuild sidebar rows"
+            );
+
+            shell
+                .focus_session("20260511-090000-000000001")
+                .expect("focus second");
+            assert_eq!(
+                shell.sidebar_rebuild_count(),
+                after_warmup + 1,
+                "focus movement marks the sidebar dirty"
+            );
+            let focused = shell
+                .sidebar_view()
+                .rows
+                .iter()
+                .find(|row| row.session_id == "20260511-090000-000000001")
+                .expect("second row")
+                .focused;
+            assert!(focused);
+
+            advance_mtime_clock();
+            let mut changed =
+                SessionState::load("20260511-090000-000000001").expect("reload second");
+            changed.title = Some("second changed".to_string());
+            changed.save().expect("save changed second");
+
+            shell.run_scheduler_tick().expect("changed index tick");
+            assert_eq!(
+                shell.sidebar_rebuild_count(),
+                after_warmup + 2,
+                "index changes mark the sidebar dirty"
+            );
+            let changed_title = shell
+                .sidebar_view()
+                .rows
+                .iter()
+                .find(|row| row.session_id == "20260511-090000-000000001")
+                .expect("second row")
+                .title
+                .clone();
+            assert_eq!(changed_title, "second changed");
         });
     }
 

@@ -319,6 +319,7 @@ pub struct App {
     pub(crate) pending_cancel_confirmation: bool,
     pub(crate) interactive_exit_prompt_dismissed_at: Option<(u64, usize)>,
     pub(crate) pending_app_exit: bool,
+    pub(crate) pending_shell_command: Option<String>,
     pub(crate) current_run_id: Option<u64>,
     pub(crate) failed_models: HashMap<RetryKey, FailedModelSet>,
     pub(crate) pending_yolo_toggle_gate: Option<&'static str>,

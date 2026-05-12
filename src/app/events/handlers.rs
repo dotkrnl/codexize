@@ -83,6 +83,12 @@ impl App {
                 key_hint: None,
             });
         }
+        commands.push(PaletteCommand {
+            name: "sessions",
+            aliases: &[],
+            help: "Toggle sessions sidebar",
+            key_hint: None,
+        });
         if self.cancel_command_available() {
             commands.push(PaletteCommand {
                 name: "cancel",
@@ -263,6 +269,10 @@ impl App {
             }
             "cancel" => {
                 self.open_cancel_session_modal();
+                false
+            }
+            "sessions" => {
+                self.pending_shell_command = Some("sessions".to_string());
                 false
             }
             "config" => {

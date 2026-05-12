@@ -125,6 +125,7 @@ impl App {
             pending_cancel_confirmation: false,
             interactive_exit_prompt_dismissed_at: None,
             pending_app_exit: false,
+            pending_shell_command: None,
             current_run_id: None,
             failed_models,
             runner_supervisor: app_runner_supervisor(&config),

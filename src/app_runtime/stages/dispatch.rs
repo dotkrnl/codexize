@@ -11,6 +11,15 @@ use crate::{
     state::Phase,
 };
 impl App {
+    fn pause_sharding_retry_for_waiting_dispatch(&mut self) -> bool {
+        self.clear_agent_error();
+        self.current_run_id = None;
+        self.run_launched = false;
+        self.live_summary_cached_text.clear();
+        self.live_summary_cached_mtime = None;
+        self.transition_to_phase(Phase::WaitingToImplement).is_ok()
+    }
+
     /// Auto-launch the agent for the current phase if it's a non-interactive
     /// one (spec review, sharding, coder, reviewer). Idempotent: no-op if the
     /// run is already launched, if models aren't loaded, or if the last run
@@ -75,12 +84,7 @@ impl App {
                 // A retry of sharding must land in WaitingToImplement so the
                 // scheduler re-verifies the repo-state baseline before any
                 // sharding launch — spec §Data model line 96.
-                self.clear_agent_error();
-                self.current_run_id = None;
-                self.run_launched = false;
-                self.live_summary_cached_text.clear();
-                self.live_summary_cached_mtime = None;
-                let _ = self.transition_to_phase(Phase::WaitingToImplement);
+                let _ = self.pause_sharding_retry_for_waiting_dispatch();
             }
             RetryLaunch::Recovery => self.launch_recovery(),
             RetryLaunch::RecoveryPlanReview => self.launch_recovery_plan_review(),
@@ -107,12 +111,7 @@ impl App {
                 // Stage-error modal retry for sharding must route through
                 // WaitingToImplement so the scheduler re-verifies baseline
                 // state before any sharding launch — spec §Data model line 96.
-                self.clear_agent_error();
-                self.current_run_id = None;
-                self.run_launched = false;
-                self.live_summary_cached_text.clear();
-                self.live_summary_cached_mtime = None;
-                let _ = self.transition_to_phase(Phase::WaitingToImplement);
+                let _ = self.pause_sharding_retry_for_waiting_dispatch();
             }
             StageId::Implementation => self.launch_coder(),
             StageId::Review => self.launch_reviewer(),
@@ -144,7 +143,7 @@ impl App {
                 Phase::BuilderRecoverySharding(_) => {
                     self.launch_recovery_sharding_with_model(Some(chosen))
                 }
-                _ => self.launch_sharding_with_model(Some(chosen)),
+                _ => self.pause_sharding_retry_for_waiting_dispatch(),
             },
             "recovery" => self.launch_recovery_with_model(Some(chosen)),
             "coder" => self.launch_coder_with_model(Some(chosen)),
@@ -154,5 +153,106 @@ impl App {
             "dreaming" => self.launch_dreaming_with_model(Some(chosen)),
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::test_support::{mk_app, with_temp_root};
+    use crate::logic::selection::{
+        CachedModel, Candidate, CliKind, IpbrPhaseScores, ScoreSource, SubscriptionKind,
+    };
+    use crate::state::{LaunchModes, Phase, RunRecord, RunStatus, SessionState};
+
+    fn cached_build_model(vendor: SubscriptionKind, name: &str) -> CachedModel {
+        let candidate = Candidate {
+            subscription: vendor,
+            cli: vendor.direct_cli().unwrap_or(CliKind::Codex),
+            launch_name: name.to_string(),
+            quota_percent: Some(80),
+            quota_resets_at: None,
+            display_order: 0,
+            enabled: true,
+            free: false,
+            official: true,
+            quota_disabled: false,
+            cheap_eligible: true,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_mapping: crate::data::config::schema::EffortMapping::default(),
+            quota_failed: false,
+        };
+        CachedModel {
+            subscription: vendor,
+            name: name.to_string(),
+            ipbr_phase_scores: IpbrPhaseScores {
+                idea: Some(80.0),
+                planning: Some(80.0),
+                build: Some(80.0),
+                review: Some(80.0),
+            },
+            score_source: ScoreSource::Ipbr,
+            candidates: vec![candidate],
+            selected_candidate: Some(0),
+            quota_percent: Some(80),
+            quota_resets_at: None,
+            display_order: 0,
+        }
+    }
+
+    fn failed_sharding_run() -> RunRecord {
+        RunRecord {
+            id: 1,
+            stage: "sharding".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "failed-model".to_string(),
+            subscription_label: "claude".to_string(),
+            window_name: "[Sharding] failed-model".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("model failed".to_string()),
+            effort: crate::adapters::EffortLevel::Normal,
+            effort_mapping: crate::data::config::schema::EffortMapping::default(),
+            effort_eligible: false,
+            modes: LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+            section_path: None,
+        }
+    }
+
+    #[test]
+    fn automatic_sharding_model_retry_pauses_in_waiting_to_implement() {
+        // Automatic model fallback reaches this lower-level retry path, so
+        // it must re-enter WaitingToImplement instead of launching sharding.
+        with_temp_root(|| {
+            let mut state = SessionState::new("20260511-093000-000000001".to_string());
+            state.current_phase = Phase::ShardingRunning;
+            let failed_run = failed_sharding_run();
+            state.agent_runs.push(failed_run.clone());
+            state.save().unwrap();
+
+            let mut app = mk_app(state);
+            app.models
+                .push(cached_build_model(SubscriptionKind::Codex, "next-model"));
+
+            assert!(app.launch_retry_for_stage(
+                &failed_run,
+                cached_build_model(SubscriptionKind::Codex, "next-model"),
+            ));
+            assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+            assert_eq!(
+                app.state
+                    .agent_runs
+                    .iter()
+                    .filter(|run| run.stage == "sharding")
+                    .count(),
+                1,
+                "retry should not append a new sharding run before the waiting dispatch",
+            );
+        });
     }
 }

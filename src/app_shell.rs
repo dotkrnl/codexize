@@ -800,3 +800,101 @@ impl SchedulerDrive {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_runtime::{AppCommand, UiKey, UiKeyCode};
+    use serial_test::serial;
+
+    fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let prev = std::env::var_os("CODEXIZE_ROOT");
+        unsafe {
+            std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        unsafe {
+            match prev {
+                Some(value) => std::env::set_var("CODEXIZE_ROOT", value),
+                None => std::env::remove_var("CODEXIZE_ROOT"),
+            }
+        }
+        result.expect("test panicked")
+    }
+
+    fn save_session(id: &str, phase: Phase) -> SessionState {
+        let mut state = SessionState::new(id.to_string());
+        state.idea_text = Some(format!("idea for {id}"));
+        state.current_phase = phase;
+        state.save().expect("save session");
+        state
+    }
+
+    // Mirrors the swap point inside `run_focused_terminal_app`: when sidebar
+    // Enter changes the focused session, the loop must absorb the running
+    // local `App` into the prior workspace, rebuild a fresh `App` for the new
+    // focused workspace, and leave shell-level run tracking untouched.
+    #[test]
+    #[serial]
+    fn sidebar_enter_swaps_focused_app_and_keeps_running_session_marked() {
+        with_temp_root(|| {
+            let first = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+            let mut shell = AppShell::new(
+                first,
+                AppStartupOrigin::Default,
+                Arc::new(Config::baked_defaults()),
+            )
+            .expect("shell");
+
+            shell.apply_event(ShellEvent::RunStarted {
+                session_id: "20260511-090000-000000001".into(),
+                run_id: 7,
+            });
+
+            let config = shell.config.clone();
+            let mut app = shell
+                .focused_workspace_unchecked()
+                .rebuild_terminal_app(config);
+            assert_eq!(app.state.session_id, "20260511-090000-000000001");
+
+            // Sidebar Enter on the second row routes through the same command
+            // path the terminal loop uses (`handle_shell_command`).
+            shell.toggle_sessions_sidebar().expect("toggle");
+            shell.focus_sidebar();
+            shell
+                .select_sidebar_session("20260511-091000-000000001")
+                .expect("select");
+            let enter = AppCommand::KeyPress(UiKey {
+                code: UiKeyCode::Enter,
+                ctrl: false,
+                alt: false,
+            });
+            assert_eq!(
+                shell.handle_shell_command(enter, false).expect("enter"),
+                ShellCommandOutcome::Consumed
+            );
+
+            // The loop's swap point hands the new focused `App` back to the
+            // body. Without this, the loop would keep rendering session A's
+            // `App` even though focus moved to session B.
+            app = shell.swap_focused_app_if_needed(app);
+            assert_eq!(app.state.session_id, "20260511-091000-000000001");
+            assert_eq!(shell.focused_session_id(), "20260511-091000-000000001");
+
+            // Shell-level run tracking is independent of focus; the prior
+            // running session must remain marked running.
+            assert_eq!(
+                shell.running_session_id(),
+                Some("20260511-090000-000000001")
+            );
+            let rows = shell.sidebar_view().rows;
+            let running_row = rows
+                .iter()
+                .find(|r| r.session_id == "20260511-090000-000000001")
+                .expect("running session in sidebar");
+            assert!(running_row.running);
+        });
+    }
+}

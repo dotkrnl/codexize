@@ -10,7 +10,9 @@ use crate::app::{App, AppStartupOrigin};
 use crate::app_runtime::{AppCommand, UiKeyCode};
 use crate::data::app_lock::AppLockGuard;
 use crate::data::config::Config;
-use crate::scheduler::{ImplementationDecision, SchedulerTick, evaluate_tick};
+use crate::scheduler::{
+    ImplementationDecision, ScannedSession, SchedulerSession, SchedulerTick, evaluate_tick,
+};
 use crate::state::{Message, Phase, RunStatus, SessionState};
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -615,7 +617,7 @@ impl AppShell {
         &mut self,
         mut focused_app: Option<&mut App>,
     ) -> Result<ShellSchedulerReport> {
-        let scan = crate::data::picker_io::scan_sessions_for_scheduler(&self.sessions_root)?;
+        let scan = self.scan_open_workspaces_for_scheduler(focused_app.as_deref());
         let tick = evaluate_tick(&scan);
         let mut planning_session_ids = Vec::new();
 
@@ -635,6 +637,24 @@ impl AppShell {
             implementation,
             skipped_corrupt_later_sessions: tick.skipped_corrupt_later_sessions,
         })
+    }
+
+    fn scan_open_workspaces_for_scheduler(&self, focused_app: Option<&App>) -> Vec<ScannedSession> {
+        let focused_phase =
+            focused_app.map(|app| (app.state.session_id.as_str(), app.state.current_phase));
+        self.workspaces
+            .iter()
+            .map(|(session_id, workspace)| {
+                let current_phase = match focused_phase {
+                    Some((focused_id, phase)) if focused_id == session_id.as_str() => phase,
+                    _ => workspace.phase(),
+                };
+                ScannedSession::Loaded(SchedulerSession {
+                    session_id: session_id.clone(),
+                    current_phase,
+                })
+            })
+            .collect()
     }
 
     fn apply_implementation_decision(
@@ -1074,6 +1094,33 @@ estimated_tokens = 100
 
     #[test]
     #[serial]
+    fn scheduler_tick_ignores_closed_stale_sessions_when_open_session_waits() {
+        with_temp_root(|| {
+            save_session("20260511-080000-000000001", Phase::BrainstormRunning);
+            let waiting = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+            let mut shell = AppShell::new(
+                waiting,
+                AppStartupOrigin::Default,
+                Arc::new(Config::baked_defaults()),
+            )
+            .expect("shell");
+
+            let report = shell.run_scheduler_tick().expect("tick");
+
+            assert!(matches!(
+                report.implementation,
+                ShellImplementationAction::DispatchedWaiting {
+                    session_id,
+                    phase: Phase::ShardingRunning,
+                } if session_id == "20260511-090000-000000001"
+            ));
+            let stale = SessionState::load("20260511-080000-000000001").expect("load stale");
+            assert_eq!(stale.current_phase, Phase::BrainstormRunning);
+        });
+    }
+
+    #[test]
+    #[serial]
     fn scheduler_tick_finalizes_finished_background_sharding_run() {
         with_temp_root(|| {
             let focused = save_session("20260511-085000-000000001", Phase::Done);
@@ -1089,6 +1136,12 @@ estimated_tokens = 100
                 Arc::new(Config::baked_defaults()),
             )
             .expect("shell");
+            shell
+                .open_session("20260511-090000-000000001")
+                .expect("open sharding");
+            shell
+                .focus_session("20260511-085000-000000001")
+                .expect("refocus done");
 
             let report = shell.run_scheduler_tick().expect("tick");
 

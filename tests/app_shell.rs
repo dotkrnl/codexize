@@ -483,6 +483,12 @@ fn scheduler_tick_continues_planning_while_implementation_lane_is_occupied() {
         let running = save_session("20260511-090000-000000001", Phase::ShardingRunning);
         save_session("20260511-091000-000000001", Phase::PlanningRunning);
         let mut shell = shell_for(running);
+        shell
+            .open_session("20260511-091000-000000001")
+            .expect("open planning");
+        shell
+            .focus_session("20260511-090000-000000001")
+            .expect("refocus running");
 
         let report = shell.run_scheduler_tick().expect("scheduler tick");
 
@@ -518,6 +524,12 @@ fn scheduler_tick_blocks_later_implementation_behind_earlier_blocked_session() {
         let blocked = save_session("20260511-090000-000000001", Phase::BlockedNeedsUser);
         save_session("20260511-091000-000000001", Phase::WaitingToImplement);
         let mut shell = shell_for(blocked);
+        shell
+            .open_session("20260511-091000-000000001")
+            .expect("open later waiting");
+        shell
+            .focus_session("20260511-090000-000000001")
+            .expect("refocus blocked");
 
         let report = shell.run_scheduler_tick().expect("scheduler tick");
 
@@ -545,6 +557,15 @@ fn scheduler_tick_skips_cancelled_and_dispatches_oldest_waiting_session() {
         save_session("20260511-091000-000000001", Phase::WaitingToImplement);
         save_session("20260511-092000-000000001", Phase::WaitingToImplement);
         let mut shell = shell_for(initial);
+        shell
+            .open_session("20260511-091000-000000001")
+            .expect("open first waiting");
+        shell
+            .open_session("20260511-092000-000000001")
+            .expect("open second waiting");
+        shell
+            .focus_session("20260511-090000-000000001")
+            .expect("refocus cancelled");
 
         let report = shell.run_scheduler_tick().expect("scheduler tick");
 

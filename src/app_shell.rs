@@ -315,6 +315,22 @@ impl AppShell {
             .expect("AppShell always has a focused workspace")
     }
 
+    /// If the focused session has changed since `app` was built, absorb the old
+    /// app into its workspace and rebuild a fresh `App` for the newly focused
+    /// session. Background run tracking on the shell is untouched.
+    fn swap_focused_app_if_needed(&mut self, app: App) -> App {
+        if app.state.session_id == self.focused_session_id {
+            return app;
+        }
+        let old_session_id = app.state.session_id.clone();
+        if let Some(workspace) = self.workspaces.get_mut(&old_session_id) {
+            workspace.absorb_terminal_app(app);
+        }
+        let config = self.config.clone();
+        self.focused_workspace_unchecked()
+            .rebuild_terminal_app(config)
+    }
+
     pub fn run_focused_terminal_app(
         &mut self,
         terminal: &mut crate::tui::AppTerminal,
@@ -373,7 +389,10 @@ impl AppShell {
                 if self.sidebar_visible {
                     let modal_open = app.current_app_view().modal.is_some();
                     match self.handle_shell_command(command.clone(), modal_open)? {
-                        ShellCommandOutcome::Consumed => continue,
+                        ShellCommandOutcome::Consumed => {
+                            app = self.swap_focused_app_if_needed(app);
+                            continue;
+                        }
                         ShellCommandOutcome::Unhandled => {}
                     }
                 }

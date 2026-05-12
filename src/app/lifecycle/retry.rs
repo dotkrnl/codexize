@@ -459,35 +459,31 @@ impl App {
             Phase::Dreaming(_) => {
                 self.cancel_run_label("[Dreaming]");
             }
-            Phase::FinalValidation(_) => {
+            Phase::FinalValidation(r) => {
                 // Validator is non-mutating and can be rewound. Route back to
                 // ReviewRound(r) for any round; round-1 sessions on the
                 // skip-to-impl path can additionally rewind to ImplementationRound(1)
                 // via existing transitions, but the default rewind target is the
                 // matching review round to preserve per-task review history.
-                if let Phase::FinalValidation(r) = self.state.current_phase {
-                    self.cancel_run_label("[FinalValidation]");
-                    let target = if r >= 1 {
-                        Phase::ReviewRound(r)
-                    } else {
-                        Phase::ImplementationRound(1)
-                    };
-                    let _ = self.transition_to_phase(target);
-                }
+                self.cancel_run_label("[FinalValidation]");
+                let target = if r >= 1 {
+                    Phase::ReviewRound(r)
+                } else {
+                    Phase::ImplementationRound(1)
+                };
+                let _ = self.transition_to_phase(target);
             }
-            Phase::Simplification(_) => {
+            Phase::Simplification(r) => {
                 // Simplification is a code-producing stage; rewind to the
                 // matching ReviewRound to drop back into the loop on round >= 1
                 // or to ImplementationRound(1) on the skip-to-impl path.
-                if let Phase::Simplification(r) = self.state.current_phase {
-                    self.cancel_run_label("[Simplifier]");
-                    let target = if r >= 1 {
-                        Phase::ReviewRound(r)
-                    } else {
-                        Phase::ImplementationRound(1)
-                    };
-                    let _ = self.transition_to_phase(target);
-                }
+                self.cancel_run_label("[Simplifier]");
+                let target = if r >= 1 {
+                    Phase::ReviewRound(r)
+                } else {
+                    Phase::ImplementationRound(1)
+                };
+                let _ = self.transition_to_phase(target);
             }
             Phase::IdeaInput
             | Phase::BlockedNeedsUser

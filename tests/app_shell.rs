@@ -548,3 +548,77 @@ fn scheduler_tick_skips_cancelled_and_dispatches_oldest_waiting_session() {
         );
     });
 }
+
+#[test]
+#[serial]
+fn scheduler_tick_does_not_duplicate_background_planning_run_when_models_loaded() {
+    use chrono::Utc;
+    use codexize::state::RunRecord;
+    with_temp_root(|| {
+        let mut state = session("20260511-090000-000000001", Phase::PlanningRunning);
+        state.idea_text = Some("idea".to_string());
+        let run = RunRecord {
+            id: 42,
+            stage: "planning".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "test-model".to_string(),
+            subscription_label: "test".to_string(),
+            window_name: "[Planning]".to_string(),
+            started_at: Utc::now(),
+            ended_at: None,
+            status: codexize::state::RunStatus::Running,
+            error: None,
+            effort: codexize::adapters::EffortLevel::Normal,
+            effort_mapping: codexize::data::config::schema::EffortMapping::default(),
+            effort_eligible: true,
+            modes: codexize::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+            section_path: None,
+        };
+        state.agent_runs.push(run);
+        state.save().expect("save");
+
+        let mut shell = shell_for(state);
+
+        // Scheduler tick 1: background planning session already has a
+        // Running agent_run. The shell rebuilds a fresh App for each
+        // background tick; `drive_scheduler_session` must restore the
+        // workspace's preserved current_run_id so `maybe_auto_launch`
+        // recognises the active run and skips re-dispatch.
+        let report1 = shell.run_scheduler_tick().expect("tick 1");
+        assert!(
+            report1
+                .planning_session_ids
+                .contains(&"20260511-090000-000000001".to_string()),
+            "planning session should be scanned"
+        );
+        let loaded1 = SessionState::load("20260511-090000-000000001").expect("load 1");
+        assert_eq!(
+            loaded1.agent_runs.len(),
+            1,
+            "tick 1: must not duplicate run"
+        );
+
+        // Tick 2 confirms the invariant survives repeated ticks.
+        let _ = shell.run_scheduler_tick().expect("tick 2");
+        let loaded2 = SessionState::load("20260511-090000-000000001").expect("load 2");
+        assert_eq!(
+            loaded2.agent_runs.len(),
+            1,
+            "tick 2: must not duplicate run"
+        );
+        // The workspace's preserved current_run_id must continue to point at
+        // the existing run, not be reset to None by the rebuild.
+        assert_eq!(
+            shell
+                .workspace("20260511-090000-000000001")
+                .expect("ws")
+                .current_run_id(),
+            Some(42),
+            "workspace must preserve current_run_id across ticks"
+        );
+    });
+}

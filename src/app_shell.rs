@@ -683,6 +683,13 @@ impl AppShell {
             .get(session_id)
             .expect("workspace loaded before scheduler drive");
         let mut app = workspace.rebuild_terminal_app(config);
+        // Restore run tracking from the workspace's preserved current_run_id so
+        // a background tick cannot re-launch a session that already has an
+        // active run. `App::new_with_startup_origin_and_config` recovers this
+        // from `state.agent_runs` via `resume_running_runs`, but mirror it
+        // explicitly here: the workspace is the in-process source of truth.
+        app.current_run_id = workspace.current_run_id();
+        app.run_launched = workspace.current_run_id().is_some();
         let before_run_id = app.current_run_id;
         drive.apply(&mut app);
         let state = app.state.clone();

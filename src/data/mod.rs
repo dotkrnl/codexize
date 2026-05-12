@@ -25,6 +25,7 @@ pub mod repo_state_update;
 pub mod runner;
 pub mod selection_assembly;
 pub mod selection_quota;
+pub mod session_index;
 pub mod snapshot;
 pub mod synthetic_artifacts;
 pub mod tmux;

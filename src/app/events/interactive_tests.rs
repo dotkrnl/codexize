@@ -563,3 +563,29 @@ fn bridged_tab_keeps_config_panel_open_and_switches_page() {
         "models"
     );
 }
+
+#[test]
+fn cancel_on_done_session_is_noop() {
+    // AC-7 / spec §"Cancellation": on Done or Cancelled, :cancel is a no-op
+    // (hidden from the palette or surfaces a non-error toast). Verify that
+    // even if the command were somehow invoked, the session state does not
+    // change.
+    crate::app::test_support::with_temp_root(|| {
+        let mut state = SessionState::new("cancel-done-noop".to_string());
+        state.current_phase = Phase::Done;
+        let mut app = mk_app(state);
+
+        // :cancel is hidden from the palette for Done sessions.
+        assert!(
+            app.palette_commands()
+                .iter()
+                .all(|cmd| cmd.name != "cancel"),
+            ":cancel must be hidden for Done session"
+        );
+
+        // Even if invoked directly, the phase must not change.
+        app.execute_palette_input("cancel");
+        assert_eq!(app.state.current_phase, Phase::Done);
+        assert_eq!(app.active_modal(), None);
+    });
+}

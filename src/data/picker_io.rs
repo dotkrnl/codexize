@@ -1,6 +1,7 @@
 use crate::{
+    data::session_index,
     picker::SessionEntry,
-    scheduler::{ScannedSession, SchedulerSession},
+    scheduler::ScannedSession,
     state::{self, Phase, SessionState},
 };
 use anyhow::Result;
@@ -39,39 +40,13 @@ pub fn newest_earlier_done_baseline(session_id: &str, sessions: &[SessionEntry])
 /// corrupt entry blocks the implementation lane (only earlier-than-head
 /// failures do, per spec).
 pub fn scan_sessions_for_scheduler(sessions_dir: &Path) -> Result<Vec<ScannedSession>> {
-    if !sessions_dir.exists() {
-        fs::create_dir_all(sessions_dir)?;
-        return Ok(Vec::new());
-    }
-    let mut entries: Vec<ScannedSession> = Vec::new();
-    for entry in fs::read_dir(sessions_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let session_id = match path.file_name().and_then(|n| n.to_str()) {
-            Some(id) => id.to_string(),
-            None => continue,
-        };
-        let toml_path = path.join("session.toml");
-        if !toml_path.exists() {
-            continue;
-        }
-        match SessionState::load(&session_id) {
-            Ok(state) if state.archived => {}
-            Ok(state) => entries.push(ScannedSession::Loaded(SchedulerSession {
-                session_id,
-                current_phase: state.current_phase,
-            })),
-            Err(err) => entries.push(ScannedSession::Corrupt {
-                session_id,
-                error: format!("{err:#}"),
-            }),
-        }
-    }
-    entries.sort_by(|a, b| a.session_id().cmp(b.session_id()));
-    Ok(entries)
+    // Thin compatibility wrapper around the one-shot `SessionIndex`
+    // snapshot. Long-lived callers (the shell scheduler tick) hold a
+    // `SessionIndex` directly so they pay only for entries whose
+    // `session.toml` mtime advanced; this one-shot path keeps the picker
+    // startup, retry-allowed gating, and scheduler unit tests working
+    // without changes.
+    session_index::snapshot_for_scheduler(sessions_dir)
 }
 
 pub fn scan_sessions(sessions_dir: &Path) -> Result<Vec<SessionEntry>> {

@@ -10,6 +10,7 @@ use crate::app::{App, AppStartupOrigin};
 use crate::app_runtime::{AppCommand, UiKeyCode};
 use crate::data::app_lock::AppLockGuard;
 use crate::data::config::Config;
+use crate::data::session_index::SessionIndex;
 use crate::scheduler::{
     ImplementationDecision, ScannedSession, SchedulerSession, SchedulerTick, evaluate_tick,
 };
@@ -240,6 +241,14 @@ pub struct AppShell {
     sidebar_rows: Vec<SidebarRow>,
     config: Arc<Config>,
     event_bus: ShellEventBus,
+    // Mtime-cached projection of every session.toml under `sessions_root`.
+    // The shell refreshes it on each scheduler tick so per-tick load cost
+    // is bounded to entries whose file actually changed since the last
+    // refresh. The scheduler input itself is still derived from the
+    // in-memory open workspaces (so the focused App's live phase wins),
+    // but the cache underpins steady-state load-count guarantees and the
+    // upcoming index-driven sidebar work.
+    session_index: SessionIndex,
 }
 
 impl AppShell {
@@ -264,6 +273,7 @@ impl AppShell {
         let running_run_id = initial_workspace.current_run_id();
         let running_session_id = running_run_id.map(|_| focused_session_id.clone());
         workspaces.insert(focused_session_id.clone(), initial_workspace);
+        let session_index = SessionIndex::new(sessions_root.clone());
         let mut shell = Self {
             app_lock_guard,
             sessions_root,
@@ -277,6 +287,7 @@ impl AppShell {
             sidebar_rows: Vec::new(),
             config,
             event_bus: ShellEventBus::new(),
+            session_index,
         };
         shell.refresh_sidebar_rows()?;
         Ok(shell)
@@ -613,10 +624,26 @@ impl AppShell {
         self.run_scheduler_tick_with_focused_app(None)
     }
 
+    /// Test seam: number of full `SessionState::load` calls the shell's
+    /// session index has performed since construction. Used by scheduler
+    /// integration tests to assert that a steady-state tick does not
+    /// full-load every session.
+    #[cfg(test)]
+    pub(crate) fn session_index_loader_call_count(&self) -> usize {
+        self.session_index.loader_call_count()
+    }
+
     fn run_scheduler_tick_with_focused_app(
         &mut self,
         mut focused_app: Option<&mut App>,
     ) -> Result<ShellSchedulerReport> {
+        // Refresh the cached projection up front so subsequent reads
+        // (sidebar refresh below, future supervisor-driven snapshots)
+        // share one bounded disk pass per tick. Refresh failure is
+        // treated as a soft error: the scheduler still runs against the
+        // in-memory workspaces, matching prior behavior where a missing
+        // sessions directory was tolerated.
+        let _ = self.session_index.refresh();
         let scan = self.scan_open_workspaces_for_scheduler(focused_app.as_deref());
         let tick = evaluate_tick(&scan);
         let mut planning_session_ids = Vec::new();
@@ -1116,6 +1143,45 @@ estimated_tokens = 100
             ));
             let stale = SessionState::load("20260511-080000-000000001").expect("load stale");
             assert_eq!(stale.current_phase, Phase::BrainstormRunning);
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn scheduler_tick_does_not_full_load_every_session_in_steady_state() {
+        with_temp_root(|| {
+            // Three on-disk sessions, none of them changing across ticks.
+            // The shell only opens one workspace (the focused one); the
+            // other two exercise the index's "seen but unchanged" path.
+            let focused = save_session("20260511-080000-000000001", Phase::Done);
+            let _ = save_session("20260511-090000-000000001", Phase::Done);
+            let _ = save_session("20260511-100000-000000001", Phase::WaitingToImplement);
+
+            let mut shell = AppShell::new(
+                focused,
+                AppStartupOrigin::Default,
+                Arc::new(Config::baked_defaults()),
+            )
+            .expect("shell");
+
+            // First tick warms the cache — every entry is "new since last
+            // refresh" so every entry is parsed exactly once.
+            shell.run_scheduler_tick().expect("first tick");
+            let after_warmup = shell.session_index_loader_call_count();
+            assert!(
+                after_warmup >= 3,
+                "first refresh should load every session at least once (got {after_warmup})"
+            );
+
+            // Subsequent ticks without any on-disk change must not reparse
+            // any session.toml — this is the bounded-reparse guarantee.
+            shell.run_scheduler_tick().expect("second tick");
+            shell.run_scheduler_tick().expect("third tick");
+            assert_eq!(
+                shell.session_index_loader_call_count(),
+                after_warmup,
+                "steady-state scheduler tick must not full-load every session"
+            );
         });
     }
 

@@ -10,6 +10,7 @@ use crate::app::{App, AppStartupOrigin};
 use crate::app_runtime::{AppCommand, UiKeyCode};
 use crate::data::app_lock::AppLockGuard;
 use crate::data::config::Config;
+use crate::scheduler::{ImplementationDecision, SchedulerTick, evaluate_tick};
 use crate::state::{Message, Phase, RunStatus, SessionState};
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -44,6 +45,23 @@ pub struct SidebarView {
     pub focus: ShellFocus,
     pub selected_index: usize,
     pub rows: Vec<SidebarRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellImplementationAction {
+    LaneOccupied { session_id: String, phase: Phase },
+    BlockedByHead { session_id: String },
+    PlanningHead { session_id: String, phase: Phase },
+    DispatchedWaiting { session_id: String, phase: Phase },
+    BlockedByCorruptEarlierSession { session_id: String, error: String },
+    NothingToDo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellSchedulerReport {
+    pub planning_session_ids: Vec<String>,
+    pub implementation: ShellImplementationAction,
+    pub skipped_corrupt_later_sessions: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -312,6 +330,7 @@ impl AppShell {
         let mut input = crate::ui::tui::CrosstermInputAdapter::spawn();
 
         loop {
+            let _ = self.run_scheduler_tick_with_focused_app(Some(&mut app));
             if let Some(path) = app.take_pending_view_path() {
                 input.shutdown_blocking();
                 app.run_external_view_editor(terminal, &path);
@@ -567,6 +586,153 @@ impl AppShell {
         let _ = self.refresh_sidebar_rows();
     }
 
+    pub fn run_scheduler_tick(&mut self) -> Result<ShellSchedulerReport> {
+        self.run_scheduler_tick_with_focused_app(None)
+    }
+
+    fn run_scheduler_tick_with_focused_app(
+        &mut self,
+        mut focused_app: Option<&mut App>,
+    ) -> Result<ShellSchedulerReport> {
+        let scan = crate::data::picker_io::scan_sessions_for_scheduler(&self.sessions_root)?;
+        let tick = evaluate_tick(&scan);
+        let mut planning_session_ids = Vec::new();
+
+        for planning in &tick.planning {
+            self.drive_scheduler_session(
+                &planning.session_id,
+                SchedulerDrive::AutoLaunch,
+                focused_app.as_deref_mut(),
+            )?;
+            planning_session_ids.push(planning.session_id.clone());
+        }
+
+        let implementation = self.apply_implementation_decision(&tick, focused_app)?;
+        self.refresh_sidebar_rows()?;
+        Ok(ShellSchedulerReport {
+            planning_session_ids,
+            implementation,
+            skipped_corrupt_later_sessions: tick.skipped_corrupt_later_sessions,
+        })
+    }
+
+    fn apply_implementation_decision(
+        &mut self,
+        tick: &SchedulerTick,
+        focused_app: Option<&mut App>,
+    ) -> Result<ShellImplementationAction> {
+        match &tick.implementation {
+            ImplementationDecision::LaneOccupied { session_id, phase } => {
+                Ok(ShellImplementationAction::LaneOccupied {
+                    session_id: session_id.clone(),
+                    phase: *phase,
+                })
+            }
+            ImplementationDecision::BlockedByHead { session_id } => {
+                Ok(ShellImplementationAction::BlockedByHead {
+                    session_id: session_id.clone(),
+                })
+            }
+            ImplementationDecision::PlanningHead { session_id, phase } => {
+                Ok(ShellImplementationAction::PlanningHead {
+                    session_id: session_id.clone(),
+                    phase: *phase,
+                })
+            }
+            ImplementationDecision::DispatchWaiting { session_id } => {
+                let state = self.drive_scheduler_session(
+                    session_id,
+                    SchedulerDrive::DispatchWaiting,
+                    focused_app,
+                )?;
+                Ok(ShellImplementationAction::DispatchedWaiting {
+                    session_id: session_id.clone(),
+                    phase: state.current_phase,
+                })
+            }
+            ImplementationDecision::BlockedByCorruptEarlierSession { session_id, error } => {
+                Ok(ShellImplementationAction::BlockedByCorruptEarlierSession {
+                    session_id: session_id.clone(),
+                    error: error.clone(),
+                })
+            }
+            ImplementationDecision::NothingToDo => Ok(ShellImplementationAction::NothingToDo),
+        }
+    }
+
+    fn drive_scheduler_session(
+        &mut self,
+        session_id: &str,
+        drive: SchedulerDrive,
+        focused_app: Option<&mut App>,
+    ) -> Result<SessionState> {
+        if let Some(app) = focused_app
+            && app.state.session_id == session_id
+        {
+            let before_run_id = app.current_run_id;
+            drive.apply(app);
+            let state = app.state.clone();
+            self.publish_scheduler_state(session_id, &state, before_run_id, app.current_run_id);
+            return Ok(state);
+        }
+
+        self.ensure_workspace_loaded(session_id)?;
+        let config = self.config.clone();
+        let workspace = self
+            .workspaces
+            .get(session_id)
+            .expect("workspace loaded before scheduler drive");
+        let mut app = workspace.rebuild_terminal_app(config);
+        let before_run_id = app.current_run_id;
+        drive.apply(&mut app);
+        let state = app.state.clone();
+        let after_run_id = app.current_run_id;
+        self.workspaces
+            .get_mut(session_id)
+            .expect("workspace loaded before absorb")
+            .absorb_terminal_app(app);
+        self.publish_scheduler_state(session_id, &state, before_run_id, after_run_id);
+        Ok(state)
+    }
+
+    fn ensure_workspace_loaded(&mut self, session_id: &str) -> Result<()> {
+        if !self.workspaces.contains_key(session_id) {
+            let state = SessionState::load(session_id)?;
+            let workspace = SessionWorkspace::new(state, AppStartupOrigin::Default);
+            self.workspaces.insert(session_id.to_string(), workspace);
+        }
+        Ok(())
+    }
+
+    fn publish_scheduler_state(
+        &mut self,
+        session_id: &str,
+        state: &SessionState,
+        before_run_id: Option<u64>,
+        after_run_id: Option<u64>,
+    ) {
+        self.apply_event(ShellEvent::SessionStateChanged {
+            session_id: session_id.to_string(),
+            state: Box::new(state.clone()),
+        });
+        if before_run_id != after_run_id {
+            if let Some(run_id) = after_run_id {
+                self.apply_event(ShellEvent::RunStarted {
+                    session_id: session_id.to_string(),
+                    run_id,
+                });
+            }
+            if let Some(run_id) = before_run_id
+                && after_run_id.is_none()
+            {
+                self.apply_event(ShellEvent::RunFinished {
+                    session_id: session_id.to_string(),
+                    run_id,
+                });
+            }
+        }
+    }
+
     fn refresh_sidebar_rows(&mut self) -> Result<()> {
         let sessions =
             crate::data::picker_io::scan_sessions_by_creation_order(&self.sessions_root)?;
@@ -588,5 +754,23 @@ impl AppShell {
             self.sidebar_selected_index = self.sidebar_rows.len().saturating_sub(1);
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SchedulerDrive {
+    AutoLaunch,
+    DispatchWaiting,
+}
+
+impl SchedulerDrive {
+    fn apply(self, app: &mut App) {
+        match self {
+            Self::AutoLaunch => app.maybe_auto_launch(),
+            Self::DispatchWaiting => {
+                app.dispatch_waiting_to_implement();
+                app.maybe_auto_launch();
+            }
+        }
     }
 }

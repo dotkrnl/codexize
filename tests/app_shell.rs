@@ -1,6 +1,8 @@
 use codexize::app::AppStartupOrigin;
 use codexize::app_runtime::{AppCommand, UiKey, UiKeyCode};
-use codexize::app_shell::{AppShell, ShellCommandOutcome, ShellEvent, ShellFocus};
+use codexize::app_shell::{
+    AppShell, ShellCommandOutcome, ShellEvent, ShellFocus, ShellImplementationAction,
+};
 use codexize::data::config::Config;
 use codexize::state::{Phase, SessionState};
 use serial_test::serial;
@@ -449,5 +451,100 @@ fn background_run_continues_when_focus_switches_to_another_session() {
             "focused session must have focused indicator"
         );
         assert!(!focused_row.running, "focused session must not be running");
+    });
+}
+
+#[test]
+#[serial]
+fn scheduler_tick_continues_planning_while_implementation_lane_is_occupied() {
+    with_temp_root(|| {
+        let running = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+        save_session("20260511-091000-000000001", Phase::PlanningRunning);
+        let mut shell = shell_for(running);
+
+        let report = shell.run_scheduler_tick().expect("scheduler tick");
+
+        assert_eq!(
+            report.planning_session_ids,
+            vec!["20260511-091000-000000001".to_string()]
+        );
+        assert_eq!(
+            report.implementation,
+            ShellImplementationAction::LaneOccupied {
+                session_id: "20260511-090000-000000001".to_string(),
+                phase: Phase::ShardingRunning,
+            }
+        );
+        assert!(
+            shell.workspace("20260511-091000-000000001").is_some(),
+            "scheduler should load the later planning workspace to continue its automation"
+        );
+        assert_eq!(
+            shell
+                .workspace("20260511-091000-000000001")
+                .expect("planning workspace")
+                .phase(),
+            Phase::PlanningRunning
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn scheduler_tick_blocks_later_implementation_behind_earlier_blocked_session() {
+    with_temp_root(|| {
+        let blocked = save_session("20260511-090000-000000001", Phase::BlockedNeedsUser);
+        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+        let mut shell = shell_for(blocked);
+
+        let report = shell.run_scheduler_tick().expect("scheduler tick");
+
+        assert_eq!(
+            report.implementation,
+            ShellImplementationAction::BlockedByHead {
+                session_id: "20260511-090000-000000001".to_string(),
+            }
+        );
+        assert_eq!(
+            SessionState::load("20260511-091000-000000001")
+                .expect("load later")
+                .current_phase,
+            Phase::WaitingToImplement,
+            "later waiting session must not dispatch while the earlier head is blocked"
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn scheduler_tick_skips_cancelled_and_dispatches_oldest_waiting_session() {
+    with_temp_root(|| {
+        let initial = save_session("20260511-090000-000000001", Phase::Cancelled);
+        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+        save_session("20260511-092000-000000001", Phase::WaitingToImplement);
+        let mut shell = shell_for(initial);
+
+        let report = shell.run_scheduler_tick().expect("scheduler tick");
+
+        assert_eq!(
+            report.implementation,
+            ShellImplementationAction::DispatchedWaiting {
+                session_id: "20260511-091000-000000001".to_string(),
+                phase: Phase::ShardingRunning,
+            }
+        );
+        assert_eq!(
+            SessionState::load("20260511-091000-000000001")
+                .expect("load dispatched")
+                .current_phase,
+            Phase::ShardingRunning
+        );
+        assert_eq!(
+            SessionState::load("20260511-092000-000000001")
+                .expect("load later")
+                .current_phase,
+            Phase::WaitingToImplement,
+            "oldest eligible waiting session should dispatch first"
+        );
     });
 }

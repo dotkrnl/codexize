@@ -853,7 +853,7 @@ rewrote_plan = true
 
     #[test]
     fn waiting_to_implement_dispatch_routes_to_sharding_when_baselines_match() {
-        // Production wiring: a `WaitingToImplement` session whose recorded
+        // Scheduler wiring: a `WaitingToImplement` session whose recorded
         // baseline matches the current newest-earlier-`Done` baseline must
         // skip the repo-state update and transition straight to sharding.
         with_temp_root(|| {
@@ -864,12 +864,7 @@ rewrote_plan = true
             state.planned_after_session_id = Some("20260511-080000-000000001".to_string());
             state.save().unwrap();
             let mut app = mk_app(state);
-            // `maybe_auto_launch` is the per-tick entry; the dispatch must
-            // fire from there even with no models loaded yet. mk_app
-            // defaults `run_launched=true`; flip it so the auto-launch
-            // guard lets dispatch run.
-            app.run_launched = false;
-            app.maybe_auto_launch();
+            app.dispatch_waiting_to_implement();
             assert_eq!(app.state.current_phase, Phase::ShardingRunning);
             // The transition was persisted to disk.
             let reloaded = SessionState::load(session_id).unwrap();
@@ -891,8 +886,7 @@ rewrote_plan = true
             state.planned_after_session_id = Some("20260511-080000-000000001".to_string());
             state.save().unwrap();
             let mut app = mk_app(state);
-            app.run_launched = false;
-            app.maybe_auto_launch();
+            app.dispatch_waiting_to_implement();
             assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
             let reloaded = SessionState::load(session_id).unwrap();
             assert_eq!(reloaded.current_phase, Phase::RepoStateUpdateRunning);
@@ -910,8 +904,7 @@ rewrote_plan = true
             state.planned_after_session_id = None;
             state.save().unwrap();
             let mut app = mk_app(state);
-            app.run_launched = false;
-            app.maybe_auto_launch();
+            app.dispatch_waiting_to_implement();
             assert_eq!(app.state.current_phase, Phase::ShardingRunning);
         });
     }
@@ -929,9 +922,26 @@ rewrote_plan = true
             state.planned_after_session_id = Some("does-not-exist".to_string());
             state.save().unwrap();
             let mut app = mk_app(state);
-            app.run_launched = false;
-            app.maybe_auto_launch();
+            app.dispatch_waiting_to_implement();
             assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
+        });
+    }
+
+    #[test]
+    fn maybe_auto_launch_leaves_waiting_to_implement_for_shell_scheduler() {
+        with_temp_root(|| {
+            let session_id = "20260511-090000-000000001";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::WaitingToImplement;
+            state.save().unwrap();
+            let mut app = mk_app(state);
+            app.run_launched = false;
+
+            app.maybe_auto_launch();
+
+            assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+            let reloaded = SessionState::load(session_id).unwrap();
+            assert_eq!(reloaded.current_phase, Phase::WaitingToImplement);
         });
     }
 

@@ -6,10 +6,66 @@ use crate::app::prompts::restore_artifacts;
 use crate::app::tree::node_at_path;
 use crate::artifacts::ArtifactKind;
 use crate::logic::rules::retry_phase_for_stage;
+use crate::scheduler::{is_implementation_lane_phase, manual_retry_allowed};
 use crate::state::{self as session_state, NodeKind, Phase, PipelineItemStatus, RunStatus};
 use std::collections::BTreeSet;
 use std::time::Duration;
 impl App {
+    pub(crate) fn retry_allowed_by_project_lane(&mut self, target_phase: Phase) -> bool {
+        if !is_implementation_lane_phase(target_phase) {
+            return true;
+        }
+        let sessions_root = crate::picker::sessions_root_for(&self.config);
+        let scan = match crate::data::picker_io::scan_sessions_for_scheduler(&sessions_root) {
+            Ok(scan) => scan,
+            Err(err) => {
+                let message = format!("retry blocked: cannot scan sessions for lane gate: {err:#}");
+                self.surface_boundary_error(message, false);
+                return false;
+            }
+        };
+        if manual_retry_allowed(target_phase, &self.state.session_id, &scan) {
+            return true;
+        }
+        if !scan
+            .iter()
+            .any(|entry| entry.session_id() == self.state.session_id)
+        {
+            // Isolated App tests and path-based sessions can run outside the
+            // project scan; only shell-owned focused sessions can be lane-gated.
+            return true;
+        }
+        // Manual implementation retries share the scheduler's project-wide
+        // lane gate; otherwise a focused session could start sharding or
+        // later work while a background session is already mutating the repo.
+        let message = "retry blocked: implementation lane is occupied by another session";
+        let _ = self.state.log_event(message);
+        self.push_status(message.to_string(), Severity::Warn, Duration::from_secs(5));
+        false
+    }
+
+    pub(crate) fn retry_gate_phase_for_stage(stage: &str) -> Option<Phase> {
+        match stage {
+            "sharding" => Some(Phase::ShardingRunning),
+            "repo-state-update" => Some(Phase::RepoStateUpdateRunning),
+            _ => retry_phase_for_stage(stage),
+        }
+    }
+
+    pub(crate) fn retry_gate_phase_for_stage_id(stage_id: crate::app::StageId) -> Phase {
+        match stage_id {
+            crate::app::StageId::Brainstorm => Phase::BrainstormRunning,
+            crate::app::StageId::SpecReview => Phase::SpecReviewRunning,
+            crate::app::StageId::Planning => Phase::PlanningRunning,
+            crate::app::StageId::PlanReview => Phase::PlanReviewRunning,
+            crate::app::StageId::Sharding => Phase::ShardingRunning,
+            crate::app::StageId::Implementation => Phase::ImplementationRound(1),
+            crate::app::StageId::Review => Phase::ReviewRound(1),
+            crate::app::StageId::FinalValidation => Phase::FinalValidation(1),
+            crate::app::StageId::Dreaming => Phase::Dreaming(1),
+        }
+    }
+
     fn cancel_run_label(&self, base: &str) {
         let prefix = format!("{base} ");
         for run in self.state.agent_runs.iter().filter(|run| {
@@ -85,6 +141,9 @@ impl App {
                 _ => None,
             })
             .unwrap_or(1);
+        if !self.retry_allowed_by_project_lane(Phase::ImplementationRound(retry_round)) {
+            return;
+        }
         let recovery_context_matches = self.state.builder.recovery_trigger_task_id == Some(task_id);
         let removed_runs = self
             .state
@@ -176,6 +235,11 @@ impl App {
                 Severity::Warn,
                 Duration::from_secs(3),
             );
+            return;
+        }
+        if let Some(phase) = Self::retry_gate_phase_for_stage(stage)
+            && !self.retry_allowed_by_project_lane(phase)
+        {
             return;
         }
         let prior_ids = self.preempt_prior_runs(&removed_runs);

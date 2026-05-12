@@ -11,6 +11,23 @@ use crate::{
     state::Phase,
 };
 impl App {
+    fn retry_gate_phase_for_descriptor(retry: &RetryLaunch) -> Phase {
+        match retry {
+            RetryLaunch::Brainstorm => Phase::BrainstormRunning,
+            RetryLaunch::SpecReview => Phase::SpecReviewRunning,
+            RetryLaunch::Planning => Phase::PlanningRunning,
+            RetryLaunch::PlanReview => Phase::PlanReviewRunning,
+            RetryLaunch::Sharding => Phase::ShardingRunning,
+            RetryLaunch::Recovery => Phase::BuilderRecovery(1),
+            RetryLaunch::RecoveryPlanReview => Phase::BuilderRecoveryPlanReview(1),
+            RetryLaunch::RecoverySharding => Phase::BuilderRecoverySharding(1),
+            RetryLaunch::Coder => Phase::ImplementationRound(1),
+            RetryLaunch::Reviewer => Phase::ReviewRound(1),
+            RetryLaunch::FinalValidation => Phase::FinalValidation(1),
+            RetryLaunch::Dreaming => Phase::Dreaming(1),
+        }
+    }
+
     fn pause_sharding_retry_for_waiting_dispatch(&mut self) -> bool {
         self.clear_agent_error();
         self.current_run_id = None;
@@ -62,6 +79,10 @@ impl App {
     /// transient state changes between modal-open and finalization don't
     /// mis-route the retry.
     pub(crate) fn launch_retry_from_descriptor(&mut self, retry: RetryLaunch) {
+        let gate_phase = Self::retry_gate_phase_for_descriptor(&retry);
+        if !self.retry_allowed_by_project_lane(gate_phase) {
+            return;
+        }
         match retry {
             RetryLaunch::Brainstorm => {
                 let idea = self.state.idea_text.clone().unwrap_or_default();
@@ -89,6 +110,9 @@ impl App {
     /// stage-error modal. Cross-stage routing lives here so the modal
     /// handler only carries the keybinding contract.
     pub(crate) fn launch_retry_for_stage_id(&mut self, stage_id: StageId) {
+        if !self.retry_allowed_by_project_lane(Self::retry_gate_phase_for_stage_id(stage_id)) {
+            return;
+        }
         match stage_id {
             StageId::Brainstorm => {
                 let idea = self.state.idea_text.clone().unwrap_or_default();
@@ -114,6 +138,11 @@ impl App {
         failed_run: &crate::state::RunRecord,
         chosen: CachedModel,
     ) -> bool {
+        if let Some(phase) = Self::retry_gate_phase_for_stage(&failed_run.stage)
+            && !self.retry_allowed_by_project_lane(phase)
+        {
+            return false;
+        }
         match failed_run.stage.as_str() {
             "brainstorm" => {
                 let Some(idea) = self.state.idea_text.clone() else {
@@ -148,6 +177,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use crate::app::StageId;
     use crate::app::test_support::{mk_app, with_temp_root};
     use crate::logic::selection::{
         CachedModel, Candidate, CliKind, IpbrPhaseScores, ScoreSource, SubscriptionKind,
@@ -214,6 +244,13 @@ mod tests {
         }
     }
 
+    fn save_session(id: &str, phase: Phase) {
+        let mut state = SessionState::new(id.to_string());
+        state.idea_text = Some(format!("idea for {id}"));
+        state.current_phase = phase;
+        state.save().unwrap();
+    }
+
     #[test]
     fn automatic_sharding_model_retry_pauses_in_waiting_to_implement() {
         // Automatic model fallback reaches this lower-level retry path, so
@@ -243,6 +280,60 @@ mod tests {
                 1,
                 "retry should not append a new sharding run before the waiting dispatch",
             );
+        });
+    }
+
+    #[test]
+    fn focused_sharding_retry_is_rejected_when_another_session_occupies_impl_lane() {
+        with_temp_root(|| {
+            save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            let mut state = SessionState::new("20260511-091000-000000001".to_string());
+            state.current_phase = Phase::BlockedNeedsUser;
+            state.save().unwrap();
+
+            let mut app = mk_app(state);
+            app.launch_retry_for_stage_id(StageId::Sharding);
+
+            assert_eq!(app.state.current_phase, Phase::BlockedNeedsUser);
+        });
+    }
+
+    #[test]
+    fn focused_later_phase_retries_are_rejected_when_another_session_occupies_impl_lane() {
+        with_temp_root(|| {
+            for (stage_id, phase) in [
+                (StageId::Implementation, Phase::ImplementationRound(3)),
+                (StageId::Review, Phase::ReviewRound(3)),
+                (StageId::FinalValidation, Phase::FinalValidation(3)),
+            ] {
+                save_session("20260511-090000-000000001", Phase::ShardingRunning);
+                let mut state = SessionState::new("20260511-091000-000000001".to_string());
+                state.current_phase = phase;
+                state.save().unwrap();
+
+                let mut app = mk_app(state);
+                app.launch_retry_for_stage_id(stage_id);
+
+                assert_eq!(app.state.agent_runs.len(), 0, "stage: {stage_id:?}");
+                assert!(
+                    app.state.agent_error.is_none(),
+                    "stage {stage_id:?} should be blocked before launch-specific validation"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn focused_planning_retry_is_allowed_while_another_session_occupies_impl_lane() {
+        with_temp_root(|| {
+            save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            let mut state = SessionState::new("20260511-091000-000000001".to_string());
+            state.current_phase = Phase::PlanReviewPaused;
+            state.save().unwrap();
+
+            let mut app = mk_app(state);
+
+            assert!(app.retry_allowed_by_project_lane(Phase::PlanningRunning));
         });
     }
 }

@@ -3,12 +3,14 @@ use super::Phase;
 #[test]
 fn plan_review_forward_transitions() {
     assert!(Phase::PlanningRunning.can_transition_to(&Phase::PlanReviewRunning));
-    assert!(Phase::PlanningRunning.can_transition_to(&Phase::ShardingRunning));
+    // Spec §Data model line 96: planning phases may NOT transition directly to
+    // ShardingRunning; the only normal path is via WaitingToImplement.
+    assert!(!Phase::PlanningRunning.can_transition_to(&Phase::ShardingRunning));
     assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::PlanReviewPaused));
-    assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::ShardingRunning));
+    assert!(!Phase::PlanReviewRunning.can_transition_to(&Phase::ShardingRunning));
     assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::BlockedNeedsUser));
     assert!(Phase::PlanReviewPaused.can_transition_to(&Phase::PlanReviewRunning));
-    assert!(Phase::PlanReviewPaused.can_transition_to(&Phase::ShardingRunning));
+    assert!(!Phase::PlanReviewPaused.can_transition_to(&Phase::ShardingRunning));
     assert!(Phase::PlanReviewPaused.can_transition_to(&Phase::BlockedNeedsUser));
     assert!(Phase::BlockedNeedsUser.can_transition_to(&Phase::PlanReviewRunning));
 }
@@ -190,6 +192,33 @@ fn waiting_to_implement_transitions() {
     assert!(Phase::RepoStateUpdateRunning.can_transition_to(&Phase::Cancelled));
     assert!(!Phase::WaitingToImplement.can_transition_to(&Phase::WaitingToImplement));
     assert!(!Phase::RepoStateUpdateRunning.can_transition_to(&Phase::RepoStateUpdateRunning));
+}
+
+#[test]
+fn waiting_to_implement_is_the_only_normal_path_to_sharding() {
+    // Spec §Data model line 96: sharding is only reachable via
+    // WaitingToImplement (directly or through RepoStateUpdateRunning).
+    // No planning phase may transition directly into ShardingRunning.
+    let planning_like = [
+        Phase::PlanningRunning,
+        Phase::PlanReviewRunning,
+        Phase::PlanReviewPaused,
+    ];
+    for from in planning_like {
+        assert!(
+            !from.can_transition_to(&Phase::ShardingRunning),
+            "{from:?} must not reach ShardingRunning directly"
+        );
+        assert!(
+            !from.can_transition_to(&Phase::RepoStateUpdateRunning),
+            "{from:?} must not reach RepoStateUpdateRunning directly"
+        );
+    }
+
+    // WaitingToImplement must be able to reach both implementation entry
+    // points so the scheduler can dispatch correctly.
+    assert!(Phase::WaitingToImplement.can_transition_to(&Phase::ShardingRunning));
+    assert!(Phase::WaitingToImplement.can_transition_to(&Phase::RepoStateUpdateRunning));
 }
 
 #[test]

@@ -338,7 +338,10 @@ impl App {
                         Phase::BrainstormRunning
                     } else {
                         session_state::reset_builder_after_rewind(&mut self.state);
-                        Phase::ShardingRunning
+                        // Spec §Data model line 96: rewind from round 1 must
+                        // pause in WaitingToImplement so the scheduler re-verifies
+                        // the repository baseline before any sharding launch.
+                        Phase::WaitingToImplement
                     }
                 } else {
                     Phase::ReviewRound(r - 1)

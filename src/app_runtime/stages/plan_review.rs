@@ -239,7 +239,91 @@ impl App {
 mod tests {
     use super::App;
     use crate::acp::AcpLaunchPolicy;
+    use crate::app::test_support::{mk_app, with_temp_root};
+    use crate::state::{LaunchModes, Phase, RunRecord, RunStatus, SessionState};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::path::PathBuf;
+
+    fn plan_review_run() -> RunRecord {
+        RunRecord {
+            id: 5,
+            stage: "plan-review".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "test-model".to_string(),
+            subscription_label: "test-vendor".to_string(),
+            window_name: "[Plan Review 1] test-model".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+            effort: crate::adapters::EffortLevel::Normal,
+            effort_mapping: crate::data::config::schema::EffortMapping::default(),
+            effort_eligible: false,
+            modes: LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+            section_path: None,
+        }
+    }
+
+    #[test]
+    fn plan_review_paused_enter_pauses_in_waiting_to_implement() {
+        // Spec §Data model line 96: confirmed plan review approval pauses
+        // in WaitingToImplement; the dispatch out of WaitingToImplement is
+        // the sole production route into ShardingRunning.
+        with_temp_root(|| {
+            let session_id = "20260511-091500-000000001";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::PlanReviewPaused;
+            state.agent_runs.push(plan_review_run());
+            state.save().unwrap();
+            let mut app = mk_app(state);
+            let consumed = app.handle_plan_review_paused_modal_key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+            ));
+            assert!(!consumed, "Enter must dismiss the modal (returns false)");
+            assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+        });
+    }
+
+    #[test]
+    fn plan_review_paused_y_pauses_in_waiting_to_implement() {
+        with_temp_root(|| {
+            let session_id = "20260511-091500-000000002";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::PlanReviewPaused;
+            state.agent_runs.push(plan_review_run());
+            state.save().unwrap();
+            let mut app = mk_app(state);
+            app.handle_plan_review_paused_modal_key(KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::NONE,
+            ));
+            assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+        });
+    }
+
+    #[test]
+    fn yolo_auto_approve_plan_review_pause_lands_in_waiting_to_implement() {
+        // The yolo auto-approve helper (called from `finalize_plan_review_success`
+        // and `maybe_yolo_auto_resolve`) must use the same pause pathway as
+        // the interactive modal — otherwise a yolo run would bypass the
+        // implementation-lane queue.
+        with_temp_root(|| {
+            let session_id = "20260511-091500-000000003";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::PlanReviewPaused;
+            state.modes.yolo = true;
+            state.agent_runs.push(plan_review_run());
+            state.save().unwrap();
+            let mut app = mk_app(state);
+            app.auto_approve_plan_review_pause("plan_approval");
+            assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+        });
+    }
 
     #[test]
     fn plan_review_policy_appends_plan_and_spec_md_to_allowed_write_paths() {

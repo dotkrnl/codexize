@@ -179,6 +179,7 @@ fn final_validation_inbound_edges_only_simplification_or_block() {
 
 #[test]
 fn waiting_to_implement_transitions() {
+    assert!(Phase::PlanningRunning.can_transition_to(&Phase::WaitingToImplement));
     assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::WaitingToImplement));
     assert!(Phase::PlanReviewPaused.can_transition_to(&Phase::WaitingToImplement));
     assert!(Phase::WaitingToImplement.can_transition_to(&Phase::ShardingRunning));

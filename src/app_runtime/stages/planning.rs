@@ -181,3 +181,76 @@ impl App {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::app::test_support::{mk_app, with_temp_root};
+    use crate::state::{LaunchModes, Phase, RunRecord, RunStatus, SessionState, session_dir};
+
+    fn planning_run(yolo: bool) -> RunRecord {
+        RunRecord {
+            id: 1,
+            stage: "planning".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "test-model".to_string(),
+            subscription_label: "test-vendor".to_string(),
+            window_name: "[Planning] test-model".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+            effort: crate::adapters::EffortLevel::Normal,
+            effort_mapping: crate::data::config::schema::EffortMapping::default(),
+            effort_eligible: false,
+            modes: LaunchModes {
+                yolo,
+                ..LaunchModes::default()
+            },
+            hostname: None,
+            mount_device_id: None,
+            section_path: None,
+        }
+    }
+
+    #[test]
+    fn yolo_planning_success_pauses_in_waiting_to_implement() {
+        // Spec §Data model line 96: approved plans pause in
+        // WaitingToImplement before any sharding launch.
+        with_temp_root(|| {
+            let session_id = "20260511-091000-000000001";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::PlanningRunning;
+            let run = planning_run(true);
+            state.agent_runs.push(run.clone());
+            state.save().unwrap();
+            let artifacts = session_dir(session_id).join("artifacts");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::write(artifacts.join("plan.md"), "# plan\n").unwrap();
+            let mut app = mk_app(state);
+            app.finalize_planning_success(&run).unwrap();
+            assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+        });
+    }
+
+    #[test]
+    fn non_yolo_planning_success_routes_to_plan_review() {
+        // Sanity guard: the WaitingToImplement pause must not swallow the
+        // human-review path. Non-yolo runs still flow into PlanReviewRunning.
+        with_temp_root(|| {
+            let session_id = "20260511-091000-000000002";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::PlanningRunning;
+            let run = planning_run(false);
+            state.agent_runs.push(run.clone());
+            state.save().unwrap();
+            let artifacts = session_dir(session_id).join("artifacts");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::write(artifacts.join("plan.md"), "# plan\n").unwrap();
+            let mut app = mk_app(state);
+            app.finalize_planning_success(&run).unwrap();
+            assert_eq!(app.state.current_phase, Phase::PlanReviewRunning);
+        });
+    }
+}

@@ -290,6 +290,7 @@ pub enum PipelineItemStatus {
     Running,
     Done,
     Failed,
+    Stale,
     Approved,
     Revise,
     HumanBlocked,

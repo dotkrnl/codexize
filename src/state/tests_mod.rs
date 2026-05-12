@@ -786,7 +786,11 @@ fn test_session_state_archived_defaults_false_on_deserialize() {
 #[test]
 fn test_pipeline_item_status_lifecycle_vs_verdict() {
     let is_lifecycle = |status: PipelineItemStatus| {
-        status.is_pending() || status.is_running() || status.is_done() || status.is_failed()
+        status.is_pending()
+            || status.is_running()
+            || status.is_done()
+            || status.is_failed()
+            || status.is_stale()
     };
     let is_verdict = |status: PipelineItemStatus| {
         status.is_approved()
@@ -803,6 +807,7 @@ fn test_pipeline_item_status_lifecycle_vs_verdict() {
     assert!(is_lifecycle(PipelineItemStatus::Running));
     assert!(is_lifecycle(PipelineItemStatus::Done));
     assert!(is_lifecycle(PipelineItemStatus::Failed));
+    assert!(is_lifecycle(PipelineItemStatus::Stale));
 
     assert!(!is_verdict(PipelineItemStatus::Pending));
     assert!(!is_verdict(PipelineItemStatus::Done));
@@ -823,12 +828,14 @@ fn test_pipeline_item_status_terminal() {
             || status.is_human_blocked()
             || status.is_agent_pivot()
     };
-    let is_terminal =
-        |status: PipelineItemStatus| status.is_done() || status.is_failed() || is_verdict(status);
+    let is_terminal = |status: PipelineItemStatus| {
+        status.is_done() || status.is_failed() || status.is_stale() || is_verdict(status)
+    };
     assert!(!is_terminal(PipelineItemStatus::Pending));
     assert!(!is_terminal(PipelineItemStatus::Running));
     assert!(is_terminal(PipelineItemStatus::Done));
     assert!(is_terminal(PipelineItemStatus::Failed));
+    assert!(is_terminal(PipelineItemStatus::Stale));
     assert!(is_terminal(PipelineItemStatus::Approved));
     assert!(is_terminal(PipelineItemStatus::Revise));
     assert!(is_terminal(PipelineItemStatus::HumanBlocked));
@@ -1285,6 +1292,7 @@ fn test_pipeline_items_update_then_persist() {
 fn test_pipeline_all_verdict_values_roundtrip() {
     for (input, expected) in [
         ("\"approved\"", PipelineItemStatus::Approved),
+        ("\"stale\"", PipelineItemStatus::Stale),
         ("\"revise\"", PipelineItemStatus::Revise),
         ("\"human_blocked\"", PipelineItemStatus::HumanBlocked),
         ("\"agent_pivot\"", PipelineItemStatus::AgentPivot),

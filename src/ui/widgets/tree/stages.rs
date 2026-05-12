@@ -296,6 +296,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
                 | PipelineItemStatus::HumanBlocked
                 | PipelineItemStatus::AgentPivot,
             ) => NodeStatus::Failed,
+            Some(PipelineItemStatus::Stale) => NodeStatus::Skipped,
             Some(PipelineItemStatus::Pending | PipelineItemStatus::Revise) => NodeStatus::Pending,
             None => {
                 if round_nodes.iter().any(|c| c.status == NodeStatus::Running) {

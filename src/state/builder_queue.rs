@@ -55,7 +55,21 @@ impl BuilderState {
             .collect()
     }
     pub fn reset_task_pipeline(&mut self, tasks: impl IntoIterator<Item = (u32, Option<String>)>) {
-        self.pipeline_items.clear();
+        let mut prior_items = Vec::new();
+        for mut item in self.pipeline_items.drain(..) {
+            if item.stage != "coder" || item.task_id.is_none() {
+                continue;
+            }
+            if !matches!(
+                item.status,
+                PipelineItemStatus::Done | PipelineItemStatus::Approved
+            ) {
+                item.status = PipelineItemStatus::Stale;
+                item.mode = Some("stale".to_string());
+            }
+            prior_items.push(item);
+        }
+        self.pipeline_items = prior_items;
         for (task_id, title) in tasks {
             self.push_pipeline_item(PipelineItem {
                 id: 0,

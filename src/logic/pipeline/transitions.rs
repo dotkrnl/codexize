@@ -115,10 +115,9 @@ pub fn initialize_task_pipeline(
     tasks: impl IntoIterator<Item = (u32, String)>,
 ) {
     let tasks = tasks.into_iter().collect::<Vec<_>>();
-    state.builder.task_titles = tasks
-        .iter()
-        .map(|(id, title)| (*id, title.clone()))
-        .collect();
+    for (id, title) in &tasks {
+        state.builder.task_titles.insert(*id, title.clone());
+    }
     state
         .builder
         .reset_task_pipeline(tasks.into_iter().map(|(id, title)| (id, Some(title))));

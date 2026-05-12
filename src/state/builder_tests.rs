@@ -56,6 +56,44 @@ iteration = 1
 }
 
 #[test]
+fn stale_task_items_do_not_count_as_blocking_or_selectable() {
+    let mut builder = make_builder_with_tasks(&[1, 2, 3]);
+    builder.pipeline_items[0].status = PipelineItemStatus::Done;
+    builder.pipeline_items[1].status = PipelineItemStatus::Stale;
+    builder.pipeline_items[2].status = PipelineItemStatus::Stale;
+
+    assert_eq!(builder.done_task_ids(), vec![1]);
+    assert_eq!(builder.current_task_id(), None);
+    assert!(builder.pending_task_ids().is_empty());
+    assert!(!builder.has_unfinished_tasks());
+}
+
+#[test]
+fn initializing_new_task_pipeline_marks_prior_unfinished_tasks_stale() {
+    let mut state = crate::state::SessionState::new("test-session".to_string());
+    state.builder = make_builder_with_tasks(&[1, 2, 3]);
+    state.builder.pipeline_items[0].status = PipelineItemStatus::Done;
+    state.builder.pipeline_items[1].status = PipelineItemStatus::Running;
+    state.builder.pipeline_items[2].status = PipelineItemStatus::HumanBlocked;
+
+    crate::logic::pipeline::initialize_task_pipeline(
+        &mut state,
+        vec![(10, "New task".to_string())],
+    );
+
+    let stale_ids = state
+        .builder
+        .pipeline_items
+        .iter()
+        .filter(|item| item.status == PipelineItemStatus::Stale)
+        .filter_map(|item| item.task_id)
+        .collect::<Vec<_>>();
+    assert_eq!(stale_ids, vec![2, 3]);
+    assert_eq!(state.builder.pending_task_ids(), vec![10]);
+    assert_eq!(state.builder.done_task_ids(), vec![1]);
+}
+
+#[test]
 fn max_task_id_scans_pipeline_titles_and_recovery_sources() {
     let mut builder = make_builder_with_tasks(&[3]);
     builder.task_titles.insert(7, "t7".to_string());

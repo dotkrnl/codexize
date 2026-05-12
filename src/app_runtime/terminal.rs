@@ -40,7 +40,7 @@ impl TerminalRuntime {
     ) -> Vec<DataEvent> {
         events.map(LiveSummaryEvents::drain).unwrap_or_default()
     }
-    fn drain_app_data_events(&mut self, app: &mut App) {
+    pub(crate) fn drain_app_data_events(&mut self, app: &mut App) {
         let drained = self.drain_live_summary_data_events(app.live_summary_change_events.as_mut());
         if drained
             .iter()

@@ -102,9 +102,6 @@ pub struct SessionWorkspace {
     viewport_top: usize,
     split_run_id: Option<u64>,
     live_summary_cached_text: String,
-    // Until the full focus-local App modal stack is embedded in SessionWorkspace,
-    // keep the shell-level Esc precedence explicit and testable.
-    modal_probe_open: bool,
 }
 
 impl SessionWorkspace {
@@ -125,7 +122,6 @@ impl SessionWorkspace {
             viewport_top: 0,
             split_run_id: None,
             live_summary_cached_text: String::new(),
-            modal_probe_open: false,
         }
     }
 
@@ -167,22 +163,6 @@ impl SessionWorkspace {
             self.viewport_top,
             self.split_run_id,
         )
-    }
-
-    pub fn set_modal_probe_open(&mut self, open: bool) {
-        self.modal_probe_open = open;
-    }
-
-    pub fn modal_probe_open(&self) -> bool {
-        self.modal_probe_open
-    }
-
-    fn consume_modal_escape_if_open(&mut self) -> bool {
-        if self.modal_probe_open {
-            self.modal_probe_open = false;
-            return true;
-        }
-        false
     }
 
     fn replace_state(&mut self, state: SessionState) {
@@ -312,14 +292,102 @@ impl AppShell {
         &mut self,
         terminal: &mut crate::tui::AppTerminal,
     ) -> Result<()> {
+        use crate::app_runtime::terminal::{TerminalCommandOutcome, TerminalRuntime};
+        use crate::ui::widgets::sidebar::view::render_sidebar;
+        use ratatui::layout::Rect;
+
         let config = self.config.clone();
         let workspace = self
             .focused_workspace_mut()
             .expect("AppShell always has a focused workspace");
         let mut app = workspace.rebuild_terminal_app(config);
-        let result = crate::app_runtime::run_terminal_app(&mut app, terminal);
-        workspace.absorb_terminal_app(app);
-        result
+        let mut runtime = TerminalRuntime::default();
+        let mut input = crate::ui::tui::CrosstermInputAdapter::spawn();
+
+        loop {
+            if let Some(path) = app.take_pending_view_path() {
+                input.shutdown_blocking();
+                app.run_external_view_editor(terminal, &path);
+                input = crate::ui::tui::CrosstermInputAdapter::spawn();
+            }
+            if app.runtime_tick_before_data_drain()? {
+                app.drain_notifications_for_shutdown();
+                let workspace = self
+                    .focused_workspace_mut()
+                    .expect("AppShell always has a focused workspace");
+                workspace.absorb_terminal_app(app);
+                return Ok(());
+            }
+            runtime.drain_app_data_events(&mut app);
+            app.runtime_tick_after_data_drain();
+            let view = runtime.view_for_render(app.current_app_view());
+
+            crate::ui::tui::render_app(terminal, &view, |frame| {
+                let full_area = frame.area();
+                if self.sidebar_visible {
+                    let sidebar_w = crate::ui::widgets::sidebar::view::sidebar_width()
+                        .min(full_area.width.saturating_sub(20).max(10));
+                    let sidebar_area =
+                        Rect::new(full_area.x, full_area.y, sidebar_w, full_area.height);
+                    let app_area = Rect::new(
+                        full_area.x + sidebar_w,
+                        full_area.y,
+                        full_area.width.saturating_sub(sidebar_w),
+                        full_area.height,
+                    );
+                    let sidebar_view = self.sidebar_view();
+                    render_sidebar(sidebar_area, frame.buffer_mut(), &sidebar_view);
+                    app.draw_in_area(frame, &view, app_area);
+                } else {
+                    app.draw(frame, &view);
+                }
+            })?;
+
+            app.on_frame_drawn();
+
+            if let Some(command) = input.next_command(app.event_poll_duration(), &view)? {
+                // Shell intercepts sidebar-navigation keys first.
+                if self.sidebar_visible {
+                    let modal_open = app.current_app_view().modal.is_some();
+                    match self.handle_shell_command(command.clone(), modal_open)? {
+                        ShellCommandOutcome::Consumed => continue,
+                        ShellCommandOutcome::Unhandled => {}
+                    }
+                }
+
+                let outcome = runtime.route_command_with_dispatch(command, &view, |request| {
+                    crate::data::events::dispatch(request, &app.runner_supervisor)
+                });
+                match outcome {
+                    TerminalCommandOutcome::HandledContinue => {}
+                    TerminalCommandOutcome::HandledExit => {
+                        app.runner_supervisor.shutdown_all_runs();
+                        app.drain_notifications_for_shutdown();
+                        let workspace = self
+                            .focused_workspace_mut()
+                            .expect("AppShell always has a focused workspace");
+                        workspace.absorb_terminal_app(app);
+                        return Ok(());
+                    }
+                    TerminalCommandOutcome::AppOwned(command) => {
+                        if app.handle_app_command(command) {
+                            app.runner_supervisor.shutdown_all_runs();
+                            app.drain_notifications_for_shutdown();
+                            let workspace = self
+                                .focused_workspace_mut()
+                                .expect("AppShell always has a focused workspace");
+                            workspace.absorb_terminal_app(app);
+                            return Ok(());
+                        }
+                    }
+                }
+
+                // If the App executed a shell-level palette command, forward it.
+                if let Some("sessions") = app.pending_shell_command.take().as_deref() {
+                    let _ = self.execute_shell_palette_command("sessions");
+                }
+            }
+        }
     }
 
     pub fn toggle_sessions_sidebar(&mut self) -> Result<()> {
@@ -342,7 +410,11 @@ impl AppShell {
         }
     }
 
-    pub fn handle_shell_command(&mut self, command: AppCommand) -> Result<ShellCommandOutcome> {
+    pub fn handle_shell_command(
+        &mut self,
+        command: AppCommand,
+        modal_open: bool,
+    ) -> Result<ShellCommandOutcome> {
         let AppCommand::KeyPress(key) = command else {
             return Ok(ShellCommandOutcome::Unhandled);
         };
@@ -371,11 +443,9 @@ impl AppShell {
                 Ok(ShellCommandOutcome::Consumed)
             }
             UiKeyCode::Esc if self.sidebar_focus == ShellFocus::Sidebar => {
-                if self
-                    .focused_workspace_mut()
-                    .is_some_and(SessionWorkspace::consume_modal_escape_if_open)
-                {
-                    return Ok(ShellCommandOutcome::Consumed);
+                if modal_open {
+                    // Esc is owned by the App modal; do not hide the sidebar.
+                    return Ok(ShellCommandOutcome::Unhandled);
                 }
                 self.sidebar_visible = false;
                 self.sidebar_focus = ShellFocus::Workspace;

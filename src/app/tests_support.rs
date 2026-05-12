@@ -117,6 +117,7 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
         pending_cancel_confirmation: false,
         interactive_exit_prompt_dismissed_at: None,
         pending_app_exit: false,
+        pending_shell_command: None,
         current_run_id: Some(2),
         failed_models: HashMap::new(),
         pending_yolo_toggle_gate: None,

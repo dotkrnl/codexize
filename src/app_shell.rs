@@ -288,6 +288,15 @@ impl AppShell {
         self.workspaces.get_mut(&self.focused_session_id)
     }
 
+    /// Returns a mutable reference to the focused workspace.
+    ///
+    /// # Panics
+    /// Panics if there is no focused workspace (this is an invariant violation).
+    fn focused_workspace_unchecked(&mut self) -> &mut SessionWorkspace {
+        self.focused_workspace_mut()
+            .expect("AppShell always has a focused workspace")
+    }
+
     pub fn run_focused_terminal_app(
         &mut self,
         terminal: &mut crate::tui::AppTerminal,
@@ -297,9 +306,7 @@ impl AppShell {
         use ratatui::layout::Rect;
 
         let config = self.config.clone();
-        let workspace = self
-            .focused_workspace_mut()
-            .expect("AppShell always has a focused workspace");
+        let workspace = self.focused_workspace_unchecked();
         let mut app = workspace.rebuild_terminal_app(config);
         let mut runtime = TerminalRuntime::default();
         let mut input = crate::ui::tui::CrosstermInputAdapter::spawn();
@@ -312,10 +319,7 @@ impl AppShell {
             }
             if app.runtime_tick_before_data_drain()? {
                 app.drain_notifications_for_shutdown();
-                let workspace = self
-                    .focused_workspace_mut()
-                    .expect("AppShell always has a focused workspace");
-                workspace.absorb_terminal_app(app);
+                self.focused_workspace_unchecked().absorb_terminal_app(app);
                 return Ok(());
             }
             runtime.drain_app_data_events(&mut app);
@@ -363,20 +367,14 @@ impl AppShell {
                     TerminalCommandOutcome::HandledExit => {
                         app.runner_supervisor.shutdown_all_runs();
                         app.drain_notifications_for_shutdown();
-                        let workspace = self
-                            .focused_workspace_mut()
-                            .expect("AppShell always has a focused workspace");
-                        workspace.absorb_terminal_app(app);
+                        self.focused_workspace_unchecked().absorb_terminal_app(app);
                         return Ok(());
                     }
                     TerminalCommandOutcome::AppOwned(command) => {
                         if app.handle_app_command(command) {
                             app.runner_supervisor.shutdown_all_runs();
                             app.drain_notifications_for_shutdown();
-                            let workspace = self
-                                .focused_workspace_mut()
-                                .expect("AppShell always has a focused workspace");
-                            workspace.absorb_terminal_app(app);
+                            self.focused_workspace_unchecked().absorb_terminal_app(app);
                             return Ok(());
                         }
                     }

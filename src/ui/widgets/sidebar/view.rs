@@ -90,19 +90,15 @@ fn row_line(
     spans.push(Span::styled(sel, Style::default().fg(Color::Yellow)));
 
     // State indicators
-    let mut indicators = String::new();
-    if row.focused {
-        indicators.push('●');
+    let focused_indicator = if row.focused {
+        '●'
     } else if row.open {
-        indicators.push('○');
+        '○'
     } else {
-        indicators.push(' ');
-    }
-    if row.running {
-        indicators.push('▶');
-    } else {
-        indicators.push(' ');
-    }
+        ' '
+    };
+    let running_indicator = if row.running { '▶' } else { ' ' };
+    let indicators = format!("{}{}", focused_indicator, running_indicator);
     spans.push(Span::styled(indicators, Style::default().fg(Color::Cyan)));
 
     // Session id (truncate to fit)

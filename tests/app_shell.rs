@@ -377,7 +377,7 @@ fn sidebar_shows_every_non_archived_non_cancelled_phase() {
 
         for (i, phase) in phases.iter().enumerate() {
             let id = format!("20260511-{:02}0000-000000001", i);
-            save_session(&id, phase.clone());
+            save_session(&id, *phase);
         }
 
         let initial = session("20260511-000000-000000001", Phase::WaitingToImplement);
@@ -385,7 +385,7 @@ fn sidebar_shows_every_non_archived_non_cancelled_phase() {
         shell.toggle_sessions_sidebar().expect("toggle");
         let view = shell.sidebar_view();
 
-        let row_phases: Vec<Phase> = view.rows.iter().map(|r| r.phase.clone()).collect();
+        let row_phases: Vec<Phase> = view.rows.iter().map(|r| r.phase).collect();
         for phase in &phases {
             assert!(row_phases.contains(phase), "sidebar must include {phase:?}");
         }

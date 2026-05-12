@@ -22,8 +22,9 @@
 //! [`crate::data::picker_io::scan_sessions_for_scheduler`], which is now a
 //! thin wrapper that builds a fresh index, refreshes once, and snapshots.
 
+use crate::picker::SessionEntry;
 use crate::scheduler::{ScannedSession, SchedulerSession};
-use crate::state::{Phase, SessionState};
+use crate::state::{Modes, Phase, SessionState};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -38,6 +39,10 @@ pub struct IndexedSession {
     pub session_id: String,
     pub phase: Phase,
     pub archived: bool,
+    pub last_modified: SystemTime,
+    pub title: String,
+    pub idea_summary: String,
+    pub modes: Modes,
 }
 
 #[derive(Debug, Clone)]
@@ -125,17 +130,9 @@ impl SessionIndex {
                 self.loader_call_count += 1;
                 match SessionState::load(&session_id) {
                     Ok(state) => {
-                        self.entries.insert(
-                            session_id.clone(),
-                            Entry::Loaded {
-                                mtime,
-                                indexed: IndexedSession {
-                                    session_id: session_id.clone(),
-                                    phase: state.current_phase,
-                                    archived: state.archived,
-                                },
-                            },
-                        );
+                        let indexed = indexed_session_from_state(&session_id, &state, mtime);
+                        self.entries
+                            .insert(session_id.clone(), Entry::Loaded { mtime, indexed });
                     }
                     Err(err) => {
                         self.entries.insert(
@@ -152,6 +149,12 @@ impl SessionIndex {
         }
         self.entries.retain(|id, _| observed.contains(id));
         Ok(())
+    }
+
+    pub fn refresh_tracking_changes(&mut self) -> Result<bool> {
+        let before = self.entries.clone();
+        self.refresh()?;
+        Ok(!entries_same_for_dirty(&before, &self.entries))
     }
 
     /// Project the cache into the scheduler's input shape. Archived
@@ -180,6 +183,46 @@ impl SessionIndex {
         out
     }
 
+    /// Project loaded, non-archived entries into the sidebar's base row
+    /// data. Focus/open/running flags are shell state and are applied by
+    /// `AppShell` when it rebuilds the sidebar model.
+    pub fn snapshot_for_sidebar(&self) -> Vec<SessionEntry> {
+        let mut out: Vec<SessionEntry> = self
+            .entries
+            .values()
+            .filter_map(|entry| match entry {
+                Entry::Loaded { indexed, .. } if indexed.archived => None,
+                Entry::Loaded { indexed, .. } => Some(SessionEntry {
+                    session_id: indexed.session_id.clone(),
+                    idea_summary: indexed.idea_summary.clone(),
+                    current_phase: indexed.phase,
+                    modes: indexed.modes,
+                    last_modified: indexed.last_modified,
+                    archived: indexed.archived,
+                }),
+                Entry::Corrupt { .. } => None,
+            })
+            .collect();
+        out.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+        out
+    }
+
+    /// Update one cached projection from an in-memory state mutation.
+    /// Supervisor events may arrive before the next filesystem refresh; this
+    /// keeps index-backed sidebar rows coherent without doing an event-time
+    /// disk scan.
+    pub fn update_loaded_state(&mut self, state: &SessionState) {
+        let session_id = state.session_id.clone();
+        let mtime = self
+            .entries
+            .get(&session_id)
+            .map(Entry::mtime)
+            .unwrap_or_else(SystemTime::now);
+        let indexed = indexed_session_from_state(&session_id, state, mtime);
+        self.entries
+            .insert(session_id, Entry::Loaded { mtime, indexed });
+    }
+
     /// Lookup the cached projection for a session, if it loaded
     /// successfully on the most recent refresh.
     pub fn get(&self, session_id: &str) -> Option<&IndexedSession> {
@@ -187,6 +230,93 @@ impl SessionIndex {
             Entry::Loaded { indexed, .. } => Some(indexed),
             Entry::Corrupt { .. } => None,
         }
+    }
+}
+
+fn indexed_session_from_state(
+    session_id: &str,
+    state: &SessionState,
+    last_modified: SystemTime,
+) -> IndexedSession {
+    let title = state
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default()
+        .to_string();
+    let idea_summary = if title.is_empty() {
+        truncate_idea(&state.idea_text)
+    } else {
+        title.clone()
+    };
+    IndexedSession {
+        session_id: session_id.to_string(),
+        phase: state.current_phase,
+        archived: state.archived,
+        last_modified,
+        title,
+        idea_summary,
+        modes: state.modes,
+    }
+}
+
+fn entries_same_for_dirty(
+    before: &BTreeMap<String, Entry>,
+    after: &BTreeMap<String, Entry>,
+) -> bool {
+    if before.len() != after.len() {
+        return false;
+    }
+    before.iter().all(|(id, before_entry)| {
+        let Some(after_entry) = after.get(id) else {
+            return false;
+        };
+        match (before_entry, after_entry) {
+            (
+                Entry::Loaded {
+                    mtime: before_mtime,
+                    indexed: before_indexed,
+                },
+                Entry::Loaded {
+                    mtime: after_mtime,
+                    indexed: after_indexed,
+                },
+            ) => before_mtime == after_mtime && indexed_same(before_indexed, after_indexed),
+            (
+                Entry::Corrupt {
+                    mtime: before_mtime,
+                    error: before_error,
+                },
+                Entry::Corrupt {
+                    mtime: after_mtime,
+                    error: after_error,
+                },
+            ) => before_mtime == after_mtime && before_error == after_error,
+            _ => false,
+        }
+    })
+}
+
+fn indexed_same(left: &IndexedSession, right: &IndexedSession) -> bool {
+    left.session_id == right.session_id
+        && left.phase == right.phase
+        && left.archived == right.archived
+        && left.last_modified == right.last_modified
+        && left.title == right.title
+        && left.idea_summary == right.idea_summary
+        && left.modes == right.modes
+}
+
+fn truncate_idea(idea: &Option<String>) -> String {
+    match idea {
+        Some(text) if text.chars().count() > 80 => {
+            let mut s: String = text.chars().take(77).collect();
+            s.push_str("...");
+            s
+        }
+        Some(text) => text.clone(),
+        None => "(untitled)".to_string(),
     }
 }
 
@@ -227,6 +357,18 @@ mod tests {
     fn save_session(id: &str, phase: Phase) {
         let mut state = SessionState::new(id.to_string());
         state.current_phase = phase;
+        state.save().expect("save session");
+    }
+
+    fn save_session_with_sidebar_fields(id: &str, phase: Phase) {
+        let mut state = SessionState::new(id.to_string());
+        state.current_phase = phase;
+        state.title = Some("Sidebar title".to_string());
+        state.idea_text = Some("Longer idea body".to_string());
+        state.modes = Modes {
+            yolo: true,
+            cheap: true,
+        };
         state.save().expect("save session");
     }
 
@@ -378,6 +520,33 @@ mod tests {
             let snap = index.snapshot_for_scheduler();
             assert_eq!(snap.len(), 1);
             assert_eq!(snap[0].session_id(), "20260511-090000-000000001");
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn refresh_indexes_sidebar_projection_fields() {
+        with_temp_root(|| {
+            let id = "20260511-080000-000000001";
+            save_session_with_sidebar_fields(id, Phase::Done);
+
+            let mut index = SessionIndex::new(sessions_root());
+            index.refresh().expect("refresh");
+
+            let indexed = index.get(id).expect("indexed session");
+            assert_eq!(indexed.title, "Sidebar title");
+            assert_eq!(indexed.idea_summary, "Sidebar title");
+            assert_eq!(
+                indexed.modes,
+                Modes {
+                    yolo: true,
+                    cheap: true,
+                }
+            );
+            let rows = index.snapshot_for_sidebar();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].idea_summary, "Sidebar title");
+            assert_eq!(rows[0].modes, indexed.modes);
         });
     }
 }

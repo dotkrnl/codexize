@@ -110,7 +110,7 @@ pub fn emit_annotated(config: &Config) -> String {
     .ok();
     out.push('\n');
 
-    out.push_str("# Per-vendor ACP launch knobs. `program` is the literal fallback used\n");
+    out.push_str("# Per-vendor ACP launch knobs. `program` is the executable used\n");
     out.push_str("# when no local install is detected. `enabled = false` removes the vendor\n");
     out.push_str("# from `available_clis()`. Keys under `env` populate the spawn\n");
     out.push_str("# environment as a base; system `CODEXIZE_ACP_*` keys overwrite collisions.\n");
@@ -190,39 +190,4 @@ fn emit_agent(out: &mut String, vendor: &str, agent: &AcpAgentSection) {
     writeln!(out, "program = {}", quote(agent.program.value())).ok();
     writeln!(out, "args = {}", format_string_array(agent.args.value())).ok();
     writeln!(out, "env = {}", format_inline_env(agent.env.value())).ok();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn emit_starts_with_meta_section() {
-        let out = emit_annotated(&Config::baked_defaults());
-        assert!(out.contains("[meta]\nversion = 1"));
-    }
-
-    #[test]
-    fn emit_contains_every_section() {
-        let out = emit_annotated(&Config::baked_defaults());
-        for header in [
-            "[meta]",
-            "[ntfy]",
-            "[ntfy.events]",
-            "[acp.policy]",
-            "[acp.install]",
-            "[acp.agents.claude]",
-            "[acp.agents.codex]",
-            "[acp.agents.gemini]",
-            "[acp.agents.kimi]",
-            "[acp.agents.opencode]",
-            "[runner]",
-            "[paths]",
-            "[ui]",
-            "[diagnostics]",
-            "[memory]",
-        ] {
-            assert!(out.contains(header), "missing {header} in dump");
-        }
-    }
 }

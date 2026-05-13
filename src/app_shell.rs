@@ -888,9 +888,22 @@ impl AppShell {
             && app.state.session_id == session_id
         {
             let before_run_id = app.current_run_id;
+            let before_live_summary = app.live_summary_cached_text.clone();
             drive.apply(app);
             let state = app.state.clone();
-            let tick = tick_from_run_transition(before_run_id, app.current_run_id);
+            let live_summary_changed = (app.live_summary_cached_text != before_live_summary)
+                .then(|| app.live_summary_cached_text.clone());
+            let tick = SupervisorTick {
+                state_changed: true,
+                run_started: (before_run_id != app.current_run_id)
+                    .then_some(app.current_run_id)
+                    .flatten(),
+                run_finished: (before_run_id != app.current_run_id
+                    && app.current_run_id.is_none())
+                .then_some(before_run_id)
+                .flatten(),
+                live_summary_changed,
+            };
             self.publish_supervisor_tick(session_id, &state, tick);
             return Ok(state);
         }
@@ -978,21 +991,6 @@ impl Drop for AppShell {
     }
 }
 
-fn tick_from_run_transition(
-    before_run_id: Option<u64>,
-    after_run_id: Option<u64>,
-) -> SupervisorTick {
-    SupervisorTick {
-        state_changed: true,
-        run_started: (before_run_id != after_run_id)
-            .then_some(after_run_id)
-            .flatten(),
-        run_finished: (before_run_id != after_run_id && after_run_id.is_none())
-            .then_some(before_run_id)
-            .flatten(),
-        live_summary_changed: None,
-    }
-}
 
 fn sidebar_date_label(session_id: &str) -> String {
     let bytes = session_id.as_bytes();

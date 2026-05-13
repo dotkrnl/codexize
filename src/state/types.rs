@@ -204,8 +204,8 @@ pub enum DreamingDecisionKind {
     Pending,
     /// Operator declined the suggested Dreaming pass.
     OperatorSkipped,
-    /// Operator chose to run Dreaming; the run phase is intentionally future
-    /// work in this version, but the choice is persisted for resume safety.
+    /// Operator chose to run Dreaming; persisted so resume can preserve
+    /// the accepted validator recommendation.
     OperatorAccepted,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -122,10 +122,13 @@ impl Default for Supervisor {
 }
 impl Supervisor {
     pub fn new(config: Arc<crate::data::config::Config>) -> Self {
+        let handle = Handle::try_current().ok();
+        #[cfg(test)]
+        let handle = handle.or_else(test_runtime_handle);
         Self {
             inner: Arc::new(SupervisorInner {
                 config,
-                handle: Handle::try_current().ok().or_else(fallback_runtime_handle),
+                handle,
                 root_token: CancellationToken::new(),
                 runs: DashMap::new(),
             }),
@@ -221,12 +224,8 @@ impl Supervisor {
             .collect()
     }
 }
-#[cfg(not(test))]
-fn fallback_runtime_handle() -> Option<Handle> {
-    None
-}
 #[cfg(test)]
-fn fallback_runtime_handle() -> Option<Handle> {
+fn test_runtime_handle() -> Option<Handle> {
     static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
     Some(
         RUNTIME

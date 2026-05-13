@@ -68,7 +68,8 @@ pub const ADDITION_DISPLAY_ORDER: u16 = u16::MAX;
 /// even if they appear on the IPBR scoreboard, since launching them
 /// errors with `ProviderModelNotFoundError`.
 pub const BAKED_TABLE: &[BakedRow] = &[
-    // --- Claude opus (4 rows): tough_eligible=true, cheap_eligible=false, effort_tough="max" ---
+    // --- Claude opus (4 rows): cheap_eligible=false,
+    // effort_tough="max"; 4.1 is kept out of tough rotation.
     BakedRow {
         model: "claude-opus-4.1",
         providers: &[BakedProvider {

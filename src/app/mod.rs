@@ -48,11 +48,12 @@ mod tests_prompts;
 mod tests_split_sync;
 pub(crate) use crate::ui::widgets::tree::view as tree;
 pub(crate) mod watchdog;
-mod yolo_exit;
+pub mod yolo_exit;
 pub(crate) use self::state::ModelRefreshState;
 use self::tree::{NodeKey, VisibleNodeRow};
 use crate::{
     cache,
+    data::runner::supervise::session_supervisor::SessionSupervisor,
     selection::{CachedModel, QuotaError, SubscriptionKind},
     state::{Message, Node, SessionState},
 };
@@ -72,20 +73,20 @@ const ENV_STAMP_TIMEOUT_MS: &str = "CODEXIZE_STAMP_TIMEOUT_MS";
 const DEFAULT_EVENT_POLL_MS: u64 = 250;
 const LIVE_SUMMARY_EVENT_POLL_MS: u64 = 50;
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ObservedPathState {
-    exists: bool,
-    modified_at: Option<SystemTime>,
+pub struct ObservedPathState {
+    pub exists: bool,
+    pub modified_at: Option<SystemTime>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct YoloExitSnapshot {
-    live_summary: ObservedPathState,
-    finish_stamp: ObservedPathState,
-    stage_artifacts: Vec<ObservedPathState>,
+pub struct YoloExitSnapshot {
+    pub live_summary: ObservedPathState,
+    pub finish_stamp: ObservedPathState,
+    pub stage_artifacts: Vec<ObservedPathState>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct YoloExitObservation {
-    snapshot: YoloExitSnapshot,
-    saw_new_update: bool,
+pub struct YoloExitObservation {
+    pub snapshot: YoloExitSnapshot,
+    pub saw_new_update: bool,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExpansionOverride {
@@ -238,7 +239,7 @@ impl App {
             .into_iter()
             .filter_map(|s| match s {
                 crate::scheduler::ScannedSession::Loaded(session) => {
-                    if session.session_id < self.state.session_id
+                    if session.session_id < self.supervisor.state.session_id
                         && session.current_phase == crate::state::Phase::WaitingToImplement
                     {
                         Some(
@@ -255,7 +256,7 @@ impl App {
     }
 }
 pub struct App {
-    pub(crate) state: SessionState,
+    pub(crate) supervisor: SessionSupervisor,
     pub(crate) nodes: Vec<Node>,
     pub(crate) visible_rows: Vec<VisibleNodeRow>,
     pub(crate) models: Vec<CachedModel>,
@@ -293,26 +294,8 @@ pub struct App {
     pub(crate) input_cursor: usize,
     pub(crate) pending_view_path: Option<std::path::PathBuf>,
     pub(crate) confirm_back: bool,
-    pub(crate) startup_origin: AppStartupOrigin,
-    pub(crate) run_launched: bool,
-    pub(crate) quota_errors: Vec<QuotaError>,
-    pub(crate) quota_retry_delay: Duration,
-    pub(crate) agent_line_count: usize,
-    pub(crate) agent_content_hash: u64,
-    pub(crate) agent_last_change: Option<Instant>,
     pub(crate) spinner_tick: usize,
     pub(crate) live_summary_spinner_visible: bool,
-    pub(crate) live_summary_watcher: Option<notify::RecommendedWatcher>,
-    pub(crate) live_summary_change_events: Option<crate::data::events::LiveSummaryEvents>,
-    pub(crate) live_summary_path: Option<std::path::PathBuf>,
-    pub(crate) live_summary_cached_text: String,
-    pub(crate) live_summary_cached_mtime: Option<std::time::SystemTime>,
-    /// Per-process watcher that fires when another instance atomically
-    /// publishes a new `models.json` under `paths.cache_root`. The notify
-    /// backend handles sub-2-s latency; an internal 60-s mtime poll
-    /// covers events the kernel-side notifier dropped. `None` only when
-    /// the App is constructed without a watcher (tests).
-    pub(crate) cache_watcher: Option<crate::data::cache::CacheWatcher>,
     pub(crate) pending_drain_deadline: Option<Instant>,
     pub(crate) pending_termination: Option<PendingTermination>,
     pub(crate) pending_quit_confirmation_run_id: Option<u64>,
@@ -320,37 +303,9 @@ pub struct App {
     pub(crate) interactive_exit_prompt_dismissed_at: Option<(u64, usize)>,
     pub(crate) pending_app_exit: bool,
     pub(crate) pending_shell_command: Option<String>,
-    pub(crate) current_run_id: Option<u64>,
-    pub(crate) failed_models: HashMap<RetryKey, FailedModelSet>,
     pub(crate) pending_yolo_toggle_gate: Option<&'static str>,
-    pub(crate) yolo_exit_issued: HashSet<u64>,
-    pub(crate) yolo_exit_observations: HashMap<u64, YoloExitObservation>,
-    pub(crate) runner_supervisor: crate::runner::Supervisor,
-    /// Runner-level operator knobs (full-alignment cadence, etc.).
-    /// Populated from `config.runner_view()` at construction time.
-    pub(crate) runner_config: crate::runner::RunnerConfig,
-    pub(crate) notification_runtime: crate::data::notifications::NotificationRuntime,
-    pub(crate) interactive_wait_marker: Option<crate::data::notifications::InteractiveWaitMarker>,
-    /// The loaded unified config, shared across subsystems. Every view
-    /// (ntfy, ACP, runner, paths, diagnostics, memory, UI) is derived
-    /// from this single `Arc<Config>` — load-on-launch, no global static.
-    pub(crate) config: std::sync::Arc<crate::data::config::Config>,
-    /// Pre-extracted read-only view of `[memory]`.
-    pub(crate) memory_view: crate::data::config::view::MemoryView,
-    /// Pre-extracted read-only view of `[ui]`.
-    pub(crate) ui_view: crate::data::config::view::UiView,
-    /// Pre-extracted read-only view of `[paths]` with `$HOME` already
-    /// expanded at load time. All path resolution inside `App` and its
-    /// stages flows through this struct so operators can independently
-    /// override session, run, cache, and memory roots.
-    pub(crate) paths: crate::data::config::view::PathsView,
-    /// Per-run liveness watchdog state. Allocated as part of task 1
-    /// scaffolding; the App-side lifecycle hookup that inserts/removes
-    /// entries (and ticks `evaluate`) lands with task 2.
-    pub(crate) watchdog: watchdog::WatchdogRegistry,
     #[cfg(test)]
     pub(crate) test_launch_harness: Option<std::sync::Arc<std::sync::Mutex<TestLaunchHarness>>>,
-    pub(crate) messages: Vec<Message>,
     pub(crate) status_line: Rc<RefCell<status_line::StatusLine>>,
     pub(crate) prev_models_mode: models_area::ModelsAreaMode,
     pub(crate) palette: palette::PaletteState,
@@ -367,8 +322,22 @@ pub struct App {
     /// stable across the session — and so parallel tests that change
     /// the process cwd cannot leak tempdir names into the rendered
     /// title.
+    pub(crate) ui_view: crate::data::config::view::UiView,
     pub(crate) project_name: String,
 }
+impl std::ops::Deref for App {
+    type Target = SessionSupervisor;
+    fn deref(&self) -> &Self::Target {
+        &self.supervisor
+    }
+}
+
+impl std::ops::DerefMut for App {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.supervisor
+    }
+}
+
 fn default_expansion(
     row: &VisibleNodeRow,
     _current_node: usize,

@@ -8,6 +8,7 @@
 //! [`super::exit`]. This file is the supervisor that ties them together.
 mod launch;
 mod runtime;
+pub mod session_supervisor;
 #[cfg(test)]
 #[path = "supervise/tests_support.rs"]
 mod test_support;

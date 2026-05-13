@@ -186,6 +186,8 @@ impl App {
             item.status = PipelineItemStatus::Pending;
             item.round = None;
         } else {
+            let task_title = self.state.builder.task_titles.get(&task_id).cloned();
+            let iteration = self.state.builder.iteration.max(1);
             self.state
                 .builder
                 .push_pipeline_item(crate::state::PipelineItem {
@@ -194,11 +196,11 @@ impl App {
                     task_id: Some(task_id),
                     round: None,
                     status: PipelineItemStatus::Pending,
-                    title: self.state.builder.task_titles.get(&task_id).cloned(),
+                    title: task_title,
                     mode: None,
                     trigger: None,
                     interactive: None,
-                    iteration: self.state.builder.iteration.max(1),
+                    iteration,
                 });
         }
         self.clear_agent_error();

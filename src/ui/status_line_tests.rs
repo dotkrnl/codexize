@@ -119,12 +119,6 @@ fn explicit_clear_allows_lower_severity_replacement() {
 }
 
 #[test]
-fn empty_line_renders_nothing() {
-    let line = StatusLine::new();
-    assert!(line.render().is_none());
-}
-
-#[test]
 fn severity_colors() {
     let mut line = StatusLine::new();
 

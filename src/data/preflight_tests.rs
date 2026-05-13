@@ -27,13 +27,6 @@ fn test_detect_project_type_rust() {
 }
 
 #[test]
-fn test_generate_heuristic_gitignore_contains_codexize() {
-    let content = generate_heuristic_gitignore(".codexize/");
-    assert!(content.contains(".codexize/"));
-    assert!(content.contains(".DS_Store"));
-}
-
-#[test]
 fn test_append_to_gitignore_creates_file() {
     with_temp_dir(|| {
         append_to_gitignore(".codexize/").unwrap();

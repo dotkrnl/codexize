@@ -1,8 +1,4 @@
-//! Shared TOML formatting helpers used by the defaults emitter, sparse
-//! saver, and CLI/TUI value formatters.
-//!
-//! These were duplicated in three modules (`defaults::quote`, `loader::toml_quote`,
-//! `mutate::toml_quote` etc.) before extraction.
+//! Shared TOML formatting helpers for defaults emitter, sparse saver, and CLI/TUI formatters.
 
 use std::collections::BTreeMap;
 

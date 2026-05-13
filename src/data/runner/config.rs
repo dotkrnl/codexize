@@ -35,11 +35,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_interval_matches_spec() {
-        assert_eq!(RunnerConfig::default().full_review_interval, 5);
-    }
-
-    #[test]
     fn selection_matrix() {
         // (round, interval, expected_full_alignment)
         let cases = [

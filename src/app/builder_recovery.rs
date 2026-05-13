@@ -42,6 +42,8 @@ impl App {
             let _ = self.state.log_event(loop_msg.clone());
             let msg = Message {
                 ts: chrono::Utc::now(),
+                // Run IDs start at 1 (see SessionState::next_agent_run_id), so 0
+                // is a safe sentinel for "no active run" in system messages.
                 run_id: self.current_run_id.unwrap_or(0),
                 kind: MessageKind::SummaryWarn,
                 sender: MessageSender::System,

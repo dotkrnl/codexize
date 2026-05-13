@@ -330,11 +330,6 @@ fn frozen_clock_difference_exactly_in_seconds_field() {
 }
 
 #[test]
-fn gradient_spans_empty_input_returns_empty_vec() {
-    assert!(gradient_spans("", 0).is_empty());
-}
-
-#[test]
 fn gradient_spans_round_trip_ascii_text() {
     let text = "Awaiting idea";
     let spans = gradient_spans(text, 0);

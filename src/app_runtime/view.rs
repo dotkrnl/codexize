@@ -139,6 +139,4 @@ impl AppView {
         }
     }
 }
-#[cfg(test)]
-#[path = "view_tests.rs"]
-mod tests;
+

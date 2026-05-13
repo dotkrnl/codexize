@@ -90,7 +90,7 @@ fn ambiguous_prefix_match() {
         MatchResult::Ambiguous { candidates, .. } => {
             assert!(candidates.contains(&"foo"));
             assert!(candidates.contains(&"food"));
-            assert_eq!(ghost_completion("fo", &cmds), Some("foo"));
+            assert_eq!(ghost_completion("fo", &cmds), None);
         }
         _ => panic!("expected ambiguous match"),
     }
@@ -139,7 +139,7 @@ fn ghost_for_ambiguous_prefix() {
             key_hint: None,
         },
     ];
-    assert_eq!(ghost_completion("fo", &cmds), Some("foo"));
+    assert_eq!(ghost_completion("fo", &cmds), None);
 }
 
 #[test]

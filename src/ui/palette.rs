@@ -87,9 +87,6 @@ pub fn ghost_completion<'a>(input: &str, commands: &'a [PaletteCommand]) -> Opti
     if prefix_matches.len() == 1 {
         return Some(prefix_matches[0].name);
     }
-    if prefix_matches.len() > 1 {
-        return Some(prefix_matches[0].name);
-    }
     None
 }
 /// Return the subset of `commands` to display in the discovery browser for

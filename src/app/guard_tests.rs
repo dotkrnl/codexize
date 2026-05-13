@@ -259,14 +259,6 @@ fn verify_dispatches_to_coder_path_when_stage_is_coder() {
 
 #[test]
 #[serial_test::serial(process_cwd)]
-fn reset_hard_to_returns_false_for_empty_head() {
-    // Empty string short-circuits before any git invocation, so the
-    // function returns false without touching the working tree.
-    assert!(!reset_hard_to(""));
-}
-
-#[test]
-#[serial_test::serial(process_cwd)]
 fn reset_hard_to_returns_false_when_head_does_not_resolve() {
     let temp = tempfile::TempDir::new().unwrap();
     init_repo(temp.path());

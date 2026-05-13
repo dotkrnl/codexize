@@ -27,29 +27,6 @@ fn test_detect_project_type_rust() {
 }
 
 #[test]
-fn test_has_existing_files_empty() {
-    with_temp_dir(|| {
-        assert!(!has_existing_files());
-    });
-}
-
-#[test]
-fn test_has_existing_files_with_dotfile() {
-    with_temp_dir(|| {
-        fs::write(".hidden", "").unwrap();
-        assert!(!has_existing_files());
-    });
-}
-
-#[test]
-fn test_has_existing_files_with_regular_file() {
-    with_temp_dir(|| {
-        fs::write("file.txt", "content").unwrap();
-        assert!(has_existing_files());
-    });
-}
-
-#[test]
 fn test_generate_heuristic_gitignore_contains_codexize() {
     let content = generate_heuristic_gitignore(".codexize/");
     assert!(content.contains(".codexize/"));

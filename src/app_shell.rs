@@ -1581,4 +1581,121 @@ estimated_tokens = 100
             assert_eq!(reloaded.agent_runs[0].status, RunStatus::Done);
         });
     }
+
+    #[test]
+    #[serial]
+    fn focused_run_lifecycle_publishes_run_started_and_finished() {
+        with_temp_root(|| {
+            let mut state = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            state.agent_runs.clear();
+            state.save().expect("save without runs");
+            let mut shell = AppShell::new(
+                state.clone(),
+                AppStartupOrigin::Default,
+                Arc::new(Config::baked_defaults()),
+            )
+            .expect("shell");
+
+            let mut sub = shell.event_bus.subscribe();
+
+            // Simulate the loop taking the app
+            let mut app = shell.take_focused_app();
+            app.models.push(cached_build_model());
+            app.test_launch_harness = Some(Arc::new(std::sync::Mutex::new(TestLaunchHarness {
+                outcomes: VecDeque::from([
+                    TestLaunchOutcome {
+                        exit_code: 0,
+                        artifact_contents: None,
+                        launch_error: None,
+                    },
+                    TestLaunchOutcome {
+                        exit_code: 0,
+                        artifact_contents: None,
+                        launch_error: None,
+                    },
+                ]),
+            })));
+
+            // Drive a launch through the focused app
+            let tick = SchedulerTick {
+                planning: Vec::new(),
+                implementation: ImplementationDecision::LaneOccupied {
+                    session_id: "20260511-090000-000000001".to_string(),
+                    phase: Phase::ShardingRunning,
+                },
+                skipped_corrupt_later_sessions: Vec::new(),
+            };
+            shell
+                .apply_implementation_decision(&tick, Some(&mut app))
+                .expect("apply launch");
+
+            // Verify RunStarted event
+            let mut found_started = false;
+            while let Ok(event) = sub.try_recv() {
+                if let ShellEvent::RunStarted { session_id, run_id } = event {
+                    assert_eq!(session_id, "20260511-090000-000000001");
+                    assert_eq!(run_id, 1);
+                    found_started = true;
+                    break;
+                }
+            }
+            assert!(
+                found_started,
+                "RunStarted event not published for focused launch"
+            );
+
+            // Simulate run finish
+            write_finish_stamp("20260511-090000-000000001", "sharding-stage-r1-a1");
+
+            // Drive another tick to trigger finalization and publication
+            shell
+                .apply_implementation_decision(&tick, Some(&mut app))
+                .expect("apply finish");
+
+            // Verify RunFinished event
+            let mut found_finished = false;
+            while let Ok(event) = sub.try_recv() {
+                if let ShellEvent::RunFinished { session_id, run_id } = event {
+                    assert_eq!(session_id, "20260511-090000-000000001");
+                    assert_eq!(run_id, 1);
+                    found_finished = true;
+                    break;
+                }
+            }
+            assert!(
+                found_finished,
+                "RunFinished event not published for focused finish"
+            );
+
+            // Re-verify that NO panic occurred in replace_state (which is called by publish_supervisor_tick
+            // via apply_event while the app is taken).
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn running_session_id_is_derived_not_mirrored() {
+        with_temp_root(|| {
+            let focused = save_session("20260511-080000-000000001", Phase::Done);
+            let mut running = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            running.agent_runs.push(running_sharding_run(7));
+            running.save().expect("save running");
+
+            let mut shell = AppShell::new(
+                focused,
+                AppStartupOrigin::Default,
+                Arc::new(Config::baked_defaults()),
+            )
+            .expect("shell");
+
+            shell
+                .open_session("20260511-090000-000000001")
+                .expect("open");
+            // Derived lookup should find session A as running even without any event application
+            assert_eq!(
+                shell.running_session_id(),
+                Some("20260511-090000-000000001")
+            );
+        });
+    }
 }

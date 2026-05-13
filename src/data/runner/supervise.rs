@@ -125,7 +125,7 @@ impl Supervisor {
         Self {
             inner: Arc::new(SupervisorInner {
                 config,
-                handle: Handle::try_current().ok().or_else(test_runtime_handle),
+                handle: Handle::try_current().ok().or_else(fallback_runtime_handle),
                 root_token: CancellationToken::new(),
                 runs: DashMap::new(),
             }),
@@ -222,11 +222,11 @@ impl Supervisor {
     }
 }
 #[cfg(not(test))]
-fn test_runtime_handle() -> Option<Handle> {
+fn fallback_runtime_handle() -> Option<Handle> {
     None
 }
 #[cfg(test)]
-fn test_runtime_handle() -> Option<Handle> {
+fn fallback_runtime_handle() -> Option<Handle> {
     static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
     Some(
         RUNTIME

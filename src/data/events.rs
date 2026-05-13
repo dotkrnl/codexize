@@ -98,9 +98,7 @@ pub enum DataOutcome {
     /// was not active or had already finished.
     Terminated(bool),
 }
-/// Dispatch a [`DataRequest`] to the appropriate data primitive. The runtime
-/// uses this as its only entry point for side effects so the surface stays
-/// small and reviewable.
+/// Dispatch a [`DataRequest`] to the appropriate data primitive.
 pub fn dispatch(
     request: DataRequest,
     runner_supervisor: &crate::runner::Supervisor,
@@ -115,11 +113,6 @@ pub fn dispatch(
         DataRequest::TerminateRun { run_id } => {
             DataOutcome::Terminated(runner_supervisor.terminate_run(run_id))
         }
-        // Observation variants are handled by `dispatch_observation`.
-        DataRequest::ProbeLiveSummary { .. }
-        | DataRequest::ReadLiveSummary { .. }
-        | DataRequest::DrainLiveSummary { .. }
-        | DataRequest::ReadPromptBody { .. } => unreachable!(),
     }
 }
 /// Dispatch the observation-only subset of [`DataRequest`] without consulting

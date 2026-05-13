@@ -103,16 +103,17 @@ pub fn dispatch(
     request: DataRequest,
     runner_supervisor: &crate::runner::Supervisor,
 ) -> DataOutcome {
-    if let Some(outcome) = dispatch_observation(&request) {
-        return outcome;
-    }
-    match request {
-        DataRequest::InterruptRun { run_id, text } => {
-            DataOutcome::Interrupted(runner_supervisor.force_interrupt_run(run_id, text))
-        }
-        DataRequest::TerminateRun { run_id } => {
-            DataOutcome::Terminated(runner_supervisor.terminate_run(run_id))
-        }
+    match dispatch_observation(&request) {
+        Some(outcome) => outcome,
+        None => match request {
+            DataRequest::InterruptRun { run_id, text } => {
+                DataOutcome::Interrupted(runner_supervisor.force_interrupt_run(run_id, text))
+            }
+            DataRequest::TerminateRun { run_id } => {
+                DataOutcome::Terminated(runner_supervisor.terminate_run(run_id))
+            }
+            _ => unreachable!(),
+        },
     }
 }
 /// Dispatch the observation-only subset of [`DataRequest`] without consulting

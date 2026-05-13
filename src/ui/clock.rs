@@ -1,4 +1,10 @@
 use std::time::Instant;
+#[cfg(test)]
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    time::{Duration, SystemTime},
+};
 
 /// Clock seam that abstracts wall-clock access for testability.
 ///

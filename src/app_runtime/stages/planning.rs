@@ -32,15 +32,7 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (
-            model,
-            _subscription,
-            subscription_tag,
-            cli,
-            launch_name,
-            effort_mapping,
-            effort_eligible,
-        ) = chosen;
+        let (model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible) = chosen;
         let _ = std::fs::remove_file(&plan_path);
         let prompt_path = session_dir.join("prompts").join("planning.md");
         if let Some(parent) = prompt_path.parent() {

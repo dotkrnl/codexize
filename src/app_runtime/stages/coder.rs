@@ -51,15 +51,7 @@ impl App {
             let _ = self.state.save();
             return false;
         };
-        let (
-            model,
-            _subscription,
-            subscription_tag,
-            cli,
-            launch_name,
-            effort_mapping,
-            effort_eligible,
-        ) = chosen;
+        let (model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible) = chosen;
         let prompt_path = session_dir.join("prompts").join(format!("coder-r{r}.md"));
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);

@@ -86,15 +86,7 @@ impl App {
             let _ = self.state.save();
             return false;
         };
-        let (
-            model,
-            _subscription,
-            subscription_tag,
-            cli,
-            launch_name,
-            effort_mapping,
-            effort_eligible,
-        ) = chosen;
+        let (model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible) = chosen;
         let attempt = self.attempt_for("reviewer", Some(task_id), r);
         let live_summary_path =
             self.live_summary_path_for_run("reviewer", Some(task_id), r, attempt);
@@ -344,7 +336,7 @@ impl App {
                     review::ReviewStatus::AgentPivot => {
                         (PipelineItemStatus::AgentPivot, "agent_pivot")
                     }
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 };
                 if let Some(task_id) = self.state.builder.current_task_id() {
                     let _ = session_state::mark_task_status(

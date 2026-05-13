@@ -69,15 +69,7 @@ impl App {
             let _ = self.state.save();
             return false;
         };
-        let (
-            model,
-            _subscription,
-            subscription_tag,
-            cli,
-            launch_name,
-            effort_mapping,
-            effort_eligible,
-        ) = chosen;
+        let (model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible) = chosen;
         let attempt = self.attempt_for("spec-review", None, round);
         let live_summary_path = self.live_summary_path_for_run("spec-review", None, round, attempt);
         let earlier_specs = self.earlier_waiting_specs();

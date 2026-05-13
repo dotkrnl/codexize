@@ -42,15 +42,7 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (
-            model,
-            _subscription,
-            subscription_tag,
-            cli,
-            launch_name,
-            effort_mapping,
-            effort_eligible,
-        ) = chosen;
+        let (model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible) = chosen;
         let completed = self.state.builder.done_task_ids();
         let id_floor = self.state.builder.max_task_id();
         let prompt = recovery_sharding_prompt(

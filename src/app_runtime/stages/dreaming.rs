@@ -47,15 +47,8 @@ impl App {
             effort,
             modes.cheap,
         );
-        let Some((
-            model,
-            _subscription,
-            subscription_tag,
-            cli,
-            launch_name,
-            effort_mapping,
-            effort_eligible,
-        )) = chosen
+        let Some((model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible)) =
+            chosen
         else {
             self.record_agent_error("no model available for dreaming".to_string());
             let _ = self.state.save();

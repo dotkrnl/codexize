@@ -48,7 +48,6 @@ impl App {
                     super::pick_cli_and_launch_name(model);
                 (
                     model.name.clone(),
-                    model.subscription,
                     subscription_tag(model.subscription).to_string(),
                     cli,
                     launch_name,
@@ -60,15 +59,8 @@ impl App {
             .or_else(|| {
                 self.choose_primary_model(None, SelectionPhase::Review, effort, modes.cheap)
             });
-        let Some((
-            model,
-            _subscription,
-            subscription_tag,
-            cli,
-            launch_name,
-            effort_mapping,
-            effort_eligible,
-        )) = chosen
+        let Some((model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible)) =
+            chosen
         else {
             self.record_agent_error("no model available for final validation".to_string());
             let _ = self.state.save();

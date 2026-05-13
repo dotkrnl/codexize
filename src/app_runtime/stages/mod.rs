@@ -46,13 +46,12 @@ use crate::{
 /// the launch site can drive [`crate::adapters::launch_effort_suffix`]
 /// without consulting any vendor-keyed table.
 pub(crate) type StagePick = (
-    String,           // model row name
-    SubscriptionKind, // row subscription (compat mirror of selected candidate)
-    String,           // subscription_tag string from subscription_tag(SubscriptionKind)
-    CliKind,          // CLI to spawn
-    String,           // verbatim launch_name passed to the CLI
-    EffortMapping,    // per-tuple effort token table (cheap/normal/tough)
-    bool,             // candidate's effort_eligible flag
+    String,        // model row name
+    String,        // subscription_tag string from subscription_tag(SubscriptionKind)
+    CliKind,       // CLI to spawn
+    String,        // verbatim launch_name passed to the CLI
+    EffortMapping, // per-tuple effort token table (cheap/normal/tough)
+    bool,          // candidate's effort_eligible flag
 );
 
 /// Pull launch-time fields from the row's selected candidate when
@@ -137,7 +136,6 @@ impl App {
                 pick_cli_and_launch_name(model);
             return Some((
                 model.name.clone(),
-                model.subscription,
                 subscription_tag(model.subscription).to_string(),
                 cli,
                 launch_name,
@@ -150,7 +148,6 @@ impl App {
             pick_cli_and_launch_name(outcome.model);
         let picked = (
             outcome.model.name.clone(),
-            outcome.model.subscription,
             subscription_tag(outcome.model.subscription).to_string(),
             cli,
             launch_name,
@@ -173,7 +170,6 @@ impl App {
                 pick_cli_and_launch_name(model);
             return Some((
                 model.name.clone(),
-                model.subscription,
                 subscription_tag(model.subscription).to_string(),
                 cli,
                 launch_name,
@@ -187,7 +183,6 @@ impl App {
             pick_cli_and_launch_name(outcome.model);
         let picked = (
             outcome.model.name.clone(),
-            outcome.model.subscription,
             subscription_tag(outcome.model.subscription).to_string(),
             cli,
             launch_name,
@@ -330,7 +325,6 @@ impl App {
         let (cli, launch_name, effort_mapping, effort_eligible) = pick_cli_and_launch_name(model);
         Some((
             model.name.clone(),
-            model.subscription,
             subscription_tag(model.subscription).to_string(),
             cli,
             launch_name,
@@ -339,7 +333,7 @@ impl App {
         ))
     }
     /// Look up the most-recent run on a stage for the given round and
-    /// resolve its `(model, vendor_kind, subscription_tag)` triple. Returns
+    /// resolve its launch metadata and rendered subscription tag. Returns
     /// `None` when no matching run exists or its persisted vendor string
     /// no longer parses (e.g. after a vendor rename).
     ///
@@ -373,7 +367,6 @@ impl App {
             };
         Some((
             last.model.clone(),
-            vendor_kind,
             subscription_tag(vendor_kind).to_string(),
             cli,
             launch_name,

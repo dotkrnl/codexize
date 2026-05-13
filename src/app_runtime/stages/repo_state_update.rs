@@ -82,15 +82,7 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (
-            model,
-            _subscription,
-            subscription_tag,
-            cli,
-            launch_name,
-            effort_mapping,
-            effort_eligible,
-        ) = chosen;
+        let (model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible) = chosen;
 
         let attempt = self.attempt_for(STAGE, None, 1);
         let live_summary_path = self.live_summary_path_for_run(STAGE, None, 1, attempt);

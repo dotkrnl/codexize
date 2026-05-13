@@ -43,15 +43,7 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (
-            model,
-            _subscription,
-            subscription_tag,
-            cli,
-            launch_name,
-            effort_mapping,
-            effort_eligible,
-        ) = chosen;
+        let (model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible) = chosen;
         let is_human_blocked = self
             .state
             .builder

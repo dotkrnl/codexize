@@ -228,6 +228,20 @@ impl App {
     /// sorts earlier than the current session and is in `WaitingToImplement`.
     /// These represent the "expected future repository state" that brainstorm,
     /// spec review, and planning stages must consider.
+    /// Guard that the model list has been loaded. If empty, records an agent
+    /// error, saves state, rebuilds the tree, and returns `false`.
+    pub(crate) fn guard_models_loaded(&mut self) -> bool {
+        if self.models.is_empty() {
+            self.record_agent_error(
+                "model list not yet loaded — wait a moment and try again".to_string(),
+            );
+            let _ = self.state.save();
+            self.rebuild_tree_view(None);
+            return false;
+        }
+        true
+    }
+
     pub(crate) fn earlier_waiting_specs(&self) -> Vec<std::path::PathBuf> {
         let Ok(scanned) =
             crate::data::picker_io::scan_sessions_for_scheduler(&self.sessions_root())

@@ -2188,8 +2188,6 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
     let Some(providers::ProvidersLine::Provider {
         entry,
         is_baked,
-        baked_free,
-        baked_official,
     }) = lines.get(state.providers_cursor)
     else {
         return;
@@ -2223,7 +2221,7 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
     body.push(Line::from(""));
 
     for (idx, toggle) in PROVIDER_TOGGLES.iter().enumerate() {
-        let on = current_toggle_value(entry, *is_baked, *baked_free, *baked_official, toggle);
+        let on = current_toggle_value(entry, toggle);
         let focused = idx == cursor;
         let locked = *is_baked && toggle.baked_locked;
         let check_glyph = if on { " ✓ " } else { " ✗ " };
@@ -2369,9 +2367,6 @@ fn render_exit_prompt_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Bu
 
 fn current_toggle_value(
     entry: &crate::data::config::schema::ProviderEntry,
-    _is_baked: bool,
-    _baked_free: bool,
-    _baked_official: bool,
     toggle: &ProviderToggle,
 ) -> bool {
     match toggle.field {

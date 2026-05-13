@@ -142,9 +142,10 @@ fn run_cli_command(cli: &Cli) -> Result<()> {
     if cli.yolo || cli.cheap || cli.message.is_some() {
         bail!("error: subcommands do not accept launch flags");
     }
-    match cli.command.as_ref().expect("command checked by caller") {
-        Command::Ntfy(command) => run_ntfy_command(command),
-        Command::Config(command) => run_config_command(command),
+    match &cli.command {
+        Some(Command::Ntfy(command)) => run_ntfy_command(command),
+        Some(Command::Config(command)) => run_config_command(command),
+        None => bail!("error: no subcommand provided"),
     }
 }
 fn run_ntfy_command(command: &NtfyCommand) -> Result<()> {

@@ -41,12 +41,7 @@ impl App {
         override_model: Option<CachedModel>,
     ) -> bool {
         self.clear_agent_error();
-        if self.models.is_empty() {
-            self.record_agent_error(
-                "model list not yet loaded — wait a moment and try again".to_string(),
-            );
-            let _ = self.state.save();
-            self.rebuild_tree_view(None);
+        if !self.guard_models_loaded() {
             return false;
         }
         let Phase::ReviewRound(r) = self.state.current_phase else {

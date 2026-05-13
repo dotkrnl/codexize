@@ -15,7 +15,7 @@ pub const CACHE_VERSION: u32 = 10;
 pub const DASHBOARD_TTL: Duration = Duration::from_secs(10 * 60);
 pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
 // ---------------------------------------------------------------------------
-// Schema v4 types
+// Cache file types
 // ---------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CacheFile {
@@ -113,7 +113,7 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 // ---------------------------------------------------------------------------
-// Public API — schema v4
+// Public API
 //
 // Every entry point takes an explicit `dir`. Callers thread the cache
 // directory from `paths.cache_root` (loaded from `~/.codexize/config.toml`)

@@ -273,8 +273,6 @@ pub(crate) enum ProvidersLine {
     Provider {
         entry: ProviderEntry,
         is_baked: bool,
-        baked_free: bool,
-        baked_official: bool,
     },
     AddAction,
 }
@@ -335,8 +333,6 @@ pub(crate) fn get_lines(
             let baked = baked::baked_for(&model, entry.cli, &entry.launch_name);
             lines.push(ProvidersLine::Provider {
                 is_baked: baked.is_some(),
-                baked_free: baked.as_ref().is_some_and(|b| b.free),
-                baked_official: baked.as_ref().is_some_and(|b| b.official),
                 entry,
             });
         }
@@ -407,8 +403,6 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
         ProvidersLine::Provider {
             entry,
             is_baked,
-            baked_free,
-            baked_official,
         } => {
             let focus_glyph = if focused {
                 Span::styled(
@@ -438,8 +432,6 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
             // built-in is the implicit default — no chip. Custom entries
             // (user-added overrides) keep their yellow chip so they
             // stand out in the list.
-            let _ = baked_free;
-            let _ = baked_official;
             let custom_chip = if *is_baked { None } else { Some("custom") };
             let free = entry.free;
 

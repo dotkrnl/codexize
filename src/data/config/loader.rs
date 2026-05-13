@@ -153,11 +153,10 @@ pub fn load_str(text: &str) -> Result<Config, LoadError> {
             "memory" => decode_memory(item, &mut config.memory, key)?,
             "providers" => decode_providers(item, &mut config.providers, key)?,
             unknown => {
-                let (line, column) = item_position(item);
                 return Err(LoadError::UnknownKey {
                     path: unknown.to_string(),
-                    line,
-                    column,
+                    line: 1,
+                    column: 1,
                     suggestion: super::util::nearest(unknown, known_top, 3),
                 });
             }
@@ -613,11 +612,10 @@ fn decode_providers(
                     display_order = n as u16;
                 }
                 other => {
-                    let (line, column) = item_position(item);
                     return Err(LoadError::UnknownKey {
                         path: format!("{parent}[{i}].{other}"),
-                        line,
-                        column,
+                        line: 1,
+                        column: 1,
                         suggestion: super::util::nearest(other, known, 3),
                     });
                 }
@@ -626,7 +624,9 @@ fn decode_providers(
         let cli = cli.ok_or_else(|| {
             LoadError::Validation(format!("{parent}[{i}]: missing required \"launch\""))
         })?;
-        let launch_name = launch_name.expect("set together with cli");
+        let launch_name = launch_name.ok_or_else(|| {
+            LoadError::Validation(format!("{parent}[{i}]: missing required \"launch\""))
+        })?;
         let model = model.ok_or_else(|| {
             LoadError::Validation(format!("{parent}[{i}]: missing required \"model\""))
         })?;
@@ -683,23 +683,13 @@ fn dotted(parent: &str, child: &str) -> String {
     }
 }
 
-fn unknown(parent: &str, key: &str, item: &Item, known: &[&str]) -> Result<(), LoadError> {
-    let (line, column) = item_position(item);
+fn unknown(parent: &str, key: &str, _item: &Item, known: &[&str]) -> Result<(), LoadError> {
     Err(LoadError::UnknownKey {
         path: dotted(parent, key),
-        line,
-        column,
+        line: 1,
+        column: 1,
         suggestion: super::util::nearest(key, known, 3),
     })
-}
-
-fn item_position(item: &Item) -> (usize, usize) {
-    // toml_edit exposes spans on the prefix decor; for v0.25 we report
-    // the best-effort 1/1 fallback when no span is present (e.g. items
-    // synthesised programmatically). Real parse positions go through
-    // the dedicated Parse error variant.
-    let _ = item;
-    (1, 1)
 }
 
 fn require_table<'a>(item: &'a Item, path: &str) -> Result<&'a toml_edit::Table, LoadError> {

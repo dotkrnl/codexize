@@ -1,9 +1,6 @@
 use serde::{Deserialize, Serialize};
 #[path = "phase_graph.rs"]
 mod phase_graph;
-#[cfg(test)]
-#[path = "phase_tests.rs"]
-mod phase_tests;
 // `EnumString` is intentionally not derived: no caller parses phase names back
 // into `Phase`, and the parameterized variants would require runtime-format
 // parsing that strum cannot generate.

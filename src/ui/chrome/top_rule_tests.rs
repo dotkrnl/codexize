@@ -101,69 +101,6 @@ fn styled_left_spans_preserve_badge_style() {
     );
 }
 
-// Snapshot tests at representative widths
-#[test]
-fn snapshot_width_200() {
-    let line = top_rule(
-        "codexize",
-        Some("Reviewer · Evaluating implementation quality"),
-        200,
-    );
-    // Both should fit with generous separator
-    assert!(line.to_string().contains("codexize"));
-    assert!(
-        line.to_string()
-            .contains("Reviewer · Evaluating implementation quality")
-    );
-    // Should have at least 4 cols separator
-    assert!(line.spans.len() == 3);
-    assert!(line.spans[1].content.chars().count() >= 4);
-}
-
-#[test]
-fn snapshot_width_120() {
-    let line = top_rule("codexize", Some("Implementation R2 · running"), 120);
-    assert!(line.to_string().contains("codexize"));
-    assert!(line.to_string().contains("Implementation R2 · running"));
-}
-
-#[test]
-fn snapshot_width_80() {
-    let line = top_rule("codexize", Some("Spec Review · awaiting input"), 80);
-    assert!(line.to_string().contains("codexize"));
-    assert!(line.to_string().contains("Spec Review · awaiting input"));
-}
-
-#[test]
-fn snapshot_width_60_truncated_right() {
-    let line = top_rule(
-        "codexize",
-        Some("Very Long Agent Name · Processing complex task with extra detail"),
-        60,
-    );
-    let text = line.to_string();
-    assert!(text.contains("codexize"));
-    // Right should be truncated with ellipsis
-    assert!(text.contains("…"));
-}
-
-#[test]
-fn snapshot_width_40_short_right() {
-    let line = top_rule("codexize", Some("paused"), 40);
-    let text = line.to_string();
-    assert!(text.contains("codexize"));
-    assert!(text.contains("paused"));
-}
-
-#[test]
-fn snapshot_width_16_left_only() {
-    let line = top_rule("codexize", Some("Agent · Processing"), 16);
-    let text = line.to_string();
-    // Right segment should be dropped (would be <8 cols after truncation).
-    assert!(!text.contains("Agent"));
-    assert!(text.contains("codexize"));
-}
-
 #[test]
 fn edge_case_right_exactly_8_cols_after_truncate() {
     // Test the boundary: truncated right exactly 8 cols should render

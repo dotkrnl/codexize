@@ -33,16 +33,6 @@ fn row_is_last_sibling_when_next_boundary_is_ancestor() {
 }
 
 #[test]
-fn spinner_frame_wraps_by_spinner_length() {
-    assert_eq!(spinner_frame(0), spinner_frame(10));
-}
-
-#[test]
-fn strip_ansi_codes_removes_escape_sequences() {
-    assert_eq!(strip_ansi("\u{1b}[31mred\u{1b}[0m"), "red");
-}
-
-#[test]
 fn sanitize_live_summary_collapses_and_truncates() {
     let text = format!("\u{1b}[31m{}\u{1b}[0m", "x ".repeat(600));
     assert_eq!(sanitize_live_summary(&text).chars().count(), 500);

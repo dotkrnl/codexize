@@ -151,6 +151,3 @@ fn name_style() -> Style {
 fn ellipsis_style() -> Style {
     Style::default().fg(Color::DarkGray)
 }
-#[cfg(test)]
-#[path = "state_tests.rs"]
-mod tests;

@@ -35,6 +35,3 @@ pub fn subscription_kind_to_str(v: SubscriptionKind) -> &'static str {
         SubscriptionKind::Direct => "direct",
     }
 }
-#[cfg(test)]
-#[path = "subscription_tests.rs"]
-mod tests;

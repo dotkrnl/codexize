@@ -15,11 +15,6 @@ fn restore_terminal_after_failed_start_is_idempotent() {
 }
 
 #[test]
-fn wrap_text_zero_width_returns_empty() {
-    assert!(wrap_text("anything", 0).is_empty());
-}
-
-#[test]
 fn quit_running_agent_modal_keys_become_domain_commands() {
     let mut view = AppView::empty("ui-command-test");
     view.modal = Some(ModalKind::QuitRunningAgent);

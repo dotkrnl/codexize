@@ -108,7 +108,7 @@ async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
     let security_path = bin_dir.join("security");
     std::fs::write(
         &claude_path,
-        "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n  printf '{\"orgId\":\"test-org\"}'\n  exit 0\nfi\nsleep 1\n",
+        "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n  printf '{\"orgId\":\"test-org\"}'\n  exit 0\nfi\nsleep 0.01\n",
     )
     .unwrap();
     std::fs::write(&security_path, "#!/bin/sh\nexit 1\n").unwrap();
@@ -178,7 +178,7 @@ async fn assemble_models_async_elects_publisher_when_reset_coverage_is_partial()
     let security_path = bin_dir.join("security");
     std::fs::write(
         &claude_path,
-        "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n  printf '{\"orgId\":\"test-org\"}'\n  exit 0\nfi\nsleep 1\n",
+        "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n  printf '{\"orgId\":\"test-org\"}'\n  exit 0\nfi\nsleep 0.01\n",
     )
     .unwrap();
     std::fs::write(&security_path, "#!/bin/sh\nexit 1\n").unwrap();

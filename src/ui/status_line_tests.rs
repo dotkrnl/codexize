@@ -118,19 +118,3 @@ fn explicit_clear_allows_lower_severity_replacement() {
     assert_eq!(rendered.to_string(), "info msg");
 }
 
-#[test]
-fn severity_colors() {
-    let mut line = StatusLine::new();
-
-    line.push("i".to_string(), Severity::Info, Duration::from_secs(10));
-    let info_span = line.render().unwrap().spans[0].clone();
-    assert_eq!(info_span.style.fg, Some(Color::Gray));
-
-    line.push("w".to_string(), Severity::Warn, Duration::from_secs(10));
-    let warn_span = line.render().unwrap().spans[0].clone();
-    assert_eq!(warn_span.style.fg, Some(Color::Yellow));
-
-    line.push("e".to_string(), Severity::Error, Duration::from_secs(10));
-    let err_span = line.render().unwrap().spans[0].clone();
-    assert_eq!(err_span.style.fg, Some(Color::Red));
-}

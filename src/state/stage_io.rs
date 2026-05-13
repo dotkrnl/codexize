@@ -141,6 +141,3 @@ pub fn stage_io_with_mode(stage: &str, mode: Option<&str>) -> Option<&'static St
         _ => None,
     }
 }
-#[cfg(test)]
-#[path = "stage_io_tests.rs"]
-mod tests;

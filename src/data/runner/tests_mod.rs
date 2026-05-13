@@ -1083,7 +1083,7 @@ fn run_child_with_timeout_returns_status_when_child_exits_quickly() {
 #[test]
 fn run_child_with_timeout_returns_none_when_child_outruns_deadline() {
     let launch = ChildLaunch::new("sleep")
-        .args(["10"])
+        .args(["2"])
         .stdin_null()
         .stdout_null()
         .stderr_null();

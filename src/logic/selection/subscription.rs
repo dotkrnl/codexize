@@ -16,15 +16,6 @@ pub fn is_cheap_eligible(model: &CachedModel) -> bool {
         .selected_candidate()
         .is_some_and(|candidate| candidate.cheap_eligible)
 }
-/// True when the row's *selected* provider tuple is flagged as
-/// effort-eligible (so the run can hand it a high-reasoning effort
-/// flag).
-pub fn is_effort_eligible(model: &CachedModel) -> bool {
-    model
-        .selected_candidate()
-        .is_some_and(|candidate| candidate.effort_eligible)
-}
-
 pub fn subscription_kind_to_str(v: SubscriptionKind) -> &'static str {
     match v {
         SubscriptionKind::Claude => "claude",

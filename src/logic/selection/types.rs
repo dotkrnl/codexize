@@ -154,13 +154,6 @@ impl ModelRow {
         self.selected_candidate
             .and_then(|index| self.candidates.get(index))
     }
-    pub fn selected_cli(&self) -> Option<CliKind> {
-        self.selected_candidate().map(|candidate| candidate.cli)
-    }
-    pub fn selected_launch_name(&self) -> &str {
-        self.selected_candidate()
-            .map_or(&self.name, |candidate| candidate.launch_name.as_str())
-    }
 }
 impl SubscriptionKind {
     pub fn direct_cli(self) -> Option<CliKind> {

@@ -344,14 +344,7 @@ impl App {
                     review::ReviewStatus::AgentPivot => {
                         (PipelineItemStatus::AgentPivot, "agent_pivot")
                     }
-                    review::ReviewStatus::Approved
-                    | review::ReviewStatus::Refine
-                    | review::ReviewStatus::Revise => {
-                        // SAFETY: the enclosing outer match arm only matches
-                        // `HumanBlocked | AgentPivot`, so the other ReviewStatus
-                        // variants cannot reach this inner match.
-                        unreachable!("already handled")
-                    }
+                    _ => unreachable!()
                 };
                 if let Some(task_id) = self.state.builder.current_task_id() {
                     let _ = session_state::mark_task_status(

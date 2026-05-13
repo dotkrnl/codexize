@@ -478,7 +478,7 @@ fn full_table_uses_gemini_preview_display_label() {
     let row = full_model_buffer_line(&lines, 0, 120);
 
     assert!(
-        row.contains("3.1 preview"),
+        row.contains("3.1 pro"),
         "curated short display label should appear: {row:?}"
     );
     assert!(

@@ -18,7 +18,7 @@ const DISPLAY: &[(&str, &str, &str)] = &[
     ("gemini-2.5-pro", "gemini", "2.5 pro"),
     ("gemini-3-flash", "gemini", "3 flash"),
     ("gemini-3-pro", "gemini", "3 pro"),
-    ("gemini-3.1-pro-preview", "gemini", "3.1 preview"),
+    ("gemini-3.1-pro-preview", "gemini", "3.1 pro"),
     ("kimi-k2-0905", "kimi", "k2 0905"),
     ("kimi-k2.5", "kimi", "2.5"),
     ("kimi-k2.6", "kimi", "2.6"),

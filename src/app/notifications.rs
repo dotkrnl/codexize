@@ -39,9 +39,8 @@ impl App {
             return;
         };
         let context = self.notification_context_for_run(&run);
-        let current_phase = self.state.current_phase;
         self.notification_runtime
-            .emit_interactive_wait(current_phase, context, marker);
+            .emit_interactive_wait(self.state.current_phase, context, marker);
     }
 
     pub(crate) fn poll_notification_reports(&mut self) {

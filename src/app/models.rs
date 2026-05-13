@@ -84,8 +84,6 @@ impl App {
         self.models = models;
     }
     pub(crate) fn refresh_models_if_due(&mut self) {
-        let quota_errors_empty = self.quota_errors.is_empty();
-        let quota_retry_delay = self.quota_retry_delay;
         match &mut self.model_refresh {
             ModelRefreshState::Fetching { rx, started_at } => match rx.try_recv() {
                 Ok((models, errors)) => {
@@ -124,10 +122,10 @@ impl App {
                 }
             },
             ModelRefreshState::Idle(refreshed_at) => {
-                let due_after = if quota_errors_empty {
+                let due_after = if self.quota_errors.is_empty() {
                     cache::TTL
                 } else {
-                    quota_retry_delay
+                    self.quota_retry_delay
                 };
                 if refreshed_at.elapsed() >= due_after {
                     self.model_refresh = ModelRefreshState::Fetching {

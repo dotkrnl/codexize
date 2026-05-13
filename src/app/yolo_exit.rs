@@ -86,11 +86,10 @@ impl App {
     }
     pub(crate) fn prime_yolo_exit_tracking(&mut self, run: &RunRecord) {
         self.yolo_exit_issued.remove(&run.id);
-        let snapshot = self.yolo_exit_snapshot(run);
         self.yolo_exit_observations.insert(
             run.id,
             YoloExitObservation {
-                snapshot,
+                snapshot: self.yolo_exit_snapshot(run),
                 saw_new_update: false,
             },
         );

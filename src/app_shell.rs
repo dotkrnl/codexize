@@ -10,7 +10,6 @@ use crate::app::{App, AppStartupOrigin};
 use crate::app_runtime::{AppCommand, UiKeyCode};
 use crate::data::app_lock::AppLockGuard;
 use crate::data::config::Config;
-use crate::data::runner::supervise::session_supervisor::{SessionSupervisor, SchedulerDrive, SupervisorTick};
 use crate::data::session_index::SessionIndex;
 use crate::scheduler::{
     ImplementationDecision, ScannedSession, SchedulerTick, evaluate_tick,
@@ -98,7 +97,7 @@ impl SidebarModel {
                 let session_id = entry.session_id;
                 SidebarRow {
                     focused: session_id == focused_session_id,
-                    open: supervisors.contains_key(&session_id) || session_id == focused_session_id,
+                    open: supervisors.contains_key(&session_id),
                     running: running_session_id == Some(session_id.as_str()),
                     date_label: sidebar_date_label(&session_id),
                     title: entry.idea_summary,
@@ -178,6 +177,141 @@ impl Default for ShellEventBus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SupervisorTick {
+    state_changed: bool,
+    run_started: Option<u64>,
+    run_finished: Option<u64>,
+    live_summary_changed: Option<String>,
+}
+
+pub struct SessionSupervisor {
+    app: Option<App>,
+}
+
+impl SessionSupervisor {
+    fn new(state: SessionState, startup_origin: AppStartupOrigin, config: Arc<Config>) -> Self {
+        Self {
+            app: Some(App::new_with_startup_origin_config_without_model_refresh(
+                state,
+                startup_origin,
+                config,
+            )),
+        }
+    }
+
+    fn app(&self) -> &App {
+        self.app
+            .as_ref()
+            .expect("session supervisor temporarily lent its App")
+    }
+
+    fn app_mut(&mut self) -> &mut App {
+        self.app
+            .as_mut()
+            .expect("session supervisor temporarily lent its App")
+    }
+
+    fn take_app(&mut self) -> App {
+        self.app
+            .take()
+            .expect("session supervisor cannot lend its App twice")
+    }
+
+    fn replace_app(&mut self, app: App) {
+        self.app = Some(app);
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.app().state.session_id
+    }
+
+    pub fn phase(&self) -> Phase {
+        self.app().state.current_phase
+    }
+
+    pub fn current_run_id(&self) -> Option<u64> {
+        self.app.as_ref().and_then(|app| app.current_run_id)
+    }
+
+    pub fn live_summary_text(&self) -> &str {
+        &self.app().live_summary_cached_text
+    }
+
+    pub fn message_count(&self) -> usize {
+        self.app().messages.len()
+    }
+
+    pub fn set_ui_probe_state(
+        &mut self,
+        input_buffer: impl Into<String>,
+        viewport_top: usize,
+        split_run_id: Option<u64>,
+    ) {
+        let app = self.app_mut();
+        app.input_buffer = input_buffer.into();
+        app.input_cursor = app.input_buffer.chars().count();
+        app.viewport_top = viewport_top;
+        app.split_target = split_run_id.map(crate::app::split::SplitTarget::Run);
+    }
+
+    pub fn ui_probe_state(&self) -> (String, usize, Option<u64>) {
+        let app = self.app();
+        let split_run_id = match app.split_target {
+            Some(crate::app::split::SplitTarget::Run(run_id)) => Some(run_id),
+            Some(crate::app::split::SplitTarget::Idea) | None => None,
+        };
+        (app.input_buffer.clone(), app.viewport_top, split_run_id)
+    }
+
+    fn replace_state(&mut self, state: SessionState) {
+        let Some(app) = self.app.as_mut() else {
+            return;
+        };
+        app.current_run_id = state
+            .agent_runs
+            .iter()
+            .find(|run| run.status == RunStatus::Running)
+            .map(|run| run.id);
+        app.run_launched = app.current_run_id.is_some();
+        app.state = state;
+        app.messages = SessionState::load_messages(&app.state.session_id).unwrap_or_default();
+        app.rebuild_tree_view(None);
+    }
+
+    fn replace_live_summary(&mut self, text: String) {
+        if let Some(app) = self.app.as_mut() {
+            app.live_summary_cached_text = crate::app::render::sanitize_live_summary(&text);
+        }
+    }
+
+    fn drive(&mut self, drive: SchedulerDrive) -> (SessionState, SupervisorTick) {
+        let app = self.app_mut();
+        let before_run_id = app.current_run_id;
+        let before_live_summary = app.live_summary_cached_text.clone();
+        drive.apply(app);
+        let after_run_id = app.current_run_id;
+        let live_summary_changed = (app.live_summary_cached_text != before_live_summary)
+            .then(|| app.live_summary_cached_text.clone());
+        let tick = SupervisorTick {
+            state_changed: true,
+            run_started: (before_run_id != after_run_id)
+                .then_some(after_run_id)
+                .flatten(),
+            run_finished: (before_run_id != after_run_id && after_run_id.is_none())
+                .then_some(before_run_id)
+                .flatten(),
+            live_summary_changed,
+        };
+        (app.state.clone(), tick)
+    }
+
+    #[cfg(test)]
+    fn app_identity(&self) -> usize {
+        self.app() as *const App as usize
+    }
+}
+
 pub struct AppShell {
     // Project-level single-process lock guard. Held for the lifetime of the
     // shell so that the lock file is removed on `Drop` after the embedded
@@ -253,41 +387,21 @@ impl AppShell {
         focused_app: Option<&'a App>,
     ) -> Option<&'a str> {
         let mut first_running = None;
-
-        // 1. Check focused app if provided
-        if let Some(app) = focused_app {
-            if app.current_run_id.is_some() {
-                let id = app.state.session_id.as_str();
-                if is_implementation_lane_phase(app.state.current_phase) {
-                    return Some(id);
-                }
-                first_running = Some(id);
-            }
-        } else if let Some(supervisor) = self.supervisors.get(&self.focused_session_id) {
-            // 2. Check focused supervisor if it's still in the map (not lent out)
-            if supervisor.current_run_id().is_some() {
-                let id = supervisor.session_id();
-                if is_implementation_lane_phase(supervisor.phase()) {
-                    return Some(id);
-                }
-                first_running = Some(id);
+        if let Some(app) = focused_app
+            && app.current_run_id.is_some()
+        {
+            first_running = Some(app.state.session_id.as_str());
+            if is_implementation_lane_phase(app.state.current_phase) {
+                return first_running;
             }
         }
-
-        // 3. Check all other supervisors in the map
         for supervisor in self.supervisors.values() {
-            if supervisor.session_id() == self.focused_session_id {
-                continue; // Already checked above
-            }
             if supervisor.current_run_id().is_none() {
                 continue;
             }
-            let id = supervisor.session_id();
-            if first_running.is_none() {
-                first_running = Some(id);
-            }
+            first_running.get_or_insert_with(|| supervisor.session_id());
             if is_implementation_lane_phase(supervisor.phase()) {
-                return Some(id);
+                return Some(supervisor.session_id());
             }
         }
         first_running
@@ -319,16 +433,15 @@ impl AppShell {
     }
 
     fn take_focused_app(&mut self) -> App {
-        let id = self.focused_session_id.clone();
-        let supervisor = self.supervisors
-            .remove(&id)
-            .expect("AppShell always has a focused workspace");
-        App::attach_to_supervisor(supervisor, true)
+        self.focused_supervisor_unchecked().take_app()
     }
 
     fn return_app_to_supervisor(&mut self, app: App) {
-        let supervisor = app.detach_supervisor();
-        self.supervisors.insert(supervisor.session_id().to_string(), supervisor);
+        let session_id = app.state.session_id.clone();
+        self.supervisors
+            .get_mut(&session_id)
+            .expect("focused App belongs to an observed supervisor")
+            .replace_app(app);
     }
 
     /// If the focused session has changed since `app` was lent to the terminal
@@ -687,23 +800,24 @@ impl AppShell {
     }
 
     fn scan_supervisors_for_scheduler(&self, focused_app: Option<&App>) -> Vec<ScannedSession> {
-        let focused_id = focused_app.map(|app| app.state.session_id.as_str());
+        let focused_phase =
+            focused_app.map(|app| (app.state.session_id.as_str(), app.state.current_phase));
         self.session_index
             .snapshot_for_scheduler()
             .into_iter()
             .filter_map(|scanned| {
-                let session_id = scanned.session_id();
-                let is_focused = Some(session_id) == focused_id;
-                if !self.supervisors.contains_key(session_id) && !is_focused {
+                let session_id = scanned.session_id().to_string();
+                if !self.supervisors.contains_key(&session_id) {
                     return None;
                 }
                 match scanned {
                     ScannedSession::Loaded(mut session) => {
-                        if let Some(app) = focused_app
-                            && app.state.session_id == session.session_id
+                        if let Some((focused_id, phase)) = focused_phase
+                            && focused_id == session.session_id
                         {
-                            session.current_phase = app.state.current_phase;
+                            session.current_phase = phase;
                         } else if let Some(supervisor) = self.supervisors.get(&session.session_id)
+                            && supervisor.app.is_some()
                         {
                             session.current_phase = supervisor.phase();
                         }
@@ -773,7 +887,23 @@ impl AppShell {
         if let Some(app) = focused_app
             && app.state.session_id == session_id
         {
-            let (state, tick) = app.supervisor.drive(drive);
+            let before_run_id = app.current_run_id;
+            let before_live_summary = app.live_summary_cached_text.clone();
+            drive.apply(app);
+            let state = app.state.clone();
+            let live_summary_changed = (app.live_summary_cached_text != before_live_summary)
+                .then(|| app.live_summary_cached_text.clone());
+            let tick = SupervisorTick {
+                state_changed: true,
+                run_started: (before_run_id != app.current_run_id)
+                    .then_some(app.current_run_id)
+                    .flatten(),
+                run_finished: (before_run_id != app.current_run_id
+                    && app.current_run_id.is_none())
+                .then_some(before_run_id)
+                .flatten(),
+                live_summary_changed,
+            };
             self.publish_supervisor_tick(session_id, &state, tick);
             return Ok(state);
         }
@@ -854,7 +984,9 @@ impl AppShell {
 impl Drop for AppShell {
     fn drop(&mut self) {
         for supervisor in self.supervisors.values() {
-            supervisor.runner_supervisor.shutdown_all_runs();
+            if let Some(app) = &supervisor.app {
+                app.runner_supervisor.shutdown_all_runs();
+            }
         }
     }
 }
@@ -866,6 +998,27 @@ fn sidebar_date_label(session_id: &str) -> String {
         format!("{}/{}", &session_id[4..6], &session_id[6..8])
     } else {
         "--/--".to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SchedulerDrive {
+    AutoLaunch,
+    DispatchWaiting,
+}
+
+impl SchedulerDrive {
+    fn apply(self, app: &mut App) {
+        match self {
+            Self::AutoLaunch => {
+                app.poll_agent_run();
+                app.maybe_auto_launch();
+            }
+            Self::DispatchWaiting => {
+                app.dispatch_waiting_to_implement();
+                app.maybe_auto_launch();
+            }
+        }
     }
 }
 

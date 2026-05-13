@@ -665,8 +665,12 @@ fn decode_effort_mapping(item: &Item, parent: &str) -> Result<EffortMapping, Loa
             "normal" => mapping.normal = require_string(v, &path)?,
             "tough" => mapping.tough = require_string(v, &path)?,
             other => {
-                unknown(parent, other, v, known)?;
-                unreachable!("unknown returns Err");
+                return Err(LoadError::UnknownKey {
+                    path: dotted(parent, other),
+                    line: 1,
+                    column: 1,
+                    suggestion: super::util::nearest(other, known, 3),
+                });
             }
         }
     }

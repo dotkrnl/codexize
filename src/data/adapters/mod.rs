@@ -55,13 +55,10 @@ pub fn launch_effort_suffix(
     effort_eligible: bool,
     effort_mapping: &EffortMapping,
 ) -> String {
-    if !effort_eligible || effort == EffortLevel::Normal {
-        return String::new();
-    }
-    let token = match effort {
-        EffortLevel::Low => &effort_mapping.cheap,
-        EffortLevel::Tough => &effort_mapping.tough,
-        EffortLevel::Normal => unreachable!(),
+    let token = match (effort, effort_eligible) {
+        (EffortLevel::Low, true) => &effort_mapping.cheap,
+        (EffortLevel::Tough, true) => &effort_mapping.tough,
+        _ => return String::new(),
     };
     if token.is_empty() {
         String::new()

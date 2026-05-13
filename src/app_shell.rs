@@ -238,10 +238,6 @@ impl SessionSupervisor {
         &self.app().live_summary_cached_text
     }
 
-    pub fn message_count(&self) -> usize {
-        self.app().messages.len()
-    }
-
     pub fn set_ui_probe_state(
         &mut self,
         input_buffer: impl Into<String>,
@@ -367,10 +363,6 @@ impl AppShell {
         };
         shell.refresh_sidebar_rows()?;
         Ok(shell)
-    }
-
-    pub fn event_bus(&self) -> ShellEventBus {
-        self.event_bus.clone()
     }
 
     pub fn focused_session_id(&self) -> &str {

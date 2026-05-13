@@ -86,12 +86,6 @@ where
     terminal.draw(draw)?;
     Ok(())
 }
-pub fn poll_command(timeout: Duration, view: &AppView) -> Result<Option<AppCommand>> {
-    if !event::poll(timeout)? {
-        return Ok(None);
-    }
-    Ok(command_from_event(event::read()?, view))
-}
 pub struct CrosstermInputAdapter {
     rx: mpsc::UnboundedReceiver<Event>,
     cancel: CancellationToken,

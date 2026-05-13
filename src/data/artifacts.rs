@@ -91,30 +91,6 @@ pub struct SessionArtifact {
     pub operator: String,
     pub status: String,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct MessagesArtifact {
-    #[serde(default)]
-    pub messages: Vec<MessageArtifact>,
-}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MessageArtifact {
-    pub role: String,
-    pub content: String,
-    pub timestamp: String,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct EventsArtifact {
-    #[serde(default)]
-    pub events: Vec<EventArtifact>,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct EventArtifact {
-    #[serde(rename = "type")]
-    pub event_type: String,
-    #[serde(default)]
-    pub payload: toml::map::Map<String, toml::Value>,
-    pub timestamp: String,
-}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactRef {
     pub path: String,
@@ -131,10 +107,6 @@ pub struct TaskArtifact {
     pub spec_refs: Vec<ArtifactRef>,
     #[serde(default)]
     pub plan_refs: Vec<ArtifactRef>,
-}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TasksArtifact {
-    pub tasks: Vec<TaskArtifact>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -158,8 +130,7 @@ pub struct ReviewArtifact {
     #[serde(default)]
     pub new_tasks: Vec<TaskArtifact>,
 }
-pub type SpecReviewArtifact = ReviewArtifact;
-pub type PlanReviewArtifact = ReviewArtifact;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryArtifact {
     pub status: ReviewStatus,

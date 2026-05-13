@@ -112,7 +112,12 @@ pub fn dispatch(
             DataRequest::TerminateRun { run_id } => {
                 DataOutcome::Terminated(runner_supervisor.terminate_run(run_id))
             }
-            _ => unreachable!(),
+            DataRequest::ProbeLiveSummary { .. }
+            | DataRequest::ReadLiveSummary { .. }
+            | DataRequest::DrainLiveSummary { .. }
+            | DataRequest::ReadPromptBody { .. } => {
+                unreachable!("dispatch_observation should have handled {request:?}")
+            }
         },
     }
 }

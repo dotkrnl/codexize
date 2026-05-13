@@ -329,15 +329,12 @@ impl App {
                 self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
             }
             review::ReviewStatus::HumanBlocked | review::ReviewStatus::AgentPivot => {
-                let (verdict_status, trigger_str) = match verdict.status {
-                    review::ReviewStatus::HumanBlocked => {
+                let (verdict_status, trigger_str) =
+                    if matches!(verdict.status, review::ReviewStatus::HumanBlocked) {
                         (PipelineItemStatus::HumanBlocked, "human_blocked")
-                    }
-                    review::ReviewStatus::AgentPivot => {
+                    } else {
                         (PipelineItemStatus::AgentPivot, "agent_pivot")
-                    }
-                    _ => unreachable!(),
-                };
+                    };
                 if let Some(task_id) = self.state.builder.current_task_id() {
                     let _ = session_state::mark_task_status(
                         &mut self.state,

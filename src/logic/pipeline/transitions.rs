@@ -5,11 +5,9 @@
 //! no process spawning. The persisting counterparts that wrap these helpers
 //! with logging and `state.save()` live in
 //! [`crate::data::persistence::transitions`].
-use crate::adapters::EffortLevel;
 use crate::logic::pipeline::phase::Phase;
 use crate::state::{
-    BuilderState, LaunchModes, Modes, PendingGuardDecision, PipelineItem, PipelineItemStatus,
-    RunRecord, RunStatus, SessionState,
+    BuilderState, Modes, PendingGuardDecision, PipelineItem, PipelineItemStatus, SessionState,
 };
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -101,14 +99,6 @@ pub fn clear_skip_to_impl_proposal(state: &mut SessionState) {
 }
 pub fn reset_builder_after_rewind(state: &mut SessionState) {
     state.builder = BuilderState::default();
-}
-pub fn load_task_titles_if_empty(
-    state: &mut SessionState,
-    titles: impl IntoIterator<Item = (u32, String)>,
-) {
-    if state.builder.task_titles.is_empty() {
-        state.builder.task_titles = titles.into_iter().collect();
-    }
 }
 pub fn initialize_task_pipeline(
     state: &mut SessionState,
@@ -401,47 +391,4 @@ pub fn restore_guard_originating_phase(state: &mut SessionState, originating: Ph
     // Phase::can_transition_to intentionally does not list GitGuardPending back
     // to the paused running phases, so this restore cannot use execute_transition.
     state.current_phase = originating;
-}
-#[allow(clippy::too_many_arguments)]
-pub fn create_run_record_in_memory(
-    state: &mut SessionState,
-    stage: String,
-    task_id: Option<u32>,
-    round: u32,
-    attempt: u32,
-    model: String,
-    subscription_label: String,
-    window_name: String,
-    effort: EffortLevel,
-    effort_mapping: crate::data::config::schema::EffortMapping,
-    effort_eligible: bool,
-    modes: LaunchModes,
-    started_at: DateTime<Utc>,
-    hostname: Option<String>,
-    mount_device_id: Option<u64>,
-) -> u64 {
-    let id = state.next_agent_run_id();
-    let run = RunRecord {
-        id,
-        stage,
-        task_id,
-        round,
-        attempt,
-        model,
-        subscription_label,
-        window_name,
-        started_at,
-        ended_at: None,
-        status: RunStatus::Running,
-        error: None,
-        effort,
-        effort_mapping,
-        effort_eligible,
-        modes,
-        hostname,
-        mount_device_id,
-        section_path: None,
-    };
-    state.agent_runs.push(run);
-    id
 }

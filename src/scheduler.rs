@@ -11,21 +11,6 @@
 //! hand-built session lists without a tempdir.
 use crate::state::Phase;
 
-/// Where a runner launch may legitimately originate.
-///
-/// The shell rejects any launch attempt whose origin is not one of these
-/// three. `Creation` covers the brainstorm auto-start when a new session is
-/// created from the picker. `Retry` covers operator-driven retries (palette
-/// commands, the stage-error modal's "Retry" action, the
-/// stop-and-retry termination flow). `Scheduler` covers planning-lane
-/// continuations and the implementation-lane head dispatch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LaunchOrigin {
-    Creation,
-    Retry,
-    Scheduler,
-}
-
 /// Lane categorization for a [`Phase`]. The scheduler uses lane membership
 /// to decide whether a session may run alongside others (Planning) or must
 /// be the sole active session in its lane across the entire project

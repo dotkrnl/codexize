@@ -117,14 +117,14 @@ pub(super) async fn wait_for_stable_head() -> (String, String) {
         while tokio::fs::metadata(&lock_path).await.is_ok() && Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        let first = git_rev_parse_head().unwrap_or_default();
+        let head_first = git_rev_parse_head().unwrap_or_default();
         tokio::time::sleep(interval).await;
-        let second = git_rev_parse_head().unwrap_or_default();
-        if first == second {
-            return (second, "stable".to_string());
+        let head_second = git_rev_parse_head().unwrap_or_default();
+        if head_first == head_second {
+            return (head_second, "stable".to_string());
         }
         if Instant::now() >= deadline {
-            return (second, "unstable".to_string());
+            return (head_second, "unstable".to_string());
         }
     }
 }
@@ -160,10 +160,10 @@ pub(super) fn enforce_readonly_workspace_policy(
     if !enforce {
         return Ok(());
     }
-    let head_after = git_rev_parse_head().unwrap_or_default();
-    if head_after != head_before {
+    let head_after_or_empty = git_rev_parse_head().unwrap_or_default();
+    if head_after_or_empty != head_before {
         bail!(
-            "ACP launch violated read-only workspace policy: HEAD changed from {head_before} to {head_after}"
+            "ACP launch violated read-only workspace policy: HEAD changed from {head_before} to {head_after_or_empty}"
         );
     }
     let Some(git_status_before) = git_status_before else {

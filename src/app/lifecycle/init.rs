@@ -74,10 +74,8 @@ impl App {
             };
             let tasks_path = tasks_path.join("artifacts").join("tasks.toml");
             if let Ok(parsed) = tasks::validate(&tasks_path) {
-                session_state::load_task_titles_if_empty(
-                    &mut state,
-                    parsed.tasks.into_iter().map(|t| (t.id, t.title)),
-                );
+                state.builder.task_titles =
+                    parsed.tasks.into_iter().map(|t| (t.id, t.title)).collect();
             }
         }
         let nodes = build_tree(&state);

@@ -11,7 +11,7 @@ pub use transitions::{
     apply_revise_with_new_tasks, archive_session, clear_agent_error,
     clear_builder_recovery_context, clear_pending_guard_decision, clear_skip_to_impl_proposal,
     ensure_builder_task_for_round, increment_recovery_cycle_count, initialize_task_pipeline,
-    load_task_titles_if_empty, mark_current_task_for_recovery, mark_latest_pipeline_stage_done,
+    mark_current_task_for_recovery, mark_latest_pipeline_stage_done,
     mark_latest_pipeline_stage_running, mark_task_status, prepare_new_session_for_brainstorm,
     queue_recovery_plan_review, queue_recovery_sharding, queue_recovery_stage, record_agent_error,
     record_brainstorm_launch, record_builder_recovery_context, record_builder_verdict,

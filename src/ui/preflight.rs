@@ -324,37 +324,30 @@ fn run_acp_install_modals_if_missing(
     Ok(())
 }
 
-// The nested poll/read shape keeps crossterm's two-step API explicit for the
-// modal input loop; collapsing it obscures which operation can block.
-#[allow(clippy::collapsible_if)]
 fn run_acp_install_modal(
     terminal: &mut AppTerminal,
     scenario: Scenario,
     claude_acp_root: &std::path::Path,
     install: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
-    // `install` is a FnOnce so it can capture state; it is called at
-    // most once on Accept (the fn returns immediately after).
     let mut install = Some(install);
     loop {
         terminal.draw(|frame| {
             render_preflight_modal(frame, scenario, claude_acp_root);
         })?;
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                match classify_optional_modal_key(key.code) {
-                    ModalAction::Accept => {
-                        if let Some(f) = install.take() {
-                            f()?;
-                        }
-                        return Ok(());
+        if event::poll(Duration::from_millis(100))? && let Event::Key(key) = event::read()? {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            match classify_optional_modal_key(key.code) {
+                ModalAction::Accept => {
+                    if let Some(f) = install.take() {
+                        f()?;
                     }
-                    ModalAction::Skip | ModalAction::Exit => return Ok(()),
-                    ModalAction::Ignore => {}
+                    return Ok(());
                 }
+                ModalAction::Skip | ModalAction::Exit => return Ok(()),
+                ModalAction::Ignore => {}
             }
         }
     }

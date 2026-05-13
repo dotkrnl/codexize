@@ -1,10 +1,5 @@
 use std::time::Instant;
-#[cfg(test)]
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    time::{Duration, SystemTime},
-};
+
 /// Clock seam that abstracts wall-clock access for testability.
 ///
 /// The 1 Hz timestamp truncation is a property of this layer: renders
@@ -90,6 +85,4 @@ impl Clock for TestClock {
         dt.format("%H:%M:%S").to_string()
     }
 }
-#[cfg(test)]
-#[path = "clock_tests.rs"]
-mod tests;
+

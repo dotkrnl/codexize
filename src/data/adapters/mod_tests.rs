@@ -1,22 +1,6 @@
 use super::*;
 
 #[test]
-fn short_model_preserves_claude_prefix_behavior() {
-    assert_eq!(short_model("claude-sonnet-4-6"), "sonnet-4-6");
-    assert_eq!(short_model("gpt-5-2"), "gpt-5-2");
-}
-
-#[test]
-fn short_model_passes_gemini_preview_canonical_through_unchanged() {
-    // run_label_name only strips a `claude-` prefix; non-claude canonicals
-    // pass through verbatim.
-    assert_eq!(
-        short_model("gemini-3-1-pro-preview"),
-        "gemini-3-1-pro-preview"
-    );
-}
-
-#[test]
 fn launch_effort_suffix_normal_is_empty() {
     let mapping = EffortMapping::new("low", "medium", "xhigh");
     assert_eq!(

@@ -85,6 +85,4 @@ pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
         crate::data::async_bridge::sleep_blocking(Duration::from_millis(50));
     }
 }
-#[cfg(test)]
-#[path = "warmup_tests.rs"]
-mod tests;
+

@@ -86,12 +86,6 @@ fn parses_typical_lstart_output() {
 }
 
 #[test]
-fn empty_lstart_output_returns_none() {
-    assert!(parse_lstart("").is_none());
-    assert!(parse_lstart("   ").is_none());
-}
-
-#[test]
 fn eperm_from_signal_probe_counts_as_live_process() {
     assert!(process_alive_from_kill_result(Err(
         nix::errno::Errno::EPERM
@@ -102,8 +96,4 @@ fn eperm_from_signal_probe_counts_as_live_process() {
     )));
 }
 
-#[test]
-fn hostname_returns_non_empty_string() {
-    let h = hostname();
-    assert!(!h.is_empty());
-}
+

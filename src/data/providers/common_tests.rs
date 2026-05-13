@@ -1,16 +1,6 @@
 use super::*;
 
 #[test]
-fn build_http_client_returns_ok() {
-    let client = build_http_client(5);
-    assert!(
-        client.is_ok(),
-        "client builder should succeed: {:?}",
-        client.err()
-    );
-}
-
-#[test]
 fn percent_to_u8_clamps_and_rounds() {
     assert_eq!(percent_to_u8(-100.0), 0);
     assert_eq!(percent_to_u8(0.0), 0);

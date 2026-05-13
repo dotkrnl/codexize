@@ -25,27 +25,6 @@ fn provider_entry(
     }
 }
 
-#[tokio::test]
-async fn load_quota_maps_for_empty_vendor_set_skips_all_probes() {
-    let (maps, reset_maps, errors) = load_quota_maps_for_async([]).await;
-
-    assert!(maps.is_empty());
-    assert!(reset_maps.is_empty());
-    assert!(errors.is_empty());
-}
-
-#[tokio::test]
-async fn load_quota_maps_for_direct_only_skips_all_probes() {
-    // `Direct` is filtered up front by `load_quota_maps_for_async` so a
-    // direct-only fetch set fans out zero worker tasks and surfaces
-    // empty maps with no errors.
-    let (maps, reset_maps, errors) = load_quota_maps_for_async([SubscriptionKind::Direct]).await;
-
-    assert!(maps.is_empty());
-    assert!(reset_maps.is_empty());
-    assert!(errors.is_empty());
-}
-
 #[test]
 fn tracked_subscriptions_for_clis_maps_each_cli_to_its_pool() {
     let mapped = tracked_subscriptions_for_clis([

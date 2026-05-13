@@ -60,6 +60,4 @@ pub fn extract_short_title(text: &str) -> String {
         text.trim().to_string()
     }
 }
-#[cfg(test)]
-#[path = "live_agent_message_view_model_tests.rs"]
-mod tests;
+

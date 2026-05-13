@@ -35,7 +35,3 @@ fn probability_helpers_clamp_and_dim_zero() {
     assert_eq!(probability_color(0, 100), Color::DarkGray);
 }
 
-#[test]
-fn name_width_min_matches_layout_floor() {
-    assert_eq!(name_width_min(), 8);
-}

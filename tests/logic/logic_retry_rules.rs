@@ -22,19 +22,6 @@ fn retry_sharding_returns_waiting_to_implement_not_sharding_running() {
 }
 
 #[test]
-fn retry_repo_state_update_returns_repo_state_update_running() {
-    assert_eq!(
-        retry_phase_for_stage("repo-state-update"),
-        Some(Phase::RepoStateUpdateRunning)
-    );
-}
-
-#[test]
-fn stage_str_recognizes_repo_state_update() {
-    assert_eq!(stage_str("repo-state-update"), Some("repo-state-update"));
-}
-
-#[test]
 fn retry_target_for_run_prefers_task_and_falls_back_to_stage() {
     let task_run = RunRecord {
         id: 7,

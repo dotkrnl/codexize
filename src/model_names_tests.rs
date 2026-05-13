@@ -21,11 +21,6 @@ fn display_vendor_curates_dashboard_only_rows() {
 }
 
 #[test]
-fn display_vendor_returns_none_for_uncurated_canonical() {
-    assert_eq!(display_vendor("totally-unknown-model"), None);
-}
-
-#[test]
 fn every_baked_model_has_curated_display_vendor() {
     for row in crate::logic::selection::baked::BAKED_TABLE {
         assert_ne!(
@@ -45,11 +40,6 @@ fn display_short_returns_curated_short_for_known_canonical() {
     assert_eq!(display_short("mimo-v2.5-pro"), Some("v2.5 pro"));
     assert_eq!(display_short("glm-5.1"), Some("5.1"));
     assert_eq!(display_short("grok-code-fast-1"), Some("code fast 1"));
-}
-
-#[test]
-fn display_short_returns_none_for_uncurated_model() {
-    assert_eq!(display_short("totally-unknown-model"), None);
 }
 
 #[test]

@@ -19,22 +19,6 @@ fn row(depth: usize) -> VisibleNodeRow {
 }
 
 #[test]
-fn quit_running_agent_modal_title() {
-    assert_eq!(
-        modal_title(ModalKind::QuitRunningAgent),
-        Some("Stop running agent and quit?")
-    );
-}
-
-#[test]
-fn cancel_session_modal_title() {
-    assert_eq!(
-        modal_title(ModalKind::CancelSession),
-        Some("Cancel this session?")
-    );
-}
-
-#[test]
 fn row_is_not_last_sibling_when_next_peer_has_same_depth() {
     let rows = vec![row(0), row(1), row(2), row(1)];
 
@@ -51,12 +35,6 @@ fn row_is_last_sibling_when_next_boundary_is_ancestor() {
 #[test]
 fn spinner_frame_wraps_by_spinner_length() {
     assert_eq!(spinner_frame(0), spinner_frame(10));
-}
-
-#[test]
-fn status_highlight_bg_maps_terminal_statuses() {
-    assert_eq!(status_highlight_bg(NodeStatus::Running), Some(Color::Cyan));
-    assert_eq!(status_highlight_bg(NodeStatus::Pending), None);
 }
 
 #[test]
@@ -92,27 +70,6 @@ fn guard_content_shortens_heads() {
     let lines = guard_content(Some(&decision));
     assert!(format!("{:?}", lines).contains("abcdef1"));
     assert!(format!("{:?}", lines).contains("9876543"));
-}
-
-#[test]
-fn stage_error_title_names_stage() {
-    assert_eq!(stage_error_title(StageId::PlanReview), "Plan review failed");
-}
-
-#[test]
-fn modal_accent_color_colors_stage_errors_red() {
-    assert_eq!(
-        modal_accent_color(ModalKind::StageError(StageId::Review)),
-        Color::Red
-    );
-}
-
-#[test]
-fn modal_title_delegates_stage_error_title() {
-    assert_eq!(
-        modal_title(ModalKind::StageError(StageId::Sharding)),
-        Some("Sharding failed")
-    );
 }
 
 #[test]

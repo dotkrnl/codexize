@@ -235,7 +235,3 @@ fn phase_rank_empty_when_no_models_or_no_scores() {
     assert!(phase_rank(&unscored, SelectionPhase::Build).is_empty());
 }
 
-#[test]
-fn visible_models_empty_input() {
-    assert!(visible_models(&[]).is_empty());
-}

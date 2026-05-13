@@ -224,6 +224,13 @@ pub enum AppStartupOrigin {
     PickerCreated,
 }
 impl App {
+    /// Persist session state and log failures instead of silently dropping them.
+    pub(crate) fn save_state(&mut self) {
+        if let Err(e) = self.state.save() {
+            tracing::warn!("failed to save session state: {e}");
+        }
+    }
+
     /// Return the `artifacts/spec.md` paths for every non-archived session that
     /// sorts earlier than the current session and is in `WaitingToImplement`.
     /// These represent the "expected future repository state" that brainstorm,
@@ -235,7 +242,7 @@ impl App {
             self.record_agent_error(
                 "model list not yet loaded — wait a moment and try again".to_string(),
             );
-            let _ = self.state.save();
+            self.save_state();
             self.rebuild_tree_view(None);
             return false;
         }

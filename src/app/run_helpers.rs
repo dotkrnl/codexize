@@ -448,7 +448,7 @@ impl App {
                 .is_some_and(|d| d.run_id == run.id)
         {
             self.transition_to_phase(Phase::GitGuardPending)?;
-            let _ = self.state.save();
+            self.save_state();
             return Ok(());
         }
         self.complete_run_finalization(run, failure_reason)

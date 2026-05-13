@@ -214,7 +214,7 @@ impl App {
             "palette_retry: task={task_id} prior_runs={}",
             prior_ids.len()
         ));
-        let _ = self.state.save();
+        self.save_state();
         self.rebuild_tree_view(None);
         self.launch_coder();
     }
@@ -257,7 +257,7 @@ impl App {
             "palette_retry: stage={stage} prior_runs={}",
             prior_ids.len()
         ));
-        let _ = self.state.save();
+        self.save_state();
         self.rebuild_tree_view(None);
         match stage {
             "brainstorm" => {
@@ -497,6 +497,6 @@ impl App {
         self.current_run_id = None;
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
-        let _ = self.state.save();
+        self.save_state();
     }
 }

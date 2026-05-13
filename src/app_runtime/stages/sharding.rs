@@ -29,7 +29,7 @@ impl App {
             self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
         else {
             self.record_agent_error("no model available with quota".to_string());
-            let _ = self.state.save();
+            self.save_state();
             self.rebuild_tree_view(None);
             return false;
         };

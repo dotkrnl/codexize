@@ -49,7 +49,7 @@ impl App {
         };
         let Some(task_id) = self.state.builder.current_task_id() else {
             self.record_agent_error("no current task".to_string());
-            let _ = self.state.save();
+            self.save_state();
             return false;
         };
         let session_id = self.state.session_id.clone();
@@ -83,7 +83,7 @@ impl App {
             modes.cheap,
         ) else {
             self.record_agent_error("no model available for review".to_string());
-            let _ = self.state.save();
+            self.save_state();
             return false;
         };
         let (model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible) = chosen;
@@ -95,7 +95,7 @@ impl App {
             .join(format!("reviewer-r{r}.md"));
         if let Err(err) = read_review_scope(&review_scope_file) {
             self.record_agent_error(format!("invalid review scope: {err:#}"));
-            let _ = self.state.save();
+            self.save_state();
             return false;
         }
         let coder_summary_file = round_dir.join("coder_summary.toml");

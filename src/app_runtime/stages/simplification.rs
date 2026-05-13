@@ -41,7 +41,7 @@ impl App {
         let _ = std::fs::remove_file(&simplification_path);
         if let Err(err) = read_review_scope(&review_scope_file) {
             self.record_agent_error(format!("invalid review scope: {err:#}"));
-            let _ = self.state.save();
+            self.save_state();
             return false;
         }
         let modes = self.state.launch_modes();
@@ -79,7 +79,7 @@ impl App {
             chosen
         else {
             self.record_agent_error("no model available for simplifier".to_string());
-            let _ = self.state.save();
+            self.save_state();
             self.rebuild_tree_view(None);
             return false;
         };

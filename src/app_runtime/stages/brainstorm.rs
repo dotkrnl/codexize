@@ -27,7 +27,7 @@ impl App {
             self.record_agent_error(
                 "no model available with quota — check model strip".to_string(),
             );
-            let _ = self.state.save();
+            self.save_state();
             self.rebuild_tree_view(None);
             return false;
         };

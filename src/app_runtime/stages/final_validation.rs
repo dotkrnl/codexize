@@ -63,7 +63,7 @@ impl App {
             chosen
         else {
             self.record_agent_error("no model available for final validation".to_string());
-            let _ = self.state.save();
+            self.save_state();
             self.rebuild_tree_view(None);
             return false;
         };

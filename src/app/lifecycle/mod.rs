@@ -407,7 +407,7 @@ impl App {
             .ok_or_else(|| {
                 anyhow::anyhow!("accept_guard_reset: run {} not found", decision.run_id)
             })?;
-        let _ = self.state.save();
+        self.save_state();
         self.complete_run_finalization(&run, Some(Reason::ForbiddenHeadAdvance.to_string()))
     }
     pub fn accept_guard_keep(&mut self) -> Result<()> {
@@ -430,7 +430,7 @@ impl App {
             .ok_or_else(|| {
                 anyhow::anyhow!("accept_guard_keep: run {} not found", decision.run_id)
             })?;
-        let _ = self.state.save();
+        self.save_state();
         // Artifact was valid (PendingDecision only fires on valid-artifact path).
         // complete_run_finalization dispatches on current_phase; restore the
         // originating running phase so the correct success successor fires.

@@ -66,7 +66,7 @@ impl App {
             modes.cheap,
         ) else {
             self.record_agent_error("no model available for review".to_string());
-            let _ = self.state.save();
+            self.save_state();
             return false;
         };
         let (model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible) = chosen;

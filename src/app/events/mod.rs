@@ -58,7 +58,7 @@ impl App {
         self.push_status(message.clone(), Severity::Error, Duration::from_secs(8));
         if persist_agent_error {
             self.record_agent_error(message);
-            let _ = self.state.save();
+            self.save_state();
             self.rebuild_tree_view(None);
         }
     }

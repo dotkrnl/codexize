@@ -30,7 +30,7 @@ impl App {
             && let Err(err) = std::fs::create_dir_all(parent)
         {
             self.record_agent_error(format!("error creating dream report dir: {err}"));
-            let _ = self.state.save();
+            self.save_state();
             self.rebuild_tree_view(None);
             return false;
         }
@@ -51,7 +51,7 @@ impl App {
             chosen
         else {
             self.record_agent_error("no model available for dreaming".to_string());
-            let _ = self.state.save();
+            self.save_state();
             self.rebuild_tree_view(None);
             return false;
         };
@@ -72,7 +72,7 @@ impl App {
         }
         if let Err(err) = std::fs::write(&prompt_path, prompt) {
             self.record_agent_error(format!("error writing prompt: {err}"));
-            let _ = self.state.save();
+            self.save_state();
             self.rebuild_tree_view(None);
             return false;
         }
@@ -142,7 +142,7 @@ impl App {
             }
             Err(err) => {
                 self.record_agent_error(format!("failed to launch dreaming: {err}"));
-                let _ = self.state.save();
+                self.save_state();
                 self.rebuild_tree_view(None);
                 false
             }

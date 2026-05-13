@@ -20,7 +20,7 @@ impl App {
         };
         let Some(task_id) = self.ensure_builder_task_for_round(r) else {
             self.record_agent_error("no pending tasks".to_string());
-            let _ = self.state.save();
+            self.save_state();
             return false;
         };
         let session_id = self.state.session_id.clone();
@@ -48,7 +48,7 @@ impl App {
             self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
         else {
             self.record_agent_error("no model available with quota".to_string());
-            let _ = self.state.save();
+            self.save_state();
             return false;
         };
         let (model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible) = chosen;

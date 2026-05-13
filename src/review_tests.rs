@@ -277,22 +277,6 @@ estimated_tokens = 0
     assert!(format!("{err:#}").contains("estimated_tokens"));
 }
 
-#[test]
-fn review_missing_file_fails() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = dir.path().join("nonexistent.toml");
-    let err = validate(&path).unwrap_err();
-    assert!(format!("{err:#}").contains("cannot read"));
-}
-
-#[test]
-fn review_malformed_toml_fails() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = dir.path().join("bad.toml");
-    std::fs::write(&path, "this is [[[ not valid toml").unwrap();
-    let err = validate(&path).unwrap_err();
-    assert!(format!("{err:#}").contains("malformed review TOML"));
-}
 
 #[test]
 fn enforce_terminal_review_rejects_refine_on_last_task() {

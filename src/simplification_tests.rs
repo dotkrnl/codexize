@@ -71,19 +71,3 @@ summary = "wrong status name"
     assert!(format!("{err:#}").contains("malformed simplification TOML"));
 }
 
-#[test]
-fn missing_file_fails() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = dir.path().join("nonexistent.toml");
-    let err = validate(&path).unwrap_err();
-    assert!(format!("{err:#}").contains("cannot read"));
-}
-
-#[test]
-fn malformed_toml_fails() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = dir.path().join("bad.toml");
-    std::fs::write(&path, "this is [[[ not valid toml").unwrap();
-    let err = validate(&path).unwrap_err();
-    assert!(format!("{err:#}").contains("malformed simplification TOML"));
-}

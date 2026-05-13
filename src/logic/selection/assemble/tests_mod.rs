@@ -913,48 +913,6 @@ fn make_opencode_kimi_entry(name: &str, match_key: &str) -> DashboardEntry {
 }
 
 #[test]
-#[ignore = "kimi-latest synthesis was retired in Task 6 — strict baked-only is the new contract"]
-fn synth_kimi_latest_skipped_when_no_kimi_semver() {
-    // Only suffixed kimi variants (no k<major>.<minor>) means no row qualifies
-    // as "the latest kimi"; the synth must not fire and opencode keeps the
-    // row uncontested.
-    let routed = make_opencode_kimi_entry("kimi-k2-thinking", "kimi-k2-thinking");
-    let quotas = make_quota_payload(&[
-        ("kimi", "kimi-shared", Some(80)),
-        ("opencode", "kimi-k2-thinking", Some(40)),
-    ]);
-
-    let (models, _warnings) = assemble_universe(
-        vec![routed],
-        quotas,
-        BTreeMap::new(),
-        &kimi_opencode_available(),
-        &[],
-    );
-
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0].subscription, SubscriptionKind::OpencodeGo);
-    assert_eq!(models[0].name, "kimi-k2-thinking");
-}
-
-#[test]
-#[ignore = "kimi-latest synthesis was retired in Task 6 — strict baked-only is the new contract"]
-fn synth_kimi_latest_skipped_when_kimi_unavailable() {
-    // Without Kimi in available_clis the synth must not emit a kimi-vendor
-    // row, even when an opencode-routed kimi-2.6 is present.
-    let routed = make_opencode_kimi_entry("kimi-k2.6", "kimi-k2-6");
-    let quotas = make_quota_payload(&[("opencode", "kimi-k2.6", Some(90))]);
-    let available = BTreeSet::from([CliKind::Opencode]);
-
-    let (models, _warnings) =
-        assemble_universe(vec![routed], quotas, BTreeMap::new(), &available, &[]);
-
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0].subscription, SubscriptionKind::OpencodeGo);
-    assert!(!models.iter().any(|m| m.name == "kimi-latest"));
-}
-
-#[test]
 fn ladder_quota_disabled_pool_picked_when_no_free_or_official() {
     // Spec §"Selection algorithm" step 2: when neither F nor O has
     // entries, the no-quota pool (`quota_disabled = true`) wins over

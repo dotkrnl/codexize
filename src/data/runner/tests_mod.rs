@@ -5,7 +5,6 @@ use super::*;
 use crate::acp::{AcpTextAccumulator, PromptPayload};
 use crate::state::{MessageKind, RunStatus, SessionState};
 use std::fs;
-use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 fn active_run_test_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -1184,101 +1183,6 @@ fn init_git_repo(dir: &Path) {
     .expect("exclude");
 }
 
-fn write_test_acp_script(dir: &Path) -> PathBuf {
-    let script = dir.join("artifacts").join("fake-acp.sh");
-    fs::create_dir_all(script.parent().expect("script parent")).expect("script dir");
-    fs::write(
-        &script,
-        r#"#!/bin/bash
-set -euo pipefail
-
-extract_id() {
-    printf '%s\n' "$1" | sed -En 's/.*"id":([0-9]+).*/\1/p'
-}
-
-mode="${ACP_TEST_MODE:-success}"
-artifact="${ACP_TEST_ARTIFACT:-}"
-log_path="${ACP_TEST_LOG:-}"
-prompt_done_path="${ACP_TEST_PROMPT_DONE:-}"
-prompt_log_path="${ACP_TEST_PROMPT_LOG:-}"
-thought_text="${ACP_TEST_THOUGHT:-}"
-thought_chunks="${ACP_TEST_THOUGHT_CHUNKS:-}"
-
-while IFS= read -r line; do
-    id="$(extract_id "$line")"
-    case "$line" in
-        *'"method":"initialize"'*)
-            if [ -n "$log_path" ]; then
-                printf '%s\n' "$$" >> "$log_path"
-            fi
-            if [ "$mode" = "invalid_initialize_json" ]; then
-                printf '{"jsonrpc":\n'
-                exit 0
-            fi
-            printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"sessionCapabilities":{"close":true}}}}\n' "$id"
-            ;;
-        *'"method":"session/new"'*)
-            printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"sess-%s","configOptions":[]}}\n' "$id" "$$"
-            ;;
-        *'"method":"session/set_config_option"'*)
-            printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[]}}\n' "$id"
-            ;;
-        *'"method":"session/prompt"'*)
-            if [ -n "$prompt_log_path" ]; then
-                printf '%s\n' "$line" >> "$prompt_log_path"
-            fi
-            if [ "$mode" = "early_exit" ]; then
-                exit 0
-            fi
-            if [ "$mode" = "sleep_forever" ]; then
-                trap 'exit 0' TERM INT
-                while true; do sleep 1; done
-            fi
-            if [ -n "$artifact" ] && [ "$mode" != "missing_artifact" ]; then
-                mkdir -p "$(dirname "$artifact")"
-                printf 'status = "ok"\n' > "$artifact"
-            fi
-            if [ "$mode" = "mutate_workspace" ]; then
-                printf 'mutated\n' > tracked.txt
-            fi
-            if [ -n "$thought_text" ]; then
-                printf '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","content":{"text":"%s"}}}}\n' "$thought_text"
-            fi
-            if [ -n "$thought_chunks" ]; then
-                old_ifs="$IFS"
-                IFS='|'
-                for chunk in $thought_chunks; do
-                    printf '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","content":{"text":"%s"}}}}\n' "$chunk"
-                done
-                IFS="$old_ifs"
-            fi
-            printf '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"done"}}}}\n'
-            printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
-            if [ -n "$prompt_done_path" ]; then
-                printf 'done\n' > "$prompt_done_path"
-            fi
-            ;;
-        *'"method":"session/close"'*)
-            printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
-            exit 0
-            ;;
-    esac
-done
-"#,
-    )
-    .expect("write fake ACP script");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script)
-            .expect("script metadata")
-            .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script, perms).expect("script perms");
-    }
-    script
-}
-
 fn launch_test_run(dir: &Path) -> AgentRun {
     let prompt_path = dir.join("artifacts").join("prompt.md");
     fs::create_dir_all(prompt_path.parent().expect("prompt parent")).expect("prompt dir");
@@ -1293,59 +1197,6 @@ fn launch_test_run(dir: &Path) -> AgentRun {
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
     }
-}
-
-fn wait_for_run_label_to_finish(window_name: &str) {
-    for _ in 0..200 {
-        if !run_label_is_active(window_name) {
-            return;
-        }
-        std::thread::park_timeout(Duration::from_millis(25));
-    }
-    panic!("managed ACP run label did not finish: {window_name}");
-}
-
-fn wait_until_run_label_active(window_name: &str) {
-    for _ in 0..200 {
-        if run_label_is_active(window_name) {
-            return;
-        }
-        std::thread::park_timeout(Duration::from_millis(25));
-    }
-    panic!("managed ACP run label did not become active: {window_name}");
-}
-
-fn wait_until_run_label_waiting_for_input(window_name: &str) {
-    for _ in 0..200 {
-        if run_label_is_waiting_for_input(window_name) {
-            return;
-        }
-        std::thread::park_timeout(Duration::from_millis(25));
-    }
-    panic!("managed ACP run label did not wait for input: {window_name}");
-}
-
-fn wait_for_path(path: &Path) {
-    for _ in 0..200 {
-        if path.exists() {
-            return;
-        }
-        std::thread::park_timeout(Duration::from_millis(25));
-    }
-    panic!("path did not appear: {}", path.display());
-}
-
-fn wait_for_file_to_contain(path: &Path, needle: &str) {
-    for _ in 0..200 {
-        if fs::read_to_string(path)
-            .map(|text| text.contains(needle))
-            .unwrap_or(false)
-        {
-            return;
-        }
-        std::thread::park_timeout(Duration::from_millis(25));
-    }
-    panic!("{} did not contain {needle:?}", path.display());
 }
 
 #[test]

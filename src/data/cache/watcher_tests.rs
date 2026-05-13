@@ -1,6 +1,6 @@
 use super::*;
 use std::io::Write;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use tempfile::TempDir;
 
 fn write_models(dir: &std::path::Path, body: &str) -> SystemTime {

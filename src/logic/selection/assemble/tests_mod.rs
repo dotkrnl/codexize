@@ -904,14 +904,6 @@ fn dashboard_warnings_are_exposed_as_refresh_diagnostics() {
     );
 }
 
-fn kimi_opencode_available() -> BTreeSet<CliKind> {
-    BTreeSet::from([CliKind::Kimi, CliKind::Opencode])
-}
-
-fn make_opencode_kimi_entry(name: &str, match_key: &str) -> DashboardEntry {
-    make_ipbr_entry(name, "opencode", match_key)
-}
-
 #[test]
 fn ladder_quota_disabled_pool_picked_when_no_free_or_official() {
     // Spec §"Selection algorithm" step 2: when neither F nor O has

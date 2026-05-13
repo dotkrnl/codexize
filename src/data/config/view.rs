@@ -1,15 +1,6 @@
-//! Typed views consumed by subsystems.
-//!
-//! These structs are the read-only projections the loaded [`Config`]
-//! hands to the notification publisher, ACP launcher, runner, etc. The
-//! milestone-3 subsystem rewiring will replace direct reads of the
-//! schema's `Override<T>` fields with these small structs so consumers
-//! stay decoupled from `Override`'s mutability story.
-//!
-//! For now the views only carry the unwrapped values; adapter
-//! constructors on the existing `data::notifications::NtfyConfig`,
-//! `data::acp_config::AcpConfig`, and `data::runner::RunnerConfig`
-//! arrive in milestone 3 (see plan.md M3.B/M3.C).
+//! Typed read-only projections the loaded [`Config`] hands to subsystems.
+//! Each view unwraps the schema's `Override<T>` fields so consumers stay
+//! decoupled from `Override`'s mutability story.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -76,9 +67,6 @@ pub struct RunnerView {
 pub struct PathsView {
     pub cache_root: PathBuf,
     pub sessions_root: PathBuf,
-    // runs_root is reserved in the schema (spec §6) for a future top-level
-    // run-artifact subsystem; the field is populated from config but no
-    // current consumer reads it.
     pub runs_root: PathBuf,
     pub memory_root: PathBuf,
 }

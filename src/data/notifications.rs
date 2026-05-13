@@ -1,10 +1,4 @@
-//! Notification publisher driven by the unified config.
-//!
-//! The old `NtfyConfig` struct and `~/.codexize/ntfy.toml` loader have been
-//! removed — notifications now read from `NtfyView` / `NtfyEventsView` in
-//! the unified `data::config` module. All formerly hardcoded constants
-//! (`NTFY_BODY_MAX_BYTES`, retry counts, etc.) are now read at run time
-//! through `NotificationParams`.
+//! Notification publisher driven by unified config views (`NtfyView` / `NtfyEventsView`).
 
 use anyhow::{Context, Result, bail};
 use reqwest::Client;

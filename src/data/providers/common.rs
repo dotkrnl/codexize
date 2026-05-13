@@ -5,9 +5,6 @@ use reqwest::{Client, RequestBuilder, Response};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-// The current providers only converge on IO/transport scaffolding. Their
-// credential lookup and payload normalization rules diverge immediately, so we
-// intentionally stop at helper extraction instead of inventing a provider trait.
 /// Build an HTTP client with the given timeout.
 pub fn build_http_client(timeout_secs: u64) -> Result<Client> {
     Client::builder()

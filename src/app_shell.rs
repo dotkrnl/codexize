@@ -317,8 +317,7 @@ pub struct AppShell {
     // shell so that the lock file is removed on `Drop` after the embedded
     // terminal `App` (and its runner supervisor) has been torn down. Never
     // read directly — the load-bearing behavior is `Drop` ordering.
-    #[allow(dead_code)]
-    app_lock_guard: Option<AppLockGuard>,
+    _app_lock_guard: Option<AppLockGuard>,
     focused_session_id: String,
     supervisors: BTreeMap<String, SessionSupervisor>,
     sidebar: SidebarModel,
@@ -358,7 +357,7 @@ impl AppShell {
         let mut session_index = SessionIndex::new(sessions_root.clone());
         session_index.refresh()?;
         let mut shell = Self {
-            app_lock_guard,
+            _app_lock_guard: app_lock_guard,
             focused_session_id,
             supervisors,
             sidebar: SidebarModel::new(),
@@ -379,22 +378,7 @@ impl AppShell {
     }
 
     pub fn running_session_id(&self) -> Option<&str> {
-        self.running_session_id_with_focused_app(None)
-    }
-
-    fn running_session_id_with_focused_app<'a>(
-        &'a self,
-        focused_app: Option<&'a App>,
-    ) -> Option<&'a str> {
         let mut first_running = None;
-        if let Some(app) = focused_app
-            && app.current_run_id.is_some()
-        {
-            first_running = Some(app.state.session_id.as_str());
-            if is_implementation_lane_phase(app.state.current_phase) {
-                return first_running;
-            }
-        }
         for supervisor in self.supervisors.values() {
             if supervisor.current_run_id().is_none() {
                 continue;
@@ -469,7 +453,14 @@ impl AppShell {
         let mut input = crate::ui::tui::CrosstermInputAdapter::spawn();
 
         loop {
-            let _ = self.run_scheduler_tick_with_focused_app(Some(&mut app));
+            // Park the focused App back inside its supervisor for the
+            // scheduler tick. With the App lent back, the scheduler can
+            // drive every session (focused or not) through the supervisor
+            // map under a single code path, so the tick no longer needs
+            // to borrow the focused `App` (spec §4.7, §4.8 line 280).
+            self.return_app_to_supervisor(app);
+            let _ = self.run_scheduler_tick();
+            app = self.take_focused_app();
             if let Some(path) = app.take_pending_view_path() {
                 input.shutdown_blocking();
                 app.run_external_view_editor(terminal, &path);
@@ -738,7 +729,30 @@ impl AppShell {
     }
 
     pub fn run_scheduler_tick(&mut self) -> Result<ShellSchedulerReport> {
-        self.run_scheduler_tick_with_focused_app(None)
+        match self.session_index.refresh_tracking_changes() {
+            Ok(true) => self.sidebar.mark_dirty(),
+            Ok(false) => {}
+            Err(err) => {
+                warn!(error = %err, "session index refresh failed during scheduler tick");
+            }
+        }
+        let scan = self.scan_supervisors_for_scheduler();
+        let tick = evaluate_tick(&scan);
+        let mut planning_session_ids = Vec::new();
+
+        for planning in &tick.planning {
+            self.drive_scheduler_session(&planning.session_id, SchedulerDrive::AutoLaunch)?;
+            planning_session_ids.push(planning.session_id.clone());
+        }
+
+        let implementation = self.apply_implementation_decision(&tick)?;
+        let running_session_id = self.running_session_id().map(str::to_string);
+        self.refresh_sidebar_rows_with_running(running_session_id.as_deref())?;
+        Ok(ShellSchedulerReport {
+            planning_session_ids,
+            implementation,
+            skipped_corrupt_later_sessions: tick.skipped_corrupt_later_sessions,
+        })
     }
 
     /// Test seam: number of full `SessionState::load` calls the shell's
@@ -762,46 +776,7 @@ impl AppShell {
             .map(SessionSupervisor::app_identity)
     }
 
-    fn run_scheduler_tick_with_focused_app(
-        &mut self,
-        mut focused_app: Option<&mut App>,
-    ) -> Result<ShellSchedulerReport> {
-        match self.session_index.refresh_tracking_changes() {
-            Ok(true) => self.sidebar.mark_dirty(),
-            Ok(false) => {}
-            Err(err) => {
-                warn!(error = %err, "session index refresh failed during scheduler tick");
-            }
-        }
-        let scan = self.scan_supervisors_for_scheduler(focused_app.as_deref());
-        let tick = evaluate_tick(&scan);
-        let mut planning_session_ids = Vec::new();
-
-        for planning in &tick.planning {
-            self.drive_scheduler_session(
-                &planning.session_id,
-                SchedulerDrive::AutoLaunch,
-                focused_app.as_deref_mut(),
-            )?;
-            planning_session_ids.push(planning.session_id.clone());
-        }
-
-        let implementation =
-            self.apply_implementation_decision(&tick, focused_app.as_deref_mut())?;
-        let running_session_id = self
-            .running_session_id_with_focused_app(focused_app.as_deref())
-            .map(str::to_string);
-        self.refresh_sidebar_rows_with_running(running_session_id.as_deref())?;
-        Ok(ShellSchedulerReport {
-            planning_session_ids,
-            implementation,
-            skipped_corrupt_later_sessions: tick.skipped_corrupt_later_sessions,
-        })
-    }
-
-    fn scan_supervisors_for_scheduler(&self, focused_app: Option<&App>) -> Vec<ScannedSession> {
-        let focused_phase =
-            focused_app.map(|app| (app.state.session_id.as_str(), app.state.current_phase));
+    fn scan_supervisors_for_scheduler(&self) -> Vec<ScannedSession> {
         self.session_index
             .snapshot_for_scheduler()
             .into_iter()
@@ -812,13 +787,15 @@ impl AppShell {
                 }
                 match scanned {
                     ScannedSession::Loaded(mut session) => {
-                        if let Some((focused_id, phase)) = focused_phase
-                            && focused_id == session.session_id
-                        {
-                            session.current_phase = phase;
-                        } else if let Some(supervisor) = self.supervisors.get(&session.session_id)
+                        if let Some(supervisor) = self.supervisors.get(&session.session_id)
                             && supervisor.app.is_some()
                         {
+                            // Supervisors are the single source of truth
+                            // for run state; the focused App is parked
+                            // back into its supervisor before this call
+                            // (see `run_focused_terminal_app`), so the
+                            // focused session is observed alongside the
+                            // background ones without a special case.
                             session.current_phase = supervisor.phase();
                         }
                         Some(ScannedSession::Loaded(session))
@@ -832,15 +809,10 @@ impl AppShell {
     fn apply_implementation_decision(
         &mut self,
         tick: &SchedulerTick,
-        focused_app: Option<&mut App>,
     ) -> Result<ShellImplementationAction> {
         match &tick.implementation {
             ImplementationDecision::LaneOccupied { session_id, phase } => {
-                let _ = self.drive_scheduler_session(
-                    session_id,
-                    SchedulerDrive::AutoLaunch,
-                    focused_app,
-                )?;
+                let _ = self.drive_scheduler_session(session_id, SchedulerDrive::AutoLaunch)?;
                 Ok(ShellImplementationAction::LaneOccupied {
                     session_id: session_id.clone(),
                     phase: *phase,
@@ -858,11 +830,8 @@ impl AppShell {
                 })
             }
             ImplementationDecision::DispatchWaiting { session_id } => {
-                let state = self.drive_scheduler_session(
-                    session_id,
-                    SchedulerDrive::DispatchWaiting,
-                    focused_app,
-                )?;
+                let state =
+                    self.drive_scheduler_session(session_id, SchedulerDrive::DispatchWaiting)?;
                 Ok(ShellImplementationAction::DispatchedWaiting {
                     session_id: session_id.clone(),
                     phase: state.current_phase,
@@ -882,32 +851,7 @@ impl AppShell {
         &mut self,
         session_id: &str,
         drive: SchedulerDrive,
-        focused_app: Option<&mut App>,
     ) -> Result<SessionState> {
-        if let Some(app) = focused_app
-            && app.state.session_id == session_id
-        {
-            let before_run_id = app.current_run_id;
-            let before_live_summary = app.live_summary_cached_text.clone();
-            drive.apply(app);
-            let state = app.state.clone();
-            let live_summary_changed = (app.live_summary_cached_text != before_live_summary)
-                .then(|| app.live_summary_cached_text.clone());
-            let tick = SupervisorTick {
-                state_changed: true,
-                run_started: (before_run_id != app.current_run_id)
-                    .then_some(app.current_run_id)
-                    .flatten(),
-                run_finished: (before_run_id != app.current_run_id
-                    && app.current_run_id.is_none())
-                .then_some(before_run_id)
-                .flatten(),
-                live_summary_changed,
-            };
-            self.publish_supervisor_tick(session_id, &state, tick);
-            return Ok(state);
-        }
-
         self.ensure_supervisor_loaded(session_id)?;
         let (state, tick) = self
             .supervisors
@@ -990,7 +934,6 @@ impl Drop for AppShell {
         }
     }
 }
-
 
 fn sidebar_date_label(session_id: &str) -> String {
     let bytes = session_id.as_bytes();
@@ -1262,9 +1205,18 @@ estimated_tokens = 100
                 },
                 skipped_corrupt_later_sessions: Vec::new(),
             };
-            let action = shell
-                .apply_implementation_decision(&tick, Some(&mut app))
-                .expect("apply");
+            // Swap the prepared app (with launch harness) into the
+            // supervisor so the scheduler drive — now decoupled from any
+            // focused `App` borrow — exercises the harnessed launch.
+            {
+                let supervisor = shell
+                    .workspace_mut("20260511-090000-000000001")
+                    .expect("workspace");
+                let _ = supervisor.take_app();
+                supervisor.replace_app(app);
+            }
+
+            let action = shell.apply_implementation_decision(&tick).expect("apply");
 
             assert!(matches!(
                 action,
@@ -1273,8 +1225,12 @@ estimated_tokens = 100
                     phase: Phase::ShardingRunning,
                 } if session_id == "20260511-090000-000000001"
             ));
-            assert!(app.run_launched, "idle sharding phase should launch");
-            assert_eq!(app.current_run_id, Some(1));
+            let driven = shell
+                .workspace("20260511-090000-000000001")
+                .expect("workspace")
+                .app();
+            assert!(driven.run_launched, "idle sharding phase should launch");
+            assert_eq!(driven.current_run_id, Some(1));
         });
     }
 
@@ -1596,25 +1552,34 @@ estimated_tokens = 100
 
             let mut sub = shell.event_bus.subscribe();
 
-            // Simulate the loop taking the app
-            let mut app = shell.take_focused_app();
-            app.models.push(cached_build_model());
-            app.test_launch_harness = Some(Arc::new(std::sync::Mutex::new(TestLaunchHarness {
-                outcomes: VecDeque::from([
-                    TestLaunchOutcome {
-                        exit_code: 0,
-                        artifact_contents: None,
-                        launch_error: None,
-                    },
-                    TestLaunchOutcome {
-                        exit_code: 0,
-                        artifact_contents: None,
-                        launch_error: None,
-                    },
-                ]),
-            })));
+            // Prime the focused supervisor's App with a launch harness and
+            // build model so the scheduler's drive can spawn a run. With
+            // the scheduler signature collapsed, the supervisor owns the
+            // App for the whole tick — no separate borrow is needed.
+            {
+                let app = shell
+                    .workspace_mut("20260511-090000-000000001")
+                    .expect("workspace")
+                    .app_mut();
+                app.models.push(cached_build_model());
+                app.test_launch_harness =
+                    Some(Arc::new(std::sync::Mutex::new(TestLaunchHarness {
+                        outcomes: VecDeque::from([
+                            TestLaunchOutcome {
+                                exit_code: 0,
+                                artifact_contents: None,
+                                launch_error: None,
+                            },
+                            TestLaunchOutcome {
+                                exit_code: 0,
+                                artifact_contents: None,
+                                launch_error: None,
+                            },
+                        ]),
+                    })));
+            }
 
-            // Drive a launch through the focused app
+            // Drive a launch through the supervisor map.
             let tick = SchedulerTick {
                 planning: Vec::new(),
                 implementation: ImplementationDecision::LaneOccupied {
@@ -1624,7 +1589,7 @@ estimated_tokens = 100
                 skipped_corrupt_later_sessions: Vec::new(),
             };
             shell
-                .apply_implementation_decision(&tick, Some(&mut app))
+                .apply_implementation_decision(&tick)
                 .expect("apply launch");
 
             // Verify RunStarted event
@@ -1645,9 +1610,9 @@ estimated_tokens = 100
             // Simulate run finish
             write_finish_stamp("20260511-090000-000000001", "sharding-stage-r1-a1");
 
-            // Drive another tick to trigger finalization and publication
+            // Drive another tick to trigger finalization and publication.
             shell
-                .apply_implementation_decision(&tick, Some(&mut app))
+                .apply_implementation_decision(&tick)
                 .expect("apply finish");
 
             // Verify RunFinished event
@@ -1664,9 +1629,6 @@ estimated_tokens = 100
                 found_finished,
                 "RunFinished event not published for focused finish"
             );
-
-            // Re-verify that NO panic occurred in replace_state (which is called by publish_supervisor_tick
-            // via apply_event while the app is taken).
         });
     }
 

@@ -265,7 +265,9 @@ impl SessionSupervisor {
     }
 
     fn replace_state(&mut self, state: SessionState) {
-        let app = self.app_mut();
+        let Some(app) = self.app.as_mut() else {
+            return;
+        };
         app.current_run_id = state
             .agent_runs
             .iter()
@@ -278,7 +280,9 @@ impl SessionSupervisor {
     }
 
     fn replace_live_summary(&mut self, text: String) {
-        self.app_mut().live_summary_cached_text = crate::app::render::sanitize_live_summary(&text);
+        if let Some(app) = self.app.as_mut() {
+            app.live_summary_cached_text = crate::app::render::sanitize_live_summary(&text);
+        }
     }
 
     fn drive(&mut self, drive: SchedulerDrive) -> (SessionState, SupervisorTick) {

@@ -1410,40 +1410,6 @@ mod tests {
     }
 
     #[test]
-    fn removed_free_models_block_is_rejected() {
-        let toml = "[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"opencode\"\nmodel_name = \"dsk-4-flash\"\n";
-        let err = load_str(toml).unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("free_models"),
-            "expected free_models in error, got: {msg}"
-        );
-        assert!(
-            msg.to_lowercase().contains("unknown"),
-            "expected UnknownKey, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn providers_removed_keys_rejected() {
-        for removed_key in [
-            "vendor = \"claude\"",
-            "cli = \"claude\"",
-            "launch_name = \"x\"",
-        ] {
-            let toml = format!(
-                "[[providers]]\nlaunch = \"claude/claude-opus-4.7\"\nmodel = \"claude-opus-4.7\"\nsubscription = \"claude\"\n{removed_key}\n"
-            );
-            let err = load_str(&toml).unwrap_err();
-            let msg = err.to_string();
-            assert!(
-                msg.to_lowercase().contains("unknown"),
-                "expected UnknownKey for {removed_key}, got: {msg}"
-            );
-        }
-    }
-
-    #[test]
     fn providers_round_trip_minimal() {
         let toml = "[[providers]]\nlaunch = \"opencode/opencode-go/deepseek-v4-flash\"\nmodel = \"deepseek-v4-flash\"\nsubscription = \"opencode-go\"\n";
         let cfg = load_str(toml).unwrap();

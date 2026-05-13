@@ -7,7 +7,6 @@
 
 use crate::data::config::Config;
 use crate::data::config::schema::{EffortMapping, Override, ProviderEntry};
-use crate::logic::selection::assemble::parse_subscription_str;
 use crate::logic::selection::baked;
 use crate::selection::{CliKind, SubscriptionKind};
 use ratatui::style::{Color, Modifier, Style};
@@ -224,13 +223,9 @@ impl ProvidersEditor {
         if trimmed_launch.is_empty() || self.subscription.is_empty() || trimmed_model.is_empty() {
             return false;
         }
-        // Prefer the picker-tracked subscription (set by `cycle_focused`)
-        // and fall back to parsing the label so legacy data round-trips.
-        let subscription = SUBSCRIPTION_OPTIONS
-            .get(self.subscription_idx)
-            .copied()
-            .or_else(|| parse_subscription_str(&self.subscription))
-            .unwrap_or(SubscriptionKind::Direct);
+        let Some(subscription) = SUBSCRIPTION_OPTIONS.get(self.subscription_idx).copied() else {
+            return false;
+        };
 
         let new_entry = ProviderEntry {
             cli: self.cli,

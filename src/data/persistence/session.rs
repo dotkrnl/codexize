@@ -17,29 +17,14 @@ impl SessionState {
         let path = session_dir(session_id).join("session.toml");
         let text = fs::read_to_string(&path)
             .with_context(|| format!("failed to read session state from {}", path.display()))?;
-        let mut state: SessionState = toml::from_str(&text)
+        let state: SessionState = toml::from_str(&text)
             .with_context(|| format!("failed to parse session state from {}", path.display()))?;
-        match state.schema_version {
-            3 => {
-                // v3 -> v4 migration: additive field with serde default gives
-                // `planned_after_session_id = None`; archived and active sessions
-                // are treated identically.
-                state.schema_version = 4;
-                state.planned_after_session_id = None;
-                // Persist the migrated shape so subsequent loads are v4.
-                let _ = state.save();
-            }
-            4 => {
-                // Current version — no migration needed.
-            }
-            other => {
-                anyhow::bail!(
-                    "session {} uses schema v{}; archive with `codexize archive {}` and start fresh.",
-                    session_id,
-                    other,
-                    session_id
-                );
-            }
+        if state.schema_version != 4 {
+            anyhow::bail!(
+                "session {} uses schema v{}; this binary supports schema v4.",
+                session_id,
+                state.schema_version
+            );
         }
         Ok(state)
     }

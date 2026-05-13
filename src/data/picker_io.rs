@@ -40,12 +40,9 @@ pub fn newest_earlier_done_baseline(session_id: &str, sessions: &[SessionEntry])
 /// corrupt entry blocks the implementation lane (only earlier-than-head
 /// failures do, per spec).
 pub fn scan_sessions_for_scheduler(sessions_dir: &Path) -> Result<Vec<ScannedSession>> {
-    // Thin compatibility wrapper around the one-shot `SessionIndex`
-    // snapshot. Long-lived callers (the shell scheduler tick) hold a
-    // `SessionIndex` directly so they pay only for entries whose
-    // `session.toml` mtime advanced; this one-shot path keeps the picker
-    // startup, retry-allowed gating, and scheduler unit tests working
-    // without changes.
+    // One-shot SessionIndex snapshot. Long-lived callers (the shell
+    // scheduler tick) hold a SessionIndex directly so they pay only for
+    // entries whose `session.toml` mtime advanced.
     session_index::snapshot_for_scheduler(sessions_dir)
 }
 

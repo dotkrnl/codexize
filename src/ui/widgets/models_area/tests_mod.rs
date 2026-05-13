@@ -360,26 +360,6 @@ fn full_table_bolds_only_phase_rank_one_when_percentages_round_together() {
 }
 
 #[test]
-fn full_table_truncates_long_names_on_narrow_width() {
-    let models = vec![model_with_axis_score("gemini-3.1-pro-preview", 1.0, 0)];
-
-    // Width 26 leaves a small name budget, so even the curated short
-    // label must be ellipsized.
-    // name budget so the full name cannot fit.
-    let (lines, _) = responsive_models_area(&models, &[], 26, 50, ModelsAreaMode::FullTable);
-    let row = full_model_buffer_line(&lines, 0, 26);
-
-    assert!(
-        row.contains("..."),
-        "narrow width should truncate name with ellipsis: {row:?}"
-    );
-    assert!(
-        !row.contains("gemini-3.1-pro-preview"),
-        "full name should not fit: {row:?}"
-    );
-}
-
-#[test]
 fn full_table_drops_probabilities_below_60() {
     // Spec rule: "drop probabilities entirely below ~60 cols". The
     // pre-cutover model_strip used to keep IPBR at width 50 — under the

@@ -180,10 +180,9 @@ async fn assemble_with_refresh_unlocked(
     // Quota refresh (independent of dashboard outcome).
     // On per-vendor error, preserve that vendor's expired cached data so
     // a single failing vendor cannot wipe out previously-known quotas.
-    // Old v3 caches can have fresh quotas but no reset section, and newer
-    // caches can still have partial gaps after a vendor refresh only wrote
-    // some model keys. Treat an absent reset entry as stale, but keep an
-    // explicit `None` as the provider's current "no reset time" answer.
+    // A vendor refresh can write only some model keys. Treat an absent reset
+    // entry as stale, but keep an explicit `None` as the provider's current
+    // "no reset time" answer.
     let reset_missing = pure::has_reset_coverage_gaps(&cached_quota, &cached_resets);
     let quota_payload;
     let reset_payload;

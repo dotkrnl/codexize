@@ -261,7 +261,7 @@ fn run_child_with_timeout_on_helper_thread(
     timeout: Duration,
 ) -> Result<Option<ExitStatus>> {
     // `block_in_place` panics on Tokio's current-thread runtime; run the
-    // synchronous compatibility wrapper on a plain helper thread instead.
+    // synchronous boundary on a plain helper thread instead.
     std::thread::spawn(move || run_child_with_timeout_on_current_thread(&launch, timeout))
         .join()
         .unwrap_or_else(|panic| std::panic::resume_unwind(panic))

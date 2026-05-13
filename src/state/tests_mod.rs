@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 fn pending_guard_decision_defaults_to_none_when_absent() {
     let toml_text = r#"
 session_id = "abc"
-schema_version = 3
+schema_version = 4
 current_phase = "IdeaInput"
 "#;
     let state: SessionState = toml::from_str(toml_text).expect("session state should deserialize");
@@ -150,60 +150,6 @@ fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
 fn test_message_kind_started_deserializes() {
     let kind = serde_json::from_str::<MessageKind>("\"Started\"");
     assert!(kind.is_ok(), "Started message kind must deserialize");
-}
-
-#[test]
-fn test_session_state_schema_v3_migrates_to_v4() {
-    with_temp_root(|| {
-        let mut state = SessionState::new("test-session".to_string());
-        state.schema_version = 3;
-        state.agent_runs.push(RunRecord {
-            id: 1,
-            stage: "brainstorm".to_string(),
-            task_id: None,
-            round: 1,
-            attempt: 1,
-            model: "claude-opus-4.7".to_string(),
-            subscription_label: "anthropic".to_string(),
-            window_name: "[Brainstorm]".to_string(),
-            started_at: chrono::Utc::now(),
-            ended_at: None,
-            status: RunStatus::Running,
-            error: None,
-            effort: EffortLevel::Normal,
-            effort_mapping: crate::data::config::schema::EffortMapping::default(),
-            effort_eligible: false,
-            modes: crate::state::LaunchModes::default(),
-            hostname: None,
-            mount_device_id: None,
-            section_path: None,
-        });
-
-        state.save().unwrap();
-        let loaded = SessionState::load("test-session").unwrap();
-
-        assert_eq!(loaded.schema_version, 4);
-        assert!(loaded.planned_after_session_id.is_none());
-        assert_eq!(loaded.agent_runs.len(), 1);
-        assert_eq!(loaded.agent_runs[0].id, 1);
-    });
-}
-
-#[test]
-fn test_archived_v3_migrates_to_v4_identically_to_active() {
-    with_temp_root(|| {
-        let mut state = SessionState::new("archived-v3".to_string());
-        state.schema_version = 3;
-        state.archived = true;
-        state.current_phase = Phase::Done;
-        state.save().unwrap();
-
-        let loaded = SessionState::load("archived-v3").unwrap();
-        assert_eq!(loaded.schema_version, 4);
-        assert!(loaded.planned_after_session_id.is_none());
-        assert!(loaded.archived);
-        assert_eq!(loaded.current_phase, Phase::Done);
-    });
 }
 
 #[test]

@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use std::{
     collections::BTreeMap,
     fs,
-    io::IsTerminal,
     path::{Path, PathBuf},
 };
 #[derive(Debug, Clone, PartialEq)]
@@ -11,12 +10,6 @@ pub enum NormalizedArtifact {
     Text(String),
 }
 pub type NormalizedTree = BTreeMap<String, NormalizedArtifact>;
-pub fn live_smoke_prereqs_available() -> bool {
-    std::io::stdout().is_terminal()
-}
-pub fn headless_fallback_active() -> bool {
-    !live_smoke_prereqs_available()
-}
 pub fn load_normalized_fixture_tree(root: &Path) -> Result<NormalizedTree> {
     load_tree(root, None)
 }

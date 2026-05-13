@@ -131,17 +131,6 @@ fn malformed_lock_file_is_broken() {
 }
 
 #[test]
-fn legacy_two_line_lock_is_treated_as_malformed_and_broken() {
-    let dir = TempDir::new().unwrap();
-    let path = lock_path(&dir);
-    // Pre-task-2 builds wrote `pid\ntimestamp\n`. Loading TOML rejects it,
-    // so we follow the malformed branch.
-    fs::write(&path, format!("{}\n0\n", std::process::id())).unwrap();
-    let result = with_lock(&path, || Ok(7)).unwrap();
-    assert_eq!(result, 7);
-}
-
-#[test]
 fn try_acquire_returns_false_when_live_pid_holds_lock() {
     let dir = TempDir::new().unwrap();
     let path = lock_path(&dir);

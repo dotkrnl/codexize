@@ -149,9 +149,8 @@ fn try_break_stale_with(path: &Path, probe: &dyn ProcessProbe, self_host: &str) 
     let parsed = match toml::from_str::<CacheLockContents>(&contents) {
         Ok(c) => c,
         Err(_) => {
-            // Malformed (including legacy `pid\ntimestamp\n` records left by
-            // older builds) → treat as stale and let the caller retry the
-            // O_EXCL create.
+            // Malformed lock contents are not a live holder; remove the file
+            // and let the caller retry the O_EXCL create.
             let _ = fs::remove_file(path);
             warn!(
                 event = "cache_stale_lock_broken",

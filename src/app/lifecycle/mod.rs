@@ -36,7 +36,7 @@ pub(crate) enum RetryTarget {
 ///
 /// The App still carries the persisted [`crate::state::Stage`] as persisted
 /// authority. This projection is the single place where that persisted shape is
-/// translated into the slim lifecycle inputs a stage scheduler needs.
+/// translated into the lifecycle inputs a stage scheduler needs.
 #[derive(Debug)]
 pub(crate) struct LifecycleStageProjection {
     session_id: String,
@@ -96,7 +96,7 @@ fn retry_target_for_run(run: &crate::state::RunRecord) -> Option<RetryTarget> {
 ///
 /// The persisted persisted stage is still the authority for "what just failed";
 /// this projection keeps the stage-error modal and its retry action from
-/// guessing across the slim lifecycle's broader stages.
+/// guessing across the lifecycle's broader stages.
 fn stage_error_target_for_stage(stage: Stage) -> Option<StageId> {
     Some(match stage {
         Stage::BrainstormRunning => StageId::Brainstorm,
@@ -320,22 +320,22 @@ impl App {
             Duration::from_millis(DEFAULT_EVENT_POLL_MS)
         }
     }
-    /// Recompute `App::slim_stage` from `state.current_stage`.
+    /// Recompute `App::lifecycle_stage` from `state.current_stage`.
     ///
-    /// The slim stage is a derived projection — it never lives on disk and
+    /// The lifecycle stage is a derived projection — it never lives on disk and
     /// must be refreshed every time the persisted stage mutates. This helper is
-    /// the single refresh point so the derived slim stage stays in sync with
+    /// the single refresh point so the derived lifecycle stage stays in sync with
     /// the authoritative persisted stage.
-    pub(crate) fn refresh_slim_stage(&mut self) {
-        self.slim_stage = self.state.current_stage.to_slim_stage();
+    pub(crate) fn refresh_lifecycle_stage(&mut self) {
+        self.lifecycle_stage = self.state.current_stage.to_lifecycle_stage();
     }
 
-    /// Project the App's agent-run history into the slim
+    /// Project the App's agent-run history into the lifecycle
     /// [`crate::lifecycle::RunHistoryEntry`] shape `LifecycleOps` consumes.
     /// Outcomes are best-effort approximations of the persisted `RunStatus`
     /// values. Used by restart's `build_spec` lookup, which doesn't inspect
     /// the outcome variant.
-    pub(crate) fn slim_run_history(&self) -> Vec<crate::lifecycle::RunHistoryEntry> {
+    pub(crate) fn lifecycle_run_history(&self) -> Vec<crate::lifecycle::RunHistoryEntry> {
         use crate::state::RunStatus;
         self.state
             .agent_runs
@@ -366,7 +366,7 @@ impl App {
             .collect()
     }
 
-    /// Task ids visible to the slim lifecycle scheduler for `stage`.
+    /// Task ids visible to the lifecycle scheduler for `stage`.
     ///
     /// The persisted builder queue has two different task concepts:
     /// - implementation launches pick from the current running task first
@@ -413,7 +413,7 @@ impl App {
             session_id: self.state.session_id.clone(),
             session_dir: self.session_dir(),
             stage,
-            prior_runs: self.slim_run_history(),
+            prior_runs: self.lifecycle_run_history(),
             pending_task_ids: self.lifecycle_task_ids_for_stage(stage),
             yolo: self.state.modes.yolo,
             cheap: self.state.modes.cheap,
@@ -446,7 +446,7 @@ impl App {
         &mut self,
         f: impl FnOnce(&mut crate::lifecycle::OpsCtx<'_>) -> R,
     ) -> R {
-        let projection = self.lifecycle_stage_projection(self.slim_stage);
+        let projection = self.lifecycle_stage_projection(self.lifecycle_stage);
         let now = chrono::Utc::now();
         let mut stage_local = projection.stage;
         let stage_ctx = projection.stage_ctx();
@@ -625,7 +625,7 @@ impl App {
         let Some(run_id) = self.current_run_id else {
             return;
         };
-        let target = stage_change.unwrap_or(self.slim_stage);
+        let target = stage_change.unwrap_or(self.lifecycle_stage);
         let marker = format!("lifecycle_op_rewind_requested: run_id={run_id}");
         if !self.marker_already_logged(&marker) {
             let _ = self.state.log_event(marker);
@@ -686,7 +686,7 @@ impl App {
     }
 
     /// Drive the persisted [`crate::state::Stage`] to the variant matching the
-    /// rewind target and refresh the slim-stage mirror.
+    /// rewind target and refresh the lifecycle-stage mirror.
     ///
     /// Rewinds frequently cross the stage-graph's forward-only edges (e.g.
     /// Implementation(r) → Idea on the skip-to-impl path), so the validated
@@ -699,8 +699,8 @@ impl App {
         let Some(target) = target else {
             return;
         };
-        let persisted = Stage::from_slim_stage(target);
-        // from_slim_stage never returns BlockedNeedsUser, so any blocked
+        let persisted = Stage::from_lifecycle_stage(target);
+        // from_lifecycle_stage never returns BlockedNeedsUser, so any blocked
         // current_stage is always leaving the blocked state.
         let leaving_blocked = matches!(self.state.current_stage, Stage::BlockedNeedsUser);
         session_state::set_stage_for_operator_retry(&mut self.state, persisted);
@@ -712,7 +712,7 @@ impl App {
             // otherwise let stale provenance satisfy the force-ship guard.
             self.state.block_origin = None;
         }
-        self.refresh_slim_stage();
+        self.refresh_lifecycle_stage();
         self.agent_line_count = 0;
         self.rebuild_tree_view(None);
         self.enable_progress_follow_and_refocus();
@@ -763,7 +763,7 @@ impl App {
                 let _ = self.launch_plan_review_with_model(override_model);
             }
             L::Sharding => {
-                // The slim `Stage::Plan` covers PlanningRunning..ShardingRunning;
+                // The lifecycle `Stage::Plan` covers PlanningRunning..ShardingRunning;
                 // operator rewinds that land on Plan must defer Sharding to the
                 // shell scheduler so `decide_waiting_dispatch` can re-verify the
                 // baseline. The auto-launch path only fires this branch when
@@ -1014,7 +1014,7 @@ impl App {
 
     pub(crate) fn transition_to_stage(&mut self, next_stage: Stage) -> Result<()> {
         session_state::execute_transition(&mut self.state, next_stage)?;
-        self.refresh_slim_stage();
+        self.refresh_lifecycle_stage();
         // Pin the round's review scope at round entry — including the
         // skip-to-impl path that has no reviewer stage and goal-gap re-runs
         // that create a fresh implementation round — so the simplifier can
@@ -1199,7 +1199,7 @@ impl App {
             other => anyhow::bail!("accept_guard_keep: unexpected stage '{other}'"),
         };
         session_state::restore_guard_originating_stage(&mut self.state, originating);
-        self.refresh_slim_stage();
+        self.refresh_lifecycle_stage();
         self.complete_run_finalization(&run, None)
     }
     pub(crate) fn editable_artifact(&self) -> Option<std::path::PathBuf> {
@@ -1406,10 +1406,10 @@ mod tests {
         state.builder.pipeline_items = vec![item(10, PipelineItemStatus::Pending)];
         let app = mk_app(state);
 
-        let outcome = app.with_lifecycle_stage_ctx(app.slim_stage, |ctx| {
+        let outcome = app.with_lifecycle_stage_ctx(app.lifecycle_stage, |ctx| {
             app.scheduler.plan(TickInput {
                 agent: &AgentState::Idle,
-                stage: app.slim_stage,
+                stage: app.lifecycle_stage,
                 paused_at_stage: app.paused_at_stage,
                 pending_decisions: &app.pending_decisions,
                 project_lane_allows: true,
@@ -1433,10 +1433,10 @@ mod tests {
         state.builder.pipeline_items = vec![item(20, PipelineItemStatus::Running)];
         let app = mk_app(state);
 
-        let outcome = app.with_lifecycle_stage_ctx(app.slim_stage, |ctx| {
+        let outcome = app.with_lifecycle_stage_ctx(app.lifecycle_stage, |ctx| {
             app.scheduler.plan(TickInput {
                 agent: &AgentState::Idle,
-                stage: app.slim_stage,
+                stage: app.lifecycle_stage,
                 paused_at_stage: app.paused_at_stage,
                 pending_decisions: &app.pending_decisions,
                 project_lane_allows: true,

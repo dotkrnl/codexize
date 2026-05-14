@@ -59,7 +59,7 @@ impl StageDriver for RepoStateUpdateStage {
 
     fn next_stage_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Stage {
         // A `not_implementable` verdict blocks via PendingDecisions.plan_approval
-        // while the slim stage stays on Plan.
+        // while the lifecycle stage stays on Plan.
         Stage::Plan
     }
 

@@ -90,45 +90,45 @@ pub enum Stage {
     BlockedNeedsUser,
 }
 impl Stage {
-    /// Project this persisted stage down to the slim lifecycle stage.
-    pub fn to_slim_stage(self) -> crate::lifecycle::Stage {
-        use crate::lifecycle::Stage as SlimStage;
+    /// Project this persisted stage down to the lifecycle stage.
+    pub fn to_lifecycle_stage(self) -> crate::lifecycle::Stage {
+        use crate::lifecycle::Stage as LifecycleStage;
         match self {
-            Stage::IdeaInput | Stage::BrainstormRunning => SlimStage::Idea,
-            Stage::SpecReviewRunning | Stage::SpecReviewPaused => SlimStage::Spec,
+            Stage::IdeaInput | Stage::BrainstormRunning => LifecycleStage::Idea,
+            Stage::SpecReviewRunning | Stage::SpecReviewPaused => LifecycleStage::Spec,
             Stage::PlanningRunning
             | Stage::PlanReviewRunning
             | Stage::PlanReviewPaused
             | Stage::ShardingRunning
             | Stage::RepoStateUpdateRunning
             | Stage::WaitingToImplement
-            | Stage::SkipToImplPending => SlimStage::Plan,
+            | Stage::SkipToImplPending => LifecycleStage::Plan,
             Stage::ImplementationRound(r)
             | Stage::BuilderRecovery(r)
             | Stage::BuilderRecoveryPlanReview(r)
-            | Stage::BuilderRecoverySharding(r) => SlimStage::Implementation(r),
-            Stage::ReviewRound(r) | Stage::Simplification(r) => SlimStage::Review(r),
+            | Stage::BuilderRecoverySharding(r) => LifecycleStage::Implementation(r),
+            Stage::ReviewRound(r) | Stage::Simplification(r) => LifecycleStage::Review(r),
             Stage::FinalValidation(_) | Stage::Dreaming(_) | Stage::DreamingPending => {
-                SlimStage::Finalization
+                LifecycleStage::Finalization
             }
-            Stage::Done => SlimStage::Done,
-            Stage::Cancelled => SlimStage::Cancelled,
-            Stage::BlockedNeedsUser | Stage::GitGuardPending => SlimStage::Plan,
+            Stage::Done => LifecycleStage::Done,
+            Stage::Cancelled => LifecycleStage::Cancelled,
+            Stage::BlockedNeedsUser | Stage::GitGuardPending => LifecycleStage::Plan,
         }
     }
 
     /// Pick a representative persisted stage to land on when rewinding to `target`.
-    pub fn from_slim_stage(target: crate::lifecycle::Stage) -> Self {
-        use crate::lifecycle::Stage as SlimStage;
+    pub fn from_lifecycle_stage(target: crate::lifecycle::Stage) -> Self {
+        use crate::lifecycle::Stage as LifecycleStage;
         match target {
-            SlimStage::Idea => Stage::IdeaInput,
-            SlimStage::Spec => Stage::SpecReviewRunning,
-            SlimStage::Plan => Stage::PlanningRunning,
-            SlimStage::Implementation(r) => Stage::ImplementationRound(r),
-            SlimStage::Review(r) => Stage::ReviewRound(r),
-            SlimStage::Finalization => Stage::FinalValidation(1),
-            SlimStage::Done => Stage::Done,
-            SlimStage::Cancelled => Stage::Cancelled,
+            LifecycleStage::Idea => Stage::IdeaInput,
+            LifecycleStage::Spec => Stage::SpecReviewRunning,
+            LifecycleStage::Plan => Stage::PlanningRunning,
+            LifecycleStage::Implementation(r) => Stage::ImplementationRound(r),
+            LifecycleStage::Review(r) => Stage::ReviewRound(r),
+            LifecycleStage::Finalization => Stage::FinalValidation(1),
+            LifecycleStage::Done => Stage::Done,
+            LifecycleStage::Cancelled => Stage::Cancelled,
         }
     }
 

@@ -1,7 +1,7 @@
 //! Lifecycle-internal stage identifier.
 //!
 //! Distinct from [`crate::app_runtime::view::StageId`] (which models only the
-//! operator-visible stages used by modals and the keymap) because the slim
+//! operator-visible stages used by modals and the keymap) because the lifecycle
 //! lifecycle has 14 distinct pipeline stages — Coder/Reviewer/Recovery* and
 //! Simplification/RepoStateUpdate all need their own [`Stage`](super::Stage)
 //! implementations and registry keys even though the UI groups them under

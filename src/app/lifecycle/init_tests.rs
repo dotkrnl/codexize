@@ -10,7 +10,7 @@ use crate::app::App;
 use crate::app::test_support::with_temp_root;
 use crate::lifecycle::{
     AgentState, DreamingData, GitGuardData, PendingDecisions, PlanApprovalData, SkipToImplData,
-    SpecApprovalData, Stage as SlimStage,
+    SpecApprovalData, Stage as LifecycleStage,
 };
 use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState, Stage as PersistedStage};
 use std::sync::Arc;
@@ -117,7 +117,7 @@ fn session_round_trips_paused_at_stage_and_pending_decisions() {
     with_temp_root(|| {
         let mut state = SessionState::new("20260513-150000-000000004".to_string());
         state.current_stage = PersistedStage::PlanReviewPaused;
-        state.paused_at_stage = Some(SlimStage::Plan);
+        state.paused_at_stage = Some(LifecycleStage::Plan);
         state.pending_decisions = PendingDecisions {
             git_guard: Some(GitGuardData {}),
             spec_approval: Some(SpecApprovalData {}),

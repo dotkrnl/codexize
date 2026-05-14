@@ -16,7 +16,7 @@ impl App {
     ///
     /// Routes the per-stage dispatch decision through
     /// [`crate::lifecycle::Scheduler::plan`]: this function builds a
-    /// [`TickInput`] from the App's slim stage and FSM state, hands it to
+    /// [`TickInput`] from the App's lifecycle stage and FSM state, hands it to
     /// the scheduler, and dispatches the returned [`crate::lifecycle::StageSpec`]
     /// via [`Self::dispatch_start`]. The cross-session project-lane gate is
     /// enforced by the shell scheduler (see `app_shell::evaluate_tick`) so
@@ -34,7 +34,7 @@ impl App {
         // The shell scheduler owns the WaitingToImplement → Sharding /
         // RepoStateUpdate decision via `decide_waiting_dispatch`; per-session
         // auto-launch deliberately skips this stage so the baseline check
-        // runs first. The slim stage for WaitingToImplement is `Stage::Plan`
+        // runs first. The lifecycle stage for WaitingToImplement is `Stage::Plan`
         // and `Scheduler::plan` would otherwise pick Sharding here.
         if matches!(self.state.current_stage, Stage::WaitingToImplement) {
             return;
@@ -46,10 +46,10 @@ impl App {
             return;
         }
 
-        let spec = self.with_lifecycle_stage_ctx(self.slim_stage, |stage_ctx| {
+        let spec = self.with_lifecycle_stage_ctx(self.lifecycle_stage, |stage_ctx| {
             let input = TickInput {
                 agent: self.fsm.view(),
-                stage: self.slim_stage,
+                stage: self.lifecycle_stage,
                 paused_at_stage: self.paused_at_stage,
                 pending_decisions: &self.pending_decisions,
                 project_lane_allows: true,

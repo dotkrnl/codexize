@@ -34,7 +34,7 @@ pub struct StatusMessage {
 /// Distinct from [`Stage`] because stages mix modal state, pipeline position,
 /// and running-agent identity. This enum names the stage the operator sees
 /// in a stage-error modal, so retry can relaunch the exact lifecycle stage
-/// that failed even when several stages share one slim stage.
+/// that failed even when several stages share one lifecycle stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum StageId {
     Brainstorm,

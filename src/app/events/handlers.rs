@@ -422,7 +422,7 @@ impl App {
                 // the specific stage the modal targets, then route through
                 // [`Self::dispatch_start`]. Going through `dispatch_start`
                 // (rather than `Scheduler::plan` + tick) keeps the modal's
-                // stage choice authoritative — slim `Stage::Finalization`
+                // stage choice authoritative — lifecycle `Stage::Finalization`
                 // covers both FinalValidation and Dreaming, so a tick
                 // would dispatch FinalValidation first in a healthy
                 // session, but the modal's contract says "retry this

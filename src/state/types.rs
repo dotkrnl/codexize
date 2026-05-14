@@ -400,13 +400,13 @@ pub struct SessionState {
     /// matches the baseline definition.
     #[serde(default)]
     pub planned_after_session_id: Option<String>,
-    /// Slim lifecycle stage the agent was paused at when the operator issued
+    /// Lifecycle stage the agent was paused at when the operator issued
     /// `:stop`. Persisted so the scheduler doesn't relaunch the same stage
     /// immediately after a TUI restart. `None` outside `:stop`-then-`Idle`
     /// transitions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paused_at_stage: Option<crate::lifecycle::Stage>,
-    /// Operator-decision slots used by the slim lifecycle. Persisted so a
+    /// Operator-decision slots used by the lifecycle. Persisted so a
     /// modal raised by a prior TUI invocation survives a restart.
     #[serde(
         default,

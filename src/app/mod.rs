@@ -300,17 +300,17 @@ pub struct App {
     /// Lifecycle FSM. `current_run_id` is the persisted mirror; the FSM owns
     /// `ActiveRun` but the app still needs the run id for UI binding.
     pub(crate) fsm: crate::lifecycle::Fsm,
-    /// Slim, round-aware lifecycle [`crate::lifecycle::Stage`] derived from
-    /// `state.current_stage` via [`Stage::to_slim_stage`].
-    /// Refreshed by [`crate::app::App::refresh_slim_stage`] at every stage
+    /// Compact, round-aware lifecycle [`crate::lifecycle::Stage`] derived from
+    /// `state.current_stage` via [`Stage::to_lifecycle_stage`].
+    /// Refreshed by [`crate::app::App::refresh_lifecycle_stage`] at every stage
     /// mutation site.
-    pub(crate) slim_stage: crate::lifecycle::Stage,
-    /// Slot for the slim stage the lifecycle was paused at when the
+    pub(crate) lifecycle_stage: crate::lifecycle::Stage,
+    /// Slot for the lifecycle stage the lifecycle was paused at when the
     /// operator issued `:stop`. None outside `Stopping`/`Idle`-after-stop
     /// transitions. Mirrors `OpsCtx.paused_at_stage` so the scheduler can
     /// avoid relaunching the same stage immediately after a stop.
     pub(crate) paused_at_stage: Option<crate::lifecycle::Stage>,
-    /// Operator-decision slots used by the slim lifecycle. Populated by
+    /// Operator-decision slots used by the lifecycle. Populated by
     /// operator paths that raise modal decisions (`:stop`, `:retry`,
     /// guard approvals, etc.).
     pub(crate) pending_decisions: crate::lifecycle::PendingDecisions,

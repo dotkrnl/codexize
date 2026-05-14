@@ -1,8 +1,8 @@
-//! Lifecycle module — agent-lifecycle FSM, slim stage, stage driver, and scheduler.
+//! Lifecycle module — agent-lifecycle FSM, lifecycle stage, stage driver, and scheduler.
 //!
 //! Provides the runtime lifecycle management that drives the App alongside the
 //! [`crate::state::Stage`] bridge:
-//! - [`stage_state`] — the slim, round-aware [`Stage`] enum.
+//! - [`stage_state`] — the compact, round-aware [`Stage`] enum.
 //! - [`stage_id`] — lifecycle-internal [`StageId`] (distinct from the UI's
 //!   `view::StageId`; 14 pipeline-stage variants vs. the UI's 9 modal ones).
 //! - [`spec`] — [`StageSpec`] and [`ActiveRun`].

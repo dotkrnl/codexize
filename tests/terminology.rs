@@ -1,7 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const FORBIDDEN_TERMS: [&str; 2] = [concat!("ph", "ase"), concat!("leg", "acy")];
+const FORBIDDEN_TERMS: [&str; 3] = [
+    concat!("ph", "ase"),
+    concat!("leg", "acy"),
+    concat!("sl", "im"),
+];
 const ALLOWED_EXTERNAL_LITERAL: &str = "CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP";
 
 #[test]

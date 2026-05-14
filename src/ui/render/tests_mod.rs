@@ -27,7 +27,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         .filter(|row| row.is_expandable())
         .map(|row| (row.key.clone(), super::super::ExpansionOverride::Expanded))
         .collect();
-    let initial_slim_stage = state.current_stage.to_slim_stage();
+    let initial_lifecycle_stage = state.current_stage.to_lifecycle_stage();
     let app = App {
         state,
         nodes,
@@ -77,7 +77,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         pending_shell_command: None,
         current_run_id: None,
         fsm: crate::lifecycle::Fsm::new(),
-        slim_stage: initial_slim_stage,
+        lifecycle_stage: initial_lifecycle_stage,
         paused_at_stage: None,
         pending_decisions: crate::lifecycle::PendingDecisions::default(),
         scheduler: crate::lifecycle::Scheduler::new(crate::lifecycle::default_registry()),

@@ -83,7 +83,7 @@ impl App {
         let current = current_node_index(&nodes);
         let selected_key = node_key_at_path(&nodes, &[current]);
         let failed_models = Self::rebuild_failed_models(&state);
-        let initial_slim_stage = state.current_stage.to_slim_stage();
+        let initial_lifecycle_stage = state.current_stage.to_lifecycle_stage();
         // Lift the persisted lifecycle-overlay fields out of `state` into the
         // App mirrors. `App::save_state` writes them back before each save so
         // disk and memory stay in sync.
@@ -153,7 +153,7 @@ impl App {
             pending_shell_command: None,
             current_run_id: None,
             fsm: crate::lifecycle::Fsm::new(),
-            slim_stage: initial_slim_stage,
+            lifecycle_stage: initial_lifecycle_stage,
             paused_at_stage: initial_paused_at_stage,
             pending_decisions: initial_pending_decisions,
             scheduler: crate::lifecycle::Scheduler::new(crate::lifecycle::default_registry()),

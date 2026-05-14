@@ -3,13 +3,13 @@ use super::{
 };
 use crate::app::App;
 use crate::app::tree::node_at_path;
-use crate::lifecycle::{LifecycleOps, Stage as SlimStage};
+use crate::lifecycle::{LifecycleOps, Stage as LifecycleStage};
 use crate::state::{self as session_state, NodeKind, Stage};
 use std::time::Duration;
 
 /// Map the operator-visible [`crate::app::StageId`] modal target to
 /// the lifecycle-internal [`crate::lifecycle::StageId`] used by the stage
-/// registry. These values are intentionally stage-error targets, not slim
+/// registry. These values are intentionally stage-error targets, not lifecycle
 /// stages: multiple concrete lifecycle stages share a stage, but a retry
 /// from the modal must relaunch the stage that actually failed.
 fn lifecycle_stage_id_from_view(view: crate::app::StageId) -> crate::lifecycle::StageId {
@@ -41,13 +41,13 @@ impl App {
     /// from the stage's `build_spec`, and dispatch via
     /// [`App::dispatch_start`]. Going through `dispatch_start` (rather
     /// than the scheduler tick) keeps the modal's stage choice
-    /// authoritative — slim `Stage::Finalization` covers both
+    /// authoritative — lifecycle `Stage::Finalization` covers both
     /// FinalValidation and Dreaming, so `Scheduler::plan` would otherwise
     /// pick FinalValidation first even when the operator clicked "retry"
     /// on the dreaming modal.
     pub(crate) fn retry_failed_stage(&mut self, view_stage_id: crate::app::StageId) {
         let stage_id = lifecycle_stage_id_from_view(view_stage_id);
-        let spec = self.with_lifecycle_stage_ctx(self.slim_stage, |ctx| {
+        let spec = self.with_lifecycle_stage_ctx(self.lifecycle_stage, |ctx| {
             self.scheduler
                 .registry()
                 .get(stage_id)
@@ -104,8 +104,8 @@ impl App {
             return;
         };
         let target_stage = match target {
-            RetryTarget::Task(task_id) => slim_stage_for_task_retry(task_id, &self.state),
-            RetryTarget::Stage(stage) => slim_stage_for_stage_retry(stage),
+            RetryTarget::Task(task_id) => lifecycle_stage_for_task_retry(task_id, &self.state),
+            RetryTarget::Stage(stage) => lifecycle_stage_for_stage_retry(stage),
         };
         self.run_lifecycle_op("retry", |ctx| LifecycleOps::rewind(ctx, target_stage));
     }
@@ -115,7 +115,7 @@ impl App {
         if self.pending_decisions.blocks() {
             return;
         }
-        let Some(mut target) = self.slim_stage.previous() else {
+        let Some(mut target) = self.lifecycle_stage.previous() else {
             self.push_status(
                 "nothing to go back to".to_string(),
                 Severity::Warn,
@@ -126,12 +126,12 @@ impl App {
         // Implementation(1) has two predecessors depending on whether the
         // operator skipped spec / planning via the skip-to-impl path:
         //   - skip_to_impl_rationale set → rewind all the way to Idea (the
-        //     slim stage brainstorm runs at; FSM will re-offer the modal).
+        //     lifecycle stage brainstorm runs at; FSM will re-offer the modal).
         //   - otherwise → Plan, and the persisted `reset_builder_after_rewind`
         //     state mutator must fire to clear the pipeline.
-        if matches!(self.slim_stage, SlimStage::Implementation(1)) {
+        if matches!(self.lifecycle_stage, LifecycleStage::Implementation(1)) {
             if self.state.skip_to_impl_rationale.is_some() {
-                target = SlimStage::Idea;
+                target = LifecycleStage::Idea;
             } else {
                 session_state::reset_builder_after_rewind(&mut self.state);
             }
@@ -147,11 +147,11 @@ impl App {
     }
 }
 
-/// Slim stage to rewind to when the operator retries a specific task.
-pub(crate) fn slim_stage_for_task_retry(
+/// Lifecycle stage to rewind to when the operator retries a specific task.
+pub(crate) fn lifecycle_stage_for_task_retry(
     task_id: u32,
     state: &crate::state::SessionState,
-) -> SlimStage {
+) -> LifecycleStage {
     let max_round = state
         .agent_runs
         .iter()
@@ -166,13 +166,13 @@ pub(crate) fn slim_stage_for_task_retry(
         _ => None,
     };
     let round = max_round.or(stage_round).unwrap_or(1);
-    SlimStage::Implementation(round)
+    LifecycleStage::Implementation(round)
 }
 
-/// Slim stage to rewind to when the operator retries a stage by name.
-pub(crate) fn slim_stage_for_stage_retry(stage: &str) -> SlimStage {
+/// Lifecycle stage to rewind to when the operator retries a stage by name.
+pub(crate) fn lifecycle_stage_for_stage_retry(stage: &str) -> LifecycleStage {
     use crate::logic::rules::retry_stage_for_stage;
     retry_stage_for_stage(stage)
-        .map(|p| p.to_slim_stage())
-        .unwrap_or(SlimStage::Plan)
+        .map(|p| p.to_lifecycle_stage())
+        .unwrap_or(LifecycleStage::Plan)
 }

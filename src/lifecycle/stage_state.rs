@@ -1,4 +1,4 @@
-//! Slim, round-aware lifecycle [`Stage`].
+//! Compact, round-aware lifecycle [`Stage`].
 //!
 //! Replaces the 24-variant `Stage` in [`crate::logic::pipeline::stage`] with a
 //! compact set of "where in the pipeline are we" values. All `*Paused` and

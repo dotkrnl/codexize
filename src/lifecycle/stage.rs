@@ -26,7 +26,7 @@ pub struct RunHistoryEntry {
     pub outcome: Option<Outcome>,
 }
 
-/// Slim read-only view of session state passed to a [`Stage`].
+/// Compact read-only view of session state passed to a [`Stage`].
 ///
 /// Every borrow here is read-only and narrowly scoped — a Stage may inspect
 /// session paths, the current stage, the prior-run projection, and operator
@@ -43,7 +43,7 @@ pub struct StageCtx<'a> {
     pub session_dir: &'a Path,
     /// Active lifecycle [`Stage`].
     pub stage: Stage,
-    /// Slim projection of prior runs the stage may inspect for
+    /// Compact projection of prior runs the stage may inspect for
     /// `next_pending_work`, attempt counts, or "has this stage succeeded
     /// yet" checks.
     pub prior_runs: &'a [RunHistoryEntry],

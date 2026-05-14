@@ -1,7 +1,7 @@
 //! Tests for operator-driven rewind paths.
 //!
 //! These exercise the App-level wiring of `LifecycleOps::rewind` through
-//! `go_back` / `retry_selected_target`. The slim-stage translator helpers
+//! `go_back` / `retry_selected_target`. The lifecycle-stage translator helpers
 //! and `LifecycleOps` itself have their own unit tests in
 //! `src/lifecycle/`; this suite focuses on what the App does *with*
 //! those primitives: cleanup is applied to disk, the persisted
@@ -41,10 +41,10 @@ fn go_back_from_plan_rewinds_to_spec_and_deletes_plan_artifact() {
             !plan_md.exists(),
             "plan.md should be removed by rewind cleanup"
         );
-        // Persisted stage landed on the running variant for Spec; the slim
+        // Persisted stage landed on the running variant for Spec; the lifecycle
         // mirror keeps up.
         assert_eq!(app.state.current_stage, Stage::SpecReviewRunning);
-        assert_eq!(app.slim_stage, crate::lifecycle::Stage::Spec);
+        assert_eq!(app.lifecycle_stage, crate::lifecycle::Stage::Spec);
     });
 }
 
@@ -58,9 +58,9 @@ fn go_back_from_implementation_one_with_skip_to_impl_rewinds_to_idea() {
 
         app.go_back();
 
-        // Skip-to-impl branch overrides slim_stage.previous() (Plan) to
+        // Skip-to-impl branch overrides lifecycle_stage.previous() (Plan) to
         // land on Idea instead, since spec/planning never ran.
-        assert_eq!(app.slim_stage, crate::lifecycle::Stage::Idea);
+        assert_eq!(app.lifecycle_stage, crate::lifecycle::Stage::Idea);
         assert_eq!(app.state.current_stage, Stage::IdeaInput);
     });
 }
@@ -96,7 +96,7 @@ fn go_back_from_implementation_one_without_skip_to_impl_resets_builder_and_rewin
 
         app.go_back();
 
-        assert_eq!(app.slim_stage, crate::lifecycle::Stage::Plan);
+        assert_eq!(app.lifecycle_stage, crate::lifecycle::Stage::Plan);
         assert!(
             app.state.builder.pipeline_items.is_empty(),
             "reset_builder_after_rewind should have cleared the pipeline"
@@ -110,19 +110,19 @@ fn go_back_is_noop_while_a_pending_decision_blocks() {
         let state = fresh_state(Stage::PlanningRunning);
         state.save().unwrap();
         let mut app = mk_app(state);
-        // Open a git-guard pending decision on the slim surface; go_back
+        // Open a git-guard pending decision on the lifecycle surface; go_back
         // should refuse to rewind until the operator resolves it.
         app.pending_decisions = PendingDecisions {
             git_guard: Some(GitGuardData {}),
             ..Default::default()
         };
         let original_stage = app.state.current_stage;
-        let original_slim = app.slim_stage;
+        let original_lifecycle_stage = app.lifecycle_stage;
 
         app.go_back();
 
         assert_eq!(app.state.current_stage, original_stage);
-        assert_eq!(app.slim_stage, original_slim);
+        assert_eq!(app.lifecycle_stage, original_lifecycle_stage);
     });
 }
 
@@ -159,10 +159,10 @@ fn retry_selected_target_for_task_row_rewinds_to_implementation_round() {
         state.save().unwrap();
         let mut app = mk_app(state);
 
-        // Drive the slim-target lookup directly: we're testing the
+        // Drive the lifecycle-target lookup directly: we're testing the
         // target-derivation contract, not the tree-row selection path
         // (already covered by the tree tests).
-        let target = crate::app::lifecycle::retry::slim_stage_for_task_retry(7, &app.state);
+        let target = crate::app::lifecycle::retry::lifecycle_stage_for_task_retry(7, &app.state);
         assert_eq!(target, crate::lifecycle::Stage::Implementation(5));
         // And confirm the App-level wrapper applies it. The
         // run_lifecycle_op + LifecycleOps::rewind composition is what
@@ -170,6 +170,9 @@ fn retry_selected_target_for_task_row_rewinds_to_implementation_round() {
         app.run_lifecycle_op("retry", |ctx| {
             crate::lifecycle::LifecycleOps::rewind(ctx, target)
         });
-        assert_eq!(app.slim_stage, crate::lifecycle::Stage::Implementation(5));
+        assert_eq!(
+            app.lifecycle_stage,
+            crate::lifecycle::Stage::Implementation(5)
+        );
     });
 }

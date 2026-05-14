@@ -21,6 +21,7 @@ pub mod fsm;
 pub mod pending;
 pub mod persist;
 pub mod phase;
+pub mod scheduler;
 pub mod spec;
 pub mod stage;
 pub mod stage_id;
@@ -36,6 +37,7 @@ pub use pending::{
 pub use persist::{RunRecordV2, SessionFileV2};
 pub use phase::Phase;
 pub use spec::{ActiveRun, StageSpec};
+pub use scheduler::{BlockReason, Scheduler, TickInput, TickOutcome};
 pub use stage::{RunHistoryEntry, Stage, StageCtx, StageRegistry, SuccessOutcome, WorkUnit};
 pub use stage_id::StageId;
 pub use stages::default_registry;

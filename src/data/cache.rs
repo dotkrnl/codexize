@@ -126,13 +126,8 @@ pub fn load(dir: &Path) -> LoadedCache {
         quotas: None,
         quota_resets: None,
     };
-    let text = match fs::read_to_string(dir.join("models.json")) {
-        Ok(t) => t,
-        Err(_) => return empty,
-    };
-    let parsed: VersionedFile = match serde_json::from_str(&text) {
-        Ok(p) => p,
-        Err(_) => return empty,
+    let Some(parsed) = read_versioned_file(dir) else {
+        return empty;
     };
     // Dashboard and quota payloads are only trusted when the cache file is the
     // current schema version. Quota-reset shape is stable.
@@ -206,13 +201,8 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
         quotas: None,
         quota_resets: None,
     };
-    let text = match fs::read_to_string(dir.join("models.json")) {
-        Ok(t) => t,
-        Err(_) => return empty,
-    };
-    let parsed: VersionedFile = match serde_json::from_str(&text) {
-        Ok(p) => p,
-        Err(_) => return empty,
+    let Some(parsed) = read_versioned_file(dir) else {
+        return empty;
     };
     // Same per-section policy as `load`: only current-version dashboard and
     // quota payloads are trusted. Quota-reset shape is stable.
@@ -225,6 +215,11 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
         quota_resets: parsed.quota_resets,
     }
 }
+fn read_versioned_file(dir: &Path) -> Option<VersionedFile> {
+    let text = fs::read_to_string(dir.join("models.json")).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
 fn parse_if_current<T: serde::de::DeserializeOwned>(
     parsed: &VersionedFile,
     raw: Option<serde_json::Value>,

@@ -258,7 +258,7 @@ fn finish_stamp_serialization_includes_working_tree_clean() {
 }
 
 #[test]
-fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
+fn acp_text_stream_buffers_partial_text_until_paragraph_boundary() {
     let _guard = crate::state::test_fs_lock()
         .lock()
         .unwrap_or_else(|err| err.into_inner());
@@ -268,7 +268,7 @@ fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
         std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
     }
 
-    let session_id = "runner-live-stream";
+    let session_id = "runner-block-stream";
     let mut state = SessionState::new(session_id.to_string());
     state.agent_runs.push(crate::state::RunRecord {
         id: 7,
@@ -278,7 +278,7 @@ fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
         attempt: 1,
         model: "model".to_string(),
         subscription_label: "vendor".to_string(),
-        window_name: "[Live]".to_string(),
+        window_name: "[Block]".to_string(),
         started_at: chrono::Utc::now(),
         ended_at: None,
         status: RunStatus::Running,
@@ -311,7 +311,7 @@ fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
                 metadata: std::collections::BTreeMap::new(),
             },
         },
-        window_name: "[Live]".to_string(),
+        window_name: "[Block]".to_string(),
         session_id: Some(session_id.to_string()),
         stamp_path: temp.path().join("stamp.toml"),
         cause_path: temp.path().join("cause.txt"),
@@ -319,13 +319,20 @@ fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
     };
     let mut stream = AcpTextStream::new();
 
+    // Partial chunks don't write to messages.toml until a paragraph/max-char
+    // boundary finalizes a block.
     stream.push_text(&launch, "thinking", MessageKind::AgentThought);
     stream.push_text(&launch, " aloud", MessageKind::AgentThought);
+    assert!(SessionState::load_messages(session_id).unwrap().is_empty());
+
+    // The `\n\n` closes the "thinking aloud" block; "next" stays live in the
+    // accumulator until finish_turn flushes it.
+    stream.push_text(&launch, "\n\nnext", MessageKind::AgentThought);
     let messages = SessionState::load_messages(session_id).unwrap();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].text, "thinking aloud");
 
-    stream.push_text(&launch, "\n\nnext", MessageKind::AgentThought);
+    stream.finish_turn(&launch, MessageKind::AgentThought);
     let messages = SessionState::load_messages(session_id).unwrap();
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].text, "thinking aloud");
@@ -440,6 +447,7 @@ fn acp_text_stream_start_new_message_splits_adjacent_logical_outputs() {
         MessageKind::AgentText,
         crate::acp::AcpTextBoundary::StartNewMessage,
     );
+    stream.finish_turn(&launch, MessageKind::AgentText);
 
     assert_eq!(
         persisted_texts(session_id, MessageKind::AgentText),
@@ -556,6 +564,7 @@ fn acp_text_stream_boundary_finalizes_live_message_before_next_live_message() {
         MessageKind::AgentText,
         crate::acp::AcpTextBoundary::Continue,
     );
+    stream.finish_turn(&launch, MessageKind::AgentText);
 
     assert_eq!(
         persisted_texts(session_id, MessageKind::AgentText),
@@ -620,6 +629,8 @@ fn acp_text_stream_tool_call_boundaries_isolate_thought_and_agent_text() {
         MessageKind::AgentText,
         crate::acp::AcpTextBoundary::StartNewMessage,
     );
+    thought.finish_turn(&launch, MessageKind::AgentThought);
+    agent.finish_turn(&launch, MessageKind::AgentText);
 
     assert_eq!(
         persisted_texts(session_id, MessageKind::AgentThought),
@@ -827,7 +838,6 @@ fn acp_text_stream_persists_one_message_per_finalized_block_plus_live_text() {
     // while shrinking the boundary distance the test has to span.
     let mut stream = AcpTextStream {
         accumulator: AcpTextAccumulator::with_max_chars(20),
-        live_ts: None,
     };
 
     // Two paragraph boundaries land first; the trailing `gamma overflow

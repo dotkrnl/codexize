@@ -95,15 +95,13 @@ fn find_transcript_run(session_id: &str, window_name: &str) -> Option<(u64, Stri
         })
         .map(|run| (run.id, run.model.clone(), run.subscription_label.clone()))
 }
-fn persist_agent_text_block(
-    launch: &ManagedAcpLaunch,
-    text: String,
-    kind: MessageKind,
-) -> Option<chrono::DateTime<chrono::Utc>> {
+fn persist_agent_text_block(launch: &ManagedAcpLaunch, text: String, kind: MessageKind) {
     if text.is_empty() {
-        return None;
+        return;
     }
-    let session_id = launch.session_id.as_deref()?;
+    let Some(session_id) = launch.session_id.as_deref() else {
+        return;
+    };
     // ACP output can arrive before the app thread finishes saving the run
     // record, so transcript persistence waits briefly for that handoff.
     let run = (0..80).find_map(|_| {
@@ -123,11 +121,10 @@ fn persist_agent_text_block(
             &launch.cause_path,
             "failed to persist ACP text: run record was not available",
         );
-        return None;
+        return;
     };
-    let ts = chrono::Utc::now();
     let msg = Message {
-        ts,
+        ts: chrono::Utc::now(),
         run_id,
         kind,
         sender: MessageSender::Agent {
@@ -141,48 +138,20 @@ fn persist_agent_text_block(
             &launch.cause_path,
             &format!("failed to persist ACP text for run {run_id}: {err:#}"),
         );
-        return None;
-    }
-    Some(ts)
-}
-fn update_agent_text_block(
-    launch: &ManagedAcpLaunch,
-    ts: chrono::DateTime<chrono::Utc>,
-    text: &str,
-) -> bool {
-    let Some(session_id) = launch.session_id.as_deref() else {
-        return false;
-    };
-    match SessionState::load(session_id).and_then(|state| state.update_message_text(ts, text)) {
-        Ok(true) => true,
-        Ok(false) => {
-            super::supervise::append_launch_cause(
-                &launch.cause_path,
-                "failed to update live ACP text: message was not available",
-            );
-            false
-        }
-        Err(err) => {
-            super::supervise::append_launch_cause(
-                &launch.cause_path,
-                &format!("failed to update live ACP text: {err:#}"),
-            );
-            false
-        }
     }
 }
 /// Per-run accumulator that funnels ACP `session/update` text events into
-/// a single live transcript message, breaking on identity changes the way
-/// `AcpTextAccumulator` reports them.
+/// transcript writes. Only finalized blocks (paragraph or max-char boundary,
+/// or end-of-turn remainder) are persisted; live partial text stays in the
+/// accumulator so `messages.toml` is rewritten once per block instead of once
+/// per streaming chunk.
 pub(in crate::data::runner) struct AcpTextStream {
     pub(in crate::data::runner) accumulator: AcpTextAccumulator,
-    pub(in crate::data::runner) live_ts: Option<chrono::DateTime<chrono::Utc>>,
 }
 impl AcpTextStream {
     pub(in crate::data::runner) fn new() -> Self {
         Self {
             accumulator: AcpTextAccumulator::new(),
-            live_ts: None,
         }
     }
     #[cfg(test)]
@@ -203,19 +172,15 @@ impl AcpTextStream {
     ) {
         if boundary == AcpTextBoundary::StartNewMessage {
             // ACP only emits Continue when stable identity proves continuity;
-            // otherwise this intentionally over-splits rather than rewriting
-            // an unrelated previous live message.
+            // otherwise this finalizes the prior accumulator state so any
+            // pending live remainder becomes its own block.
             self.finish_turn(launch, kind);
-            self.live_ts = None;
         }
         if let Some(text) = self.accumulator.push(chunk) {
             self.persist_ready(launch, text, kind);
         }
         while let Some(text) = self.accumulator.next_ready() {
             self.persist_ready(launch, text, kind);
-        }
-        if let Some(text) = self.accumulator.current_text().map(str::to_string) {
-            self.persist_live(launch, &text, kind);
         }
     }
     pub(in crate::data::runner) fn finish_turn(
@@ -232,24 +197,7 @@ impl AcpTextStream {
         if text.is_empty() {
             return;
         }
-        if let Some(ts) = self.live_ts.take()
-            && update_agent_text_block(launch, ts, &text)
-        {
-            return;
-        }
-        let _ = persist_agent_text_block(launch, text, kind);
-    }
-    fn persist_live(&mut self, launch: &ManagedAcpLaunch, text: &str, kind: MessageKind) {
-        let text = text.trim();
-        if text.is_empty() {
-            return;
-        }
-        if let Some(ts) = self.live_ts
-            && update_agent_text_block(launch, ts, text)
-        {
-            return;
-        }
-        self.live_ts = persist_agent_text_block(launch, text.to_string(), kind);
+        persist_agent_text_block(launch, text, kind);
     }
 }
 

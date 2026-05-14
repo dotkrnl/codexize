@@ -71,28 +71,6 @@ impl SessionState {
             .with_context(|| format!("failed to write messages to {}", path.display()))?;
         Ok(())
     }
-    /// Update the text for an existing message identified by its timestamp.
-    pub fn update_message_text(
-        &self,
-        ts: chrono::DateTime<chrono::Utc>,
-        text: &str,
-    ) -> Result<bool> {
-        let dir = session_dir(&self.session_id);
-        fs::create_dir_all(&dir)?;
-        let path = dir.join("messages.toml");
-        let mut file = read_messages_file(&path)?;
-        let Some(message) = file.messages.iter_mut().find(|message| message.ts == ts) else {
-            return Ok(false);
-        };
-        if message.text == text {
-            return Ok(true);
-        }
-        message.text = text.to_string();
-        let serialized = toml::to_string_pretty(&file).context("failed to serialize messages")?;
-        atomic_write(&path, serialized.as_bytes())
-            .with_context(|| format!("failed to write messages to {}", path.display()))?;
-        Ok(true)
-    }
     /// Load all messages for a session from messages.toml.
     pub fn load_messages(session_id: &str) -> Result<Vec<Message>> {
         let dir = session_dir(session_id);

@@ -18,23 +18,14 @@
 //!   is dead — runs [`Fsm::confirm_dead`] and applies the same plan from
 //!   the resolved `next` variant.
 //!
-//! Step 4 only models the surface and tests it against synthetic
-//! [`StageCtx`] / [`Fsm`] inputs. Wiring into the App lands in Step 5; the
-//! `resolution_to_action` helper bridges [`StopResolution`] back to a
-//! flat [`OpAction::Immediate`] the App can apply uniformly.
-//!
-//! Owner notes:
-//! - This file defers Step 3's [`StageRegistry::next_stage_for_phase`] /
-//!   [`StageRegistry::stages_after`] in favor of a private candidate-
-//!   walker ([`next_stage_for_phase_inline`] / [`stages_after_inline`]),
-//!   so Step 4's tests are robust to Step 3 landing at different times.
-//!   Step 5 will pick the single implementation to keep.
+//! `resolution_to_action` bridges [`StopResolution`] back to a flat
+//! [`OpAction::Immediate`] the App can apply uniformly after a stopped run
+//! finalizes.
 use super::fsm::{AfterStop, AgentState, CleanupPlan, Fsm, StopResolution};
 use super::pending::PendingDecisions;
 use super::phase::Phase;
 use super::spec::StageSpec;
 use super::stage::{StageCtx, StageRegistry};
-use super::stage_id::StageId;
 use std::path::PathBuf;
 
 /// Context bundle the operator commands mutate or read.
@@ -316,7 +307,7 @@ fn build_rewind_cleanup(ctx: &OpsCtx<'_>, target: Phase) -> CleanupPlan {
     let mut restore_backups: Vec<(PathBuf, PathBuf)> = Vec::new();
 
     let current_round = round_for_phase(*ctx.phase);
-    for id in stages_after_inline(ctx.registry, target) {
+    for id in ctx.registry.stages_after(target) {
         let Some(stage) = ctx.registry.get(id) else {
             continue;
         };
@@ -337,7 +328,7 @@ fn build_rewind_cleanup(ctx: &OpsCtx<'_>, target: Phase) -> CleanupPlan {
     // Phase::Plan that's PlanReview (the plan.pre-review-1.md backup is
     // the canonical example). The simplest mapping is to query every
     // registered stage and pick those whose phase_when_running == target.
-    for id in stages_at_phase(ctx.registry, target) {
+    for id in ctx.registry.stages_at_phase(target) {
         let Some(stage) = ctx.registry.get(id) else {
             continue;
         };
@@ -359,96 +350,9 @@ fn build_rewind_cleanup(ctx: &OpsCtx<'_>, target: Phase) -> CleanupPlan {
 /// per-phase candidate list (matching the canonical pipeline order)
 /// and returns the first stage with [`super::Stage::next_pending_work`].
 fn build_start_spec_for_phase(ctx: &OpsCtx<'_>, target: Phase) -> Option<StageSpec> {
-    let id = next_stage_for_phase_inline(ctx.registry, target, &ctx.stage_ctx)?;
+    let id = ctx.registry.next_stage_for_phase(target, &ctx.stage_ctx)?;
     let stage = ctx.registry.get(id)?;
     Some(stage.build_spec(&ctx.stage_ctx))
-}
-
-/// Private candidate walker mirroring Step 3's [`StageRegistry::next_stage_for_phase`].
-fn next_stage_for_phase_inline(
-    registry: &StageRegistry,
-    phase: Phase,
-    ctx: &StageCtx<'_>,
-) -> Option<StageId> {
-    let candidates: &[(StageId, GateFn)] = match phase {
-        Phase::Idea => &[(StageId::Brainstorm, gate_always)],
-        Phase::Spec => &[(StageId::SpecReview, gate_always)],
-        Phase::Plan => &[
-            (StageId::Planning, gate_always),
-            (StageId::PlanReview, gate_always),
-            (StageId::RepoStateUpdate, gate_always),
-            (StageId::Sharding, gate_always),
-        ],
-        Phase::Implementation(_) => &[
-            (StageId::Coder, gate_always),
-            (StageId::Recovery, gate_recovery_active),
-            (StageId::RecoveryPlanReview, gate_recovery_active),
-            (StageId::RecoverySharding, gate_recovery_active),
-        ],
-        Phase::Review(_) => &[
-            (StageId::Reviewer, gate_always),
-            (StageId::Simplification, gate_simplification_requested),
-        ],
-        Phase::Finalization => &[
-            (StageId::FinalValidation, gate_always),
-            (StageId::Dreaming, gate_dreaming_accepted),
-        ],
-        Phase::Done | Phase::Cancelled => &[],
-    };
-    for (id, gate) in candidates {
-        if !gate(ctx) {
-            continue;
-        }
-        let stage = registry.get(*id)?;
-        if stage.next_pending_work(ctx).is_some() {
-            return Some(*id);
-        }
-    }
-    None
-}
-
-/// Private analog of Step 3's [`StageRegistry::stages_after`].
-fn stages_after_inline(registry: &StageRegistry, phase: Phase) -> Vec<StageId> {
-    let mut hits: Vec<(StageId, Phase)> = Vec::new();
-    for id in ALL_STAGE_IDS {
-        let Some(stage) = registry.get(*id) else {
-            continue;
-        };
-        let s_phase = stage.phase_when_running();
-        if matches!(
-            s_phase.partial_cmp(&phase),
-            Some(std::cmp::Ordering::Greater)
-        ) {
-            hits.push((*id, s_phase));
-        }
-    }
-    // Sort by phase descending; ties broken by StageId discriminant.
-    hits.sort_by(|a, b| {
-        match b.1.partial_cmp(&a.1) {
-            Some(ord) => ord,
-            None => std::cmp::Ordering::Equal,
-        }
-        .then_with(|| (a.0 as u32).cmp(&(b.0 as u32)))
-    });
-    hits.into_iter().map(|(id, _)| id).collect()
-}
-
-/// Stages whose `phase_when_running` *equals* `phase` — used by
-/// [`build_rewind_cleanup`] to pull the target stage's restore_backups.
-fn stages_at_phase(registry: &StageRegistry, phase: Phase) -> Vec<StageId> {
-    let mut hits = Vec::new();
-    for id in ALL_STAGE_IDS {
-        let Some(stage) = registry.get(*id) else {
-            continue;
-        };
-        if matches!(
-            stage.phase_when_running().partial_cmp(&phase),
-            Some(std::cmp::Ordering::Equal)
-        ) {
-            hits.push(*id);
-        }
-    }
-    hits
 }
 
 /// Round number for the lifecycle's current phase. Used by
@@ -460,41 +364,6 @@ fn round_for_phase(phase: Phase) -> u32 {
         _ => 1,
     }
 }
-
-type GateFn = fn(&StageCtx<'_>) -> bool;
-fn gate_always(_ctx: &StageCtx<'_>) -> bool {
-    true
-}
-fn gate_recovery_active(ctx: &StageCtx<'_>) -> bool {
-    ctx.recovery_active
-}
-fn gate_simplification_requested(ctx: &StageCtx<'_>) -> bool {
-    ctx.simplification_requested
-}
-fn gate_dreaming_accepted(ctx: &StageCtx<'_>) -> bool {
-    ctx.dreaming_accepted
-}
-
-/// Every [`StageId`] variant. Hand-rolled list because [`StageId`] is a
-/// plain enum without a `strum`-style iterator; the
-/// `default_registry_covers_every_stage_id` test in
-/// `src/lifecycle/stages/registry.rs` guards against drift.
-const ALL_STAGE_IDS: &[StageId] = &[
-    StageId::Brainstorm,
-    StageId::SpecReview,
-    StageId::Planning,
-    StageId::PlanReview,
-    StageId::Sharding,
-    StageId::Coder,
-    StageId::Reviewer,
-    StageId::Recovery,
-    StageId::RecoveryPlanReview,
-    StageId::RecoverySharding,
-    StageId::FinalValidation,
-    StageId::Simplification,
-    StageId::Dreaming,
-    StageId::RepoStateUpdate,
-];
 
 #[cfg(test)]
 #[path = "ops_tests.rs"]

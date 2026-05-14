@@ -282,6 +282,24 @@ impl StageRegistry {
         });
         hits.into_iter().map(|(id, _)| id).collect()
     }
+
+    /// Stages whose `phase_when_running` equals `phase`, sorted by
+    /// [`StageId`] discriminant for deterministic cleanup planning.
+    pub fn stages_at_phase(&self, phase: Phase) -> Vec<StageId> {
+        let mut hits: Vec<StageId> = self
+            .stages
+            .iter()
+            .filter_map(|(id, stage)| {
+                matches!(
+                    stage.phase_when_running().partial_cmp(&phase),
+                    Some(std::cmp::Ordering::Equal)
+                )
+                .then_some(*id)
+            })
+            .collect();
+        hits.sort_by_key(|id| *id as u32);
+        hits
+    }
 }
 
 type GateFn = fn(&StageCtx<'_>) -> bool;

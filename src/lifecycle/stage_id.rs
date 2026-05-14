@@ -2,12 +2,12 @@
 //!
 //! Distinct from [`crate::app_runtime::view::StageId`] (which models only the
 //! operator-visible stages used by modals and the keymap) because the lifecycle
-//! lifecycle has 14 distinct pipeline stages — Coder/Reviewer/Recovery* and
+//! has 14 distinct pipeline stages — Coder/Reviewer/Recovery* and
 //! Simplification/RepoStateUpdate all need their own [`Stage`](super::Stage)
 //! implementations and registry keys even though the UI groups them under
 //! coarser modal categories.
 //!
-//! Shared by [`super::spec`] and the persisted-run translator so lifecycle code
+//! Shared by [`super::spec`] and run-record lookup so lifecycle code
 //! can stay decoupled from the UI's grouped `view::StageId`.
 use serde::{Deserialize, Serialize};
 
@@ -53,8 +53,8 @@ impl StageId {
     }
 }
 
-/// Best-effort lifecycle [`StageId`] for a persisted run record's `stage` string
-/// and `window_name` discriminators.
+/// Lifecycle [`StageId`] for a persisted run record's `stage` string and
+/// `window_name` discriminators.
 ///
 /// Synthesizes a [`StageId`] from the existing `RunRecord` fields.
 /// Recovery sub-stages share the `stage == "recovery"` string, so we key off

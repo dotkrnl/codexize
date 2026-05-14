@@ -339,17 +339,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_registry_returns_none_and_empty() {
-        let reg = StageRegistry::new();
-        assert!(reg.get(StageId::Brainstorm).is_none());
-        assert_eq!(
-            reg.next_stage_for_stage(Stage::Idea, &empty_ctx(Stage::Idea)),
-            None
-        );
-        assert!(reg.stages_after(Stage::Idea).is_empty());
-    }
-
-    #[test]
     fn empty_registry_returns_none_for_every_stage() {
         let reg = StageRegistry::new();
         for stage in [

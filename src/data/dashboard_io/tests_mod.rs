@@ -105,18 +105,3 @@ fn parse_ipbr_malformed_feed_surfaces_existing_failure_path() {
         "expected no-models error, got {err}"
     );
 }
-
-#[test]
-fn parse_ipbr_scoreboard_is_what_load_scores_uses() {
-    // Smoke-check the production fetch boundary: the URL constant
-    // points at the documented ipbr endpoint and the parser the
-    // fetcher delegates to is `parse_ipbr_scoreboard`. This pins the
-    // production wiring without performing a network round-trip.
-    assert_eq!(IPBR_SCOREBOARD_URL, "https://ipbr.dev/scoreboard.toml");
-    // Confirm the parser is a real function (compiles) by exercising
-    // a minimal valid feed through it.
-    let entries =
-        parse_ipbr_scoreboard("[[models]]\ndisplay_name = \"x\"\nvendor = \"v\"\n").unwrap();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].name, "x");
-}

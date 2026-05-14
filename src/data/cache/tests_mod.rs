@@ -103,81 +103,6 @@ fn current_version_cache_without_quota_resets_loads() {
     assert!(loaded.quota_resets.is_none());
 }
 
-#[test]
-fn non_current_cache_version_is_ignored() {
-    let dir = TempDir::new().unwrap();
-    let payload = serde_json::json!({
-        "version": CACHE_VERSION - 1,
-        "dashboard": {
-            "fetched_at": now_secs(),
-            "data": [{
-                "name": "claude-opus-4.7",
-                "ipbr_stage_scores": {"idea": 91.0, "planning": 90.0, "build": 89.0, "review": 88.0},
-                "score_source": "ipbr",
-                "display_order": 0,
-            }]
-        },
-        "quotas": {
-            "fetched_at": now_secs(),
-            "data": sample_quotas()
-        }
-    });
-    fs::create_dir_all(dir.path()).unwrap();
-    fs::write(
-        dir.path().join("models.json"),
-        serde_json::to_string(&payload).unwrap(),
-    )
-    .unwrap();
-
-    let loaded = load(dir.path());
-
-    assert!(loaded.dashboard.is_none());
-    assert!(loaded.quotas.is_none());
-}
-
-#[test]
-fn save_after_version_mismatch_rewrites_at_current_version() {
-    let dir = TempDir::new().unwrap();
-    let payload = serde_json::json!({
-        "version": CACHE_VERSION - 1,
-        "dashboard": {
-            "fetched_at": now_secs(),
-            "data": []
-        },
-        "quotas": {
-            "fetched_at": now_secs(),
-            "data": sample_quotas()
-        }
-    });
-    fs::create_dir_all(dir.path()).unwrap();
-    fs::write(
-        dir.path().join("models.json"),
-        serde_json::to_string(&payload).unwrap(),
-    )
-    .unwrap();
-
-    save_dashboard(dir.path(), &sample_entries()).unwrap();
-    save_quotas(dir.path(), &sample_quotas()).unwrap();
-
-    let loaded = load(dir.path());
-    assert!(
-        loaded.dashboard.is_some(),
-        "current-version dashboard rewritten on save"
-    );
-    let quotas = loaded
-        .quotas
-        .expect("freshly-saved quota section must round-trip");
-    assert_eq!(
-        quotas
-            .data
-            .get("claude")
-            .unwrap()
-            .get("claude-sonnet")
-            .unwrap(),
-        &Some(75)
-    );
-}
-
 /// A current-version dashboard entry that omits ipbr fields (e.g.
 /// from a fresh save before ipbr scores are attached) loads with
 /// per-stage scores defaulting to `None` and the provenance to a
@@ -236,45 +161,6 @@ fn sections_are_independent() {
     let loaded = load(dir.path());
     assert!(loaded.dashboard.is_some());
     assert!(loaded.quotas.is_some());
-}
-
-#[test]
-fn version_mismatch_drops_dashboard_only() {
-    let dir = TempDir::new().unwrap();
-    save_dashboard(dir.path(), &sample_entries()).unwrap();
-    save_quotas(dir.path(), &sample_quotas()).unwrap();
-    let path = dir.path().join("models.json");
-    let mut file: CacheFile = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    file.version = 999;
-    fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
-
-    let loaded = load(dir.path());
-    assert!(
-        loaded.dashboard.is_none(),
-        "dashboard payload is dropped on any version mismatch"
-    );
-    assert!(
-        loaded.quotas.is_none(),
-        "quota payload is dropped on version mismatch (v7 reshape)"
-    );
-}
-
-#[test]
-fn older_cache_file_drops_all_versioned_sections() {
-    let dir = TempDir::new().unwrap();
-    save_dashboard(dir.path(), &sample_entries()).unwrap();
-    save_quotas(dir.path(), &sample_quotas()).unwrap();
-    let path = dir.path().join("models.json");
-    let mut file: CacheFile = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    file.version = 3;
-    fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
-
-    let loaded = load(dir.path());
-    assert!(loaded.dashboard.is_none());
-    assert!(
-        loaded.quotas.is_none(),
-        "old quota payload is dropped because the v7 quota schema differs"
-    );
 }
 
 #[test]

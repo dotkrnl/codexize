@@ -26,22 +26,6 @@ pub struct CacheFile {
     #[serde(default)]
     pub quota_resets: Option<Section<ResetPayload>>,
 }
-/// Lenient parse used during load. The dashboard payload is held as raw
-/// JSON so we can decide whether to deserialize it based on the file's
-/// `version`, while quota / quota-reset sections — whose schema is stable
-/// across this version bump — deserialize directly and survive a
-/// dashboard-only schema change.
-#[derive(Deserialize, Debug)]
-struct VersionedFile {
-    #[serde(default)]
-    version: u32,
-    #[serde(default)]
-    dashboard: Option<serde_json::Value>,
-    #[serde(default)]
-    quotas: Option<serde_json::Value>,
-    #[serde(default)]
-    quota_resets: Option<Section<ResetPayload>>,
-}
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Section<T> {
     pub fetched_at: u64,
@@ -126,21 +110,19 @@ pub fn load(dir: &Path) -> LoadedCache {
         quotas: None,
         quota_resets: None,
     };
-    let Some(parsed) = read_versioned_file(dir) else {
+    let Some(parsed) = read_cache_file(dir) else {
         return empty;
     };
-    // Dashboard and quota payloads are only trusted when the cache file is the
-    // current schema version. Quota-reset shape is stable.
-    let dashboard_section =
-        parse_if_current::<Section<Vec<DashboardEntry>>>(&parsed, parsed.dashboard.clone());
-    let quota_section = parse_if_current::<Section<QuotaPayload>>(&parsed, parsed.quotas.clone());
+    if parsed.version != CACHE_VERSION {
+        return empty;
+    }
     let now = now_secs();
     LoadedCache {
-        dashboard: dashboard_section.map(|s| LoadedSection {
+        dashboard: parsed.dashboard.map(|s| LoadedSection {
             expired: now.saturating_sub(s.fetched_at) >= DASHBOARD_TTL.as_secs(),
             data: s.data,
         }),
-        quotas: quota_section.map(|s| LoadedSection {
+        quotas: parsed.quotas.map(|s| LoadedSection {
             expired: now.saturating_sub(s.fetched_at) >= QUOTA_TTL.as_secs(),
             data: s.data,
         }),
@@ -202,34 +184,22 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
         quotas: None,
         quota_resets: None,
     };
-    let Some(parsed) = read_versioned_file(dir) else {
+    let Some(parsed) = read_cache_file(dir) else {
         return empty;
     };
-    // Same per-section policy as `load`: only current-version dashboard and
-    // quota payloads are trusted. Quota-reset shape is stable.
-    let dashboard =
-        parse_if_current::<Section<Vec<DashboardEntry>>>(&parsed, parsed.dashboard.clone());
-    let quotas = parse_if_current::<Section<QuotaPayload>>(&parsed, parsed.quotas.clone());
+    if parsed.version != CACHE_VERSION {
+        return empty;
+    }
     CacheFile {
         version: CACHE_VERSION,
-        dashboard,
-        quotas,
+        dashboard: parsed.dashboard,
+        quotas: parsed.quotas,
         quota_resets: parsed.quota_resets,
     }
 }
-fn read_versioned_file(dir: &Path) -> Option<VersionedFile> {
+fn read_cache_file(dir: &Path) -> Option<CacheFile> {
     let text = fs::read_to_string(dir.join("models.json")).ok()?;
     serde_json::from_str(&text).ok()
-}
-
-fn parse_if_current<T: serde::de::DeserializeOwned>(
-    parsed: &VersionedFile,
-    raw: Option<serde_json::Value>,
-) -> Option<T> {
-    if parsed.version != CACHE_VERSION {
-        return None;
-    }
-    raw.and_then(|v| serde_json::from_value(v).ok())
 }
 
 fn write_cache_file(dir: &Path, file: &CacheFile) -> Result<()> {

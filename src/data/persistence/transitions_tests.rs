@@ -127,35 +127,6 @@ fn brainstorm_run_captures_brainstorm_stage_path() {
     );
 }
 
-#[test]
-fn test_try_parse_toml_artifact_missing_file() {
-    let result = try_parse_toml_artifact::<toml::Value>(Path::new("/nonexistent/path.toml"));
-    assert!(result.is_err());
-    let msg = format!("{:#}", result.unwrap_err());
-    assert!(msg.contains("missing or unreadable"));
-}
-
-#[test]
-fn test_try_parse_toml_artifact_malformed() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = dir.path().join("bad.toml");
-    std::fs::write(&path, "this is not { valid toml").unwrap();
-    let result = try_parse_toml_artifact::<toml::Value>(&path);
-    assert!(result.is_err());
-    let msg = format!("{:#}", result.unwrap_err());
-    assert!(msg.contains("unparseable TOML"));
-}
-
-#[test]
-fn test_try_parse_toml_artifact_valid() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = dir.path().join("ok.toml");
-    std::fs::write(&path, "status = \"approved\"\nsummary = \"good\"").unwrap();
-    let val: toml::Value = try_parse_toml_artifact(&path).unwrap();
-    assert_eq!(val.get("status").and_then(|v| v.as_str()), Some("approved"));
-    assert_eq!(val.get("summary").and_then(|v| v.as_str()), Some("good"));
-}
-
 /// Run `f` with a private `CODEXIZE_ROOT` so `execute_transition`'s
 /// implicit `SessionState::save` writes into a temp directory that gets
 /// cleaned up.

@@ -299,14 +299,6 @@ pub fn finish_run_record(
 pub fn resume_running_runs(state: &mut SessionState) -> Result<Option<u64>> {
     state.resume_running_runs()
 }
-/// Try to read and parse a TOML artifact at `path`. Returns an error if the
-/// file is missing or malformed — the orchestrator treats either case as an
-/// incomplete agent turn and retries.
-pub fn try_parse_toml_artifact<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("artifact missing or unreadable: {}", path.display()))?;
-    toml::from_str(&text).with_context(|| format!("unparseable TOML artifact: {}", path.display()))
-}
 #[cfg(test)]
 #[path = "transitions_tests.rs"]
 mod tests;

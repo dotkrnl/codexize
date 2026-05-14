@@ -245,7 +245,7 @@ fn mutation_to_anyhow(err: MutationError) -> anyhow::Error {
 
 #[cfg(test)]
 mod tests {
-    //! These smoke tests run against `effective_path()` via the
+    //! These snapshot tests run against `effective_path()` via the
     //! `CODEXIZE_CONFIG` env override; they're serialized so the env
     //! mutation doesn't bleed across the suite.
 

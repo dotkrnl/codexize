@@ -157,7 +157,7 @@ fn is_timestamp_key(key: Option<&str>) -> bool {
 }
 fn is_env_key(key: Option<&str>) -> bool {
     // Mirrors env-derived RunRecord fields so real host values do not leak into
-    // normalized smoke fixtures when the persisted schema grows.
+    // normalized snapshot fixtures when the persisted schema grows.
     matches!(key, Some("hostname" | "mount_device_id"))
 }
 fn normalize_text(mut text: String, replacements: &ReplacementSet) -> String {

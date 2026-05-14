@@ -8,11 +8,13 @@
 pub mod brainstorm;
 pub mod plan_review;
 pub mod planning;
+pub mod sharding;
 pub mod spec_review;
 
 pub use brainstorm::BrainstormStage;
 pub use plan_review::PlanReviewStage;
 pub use planning::PlanningStage;
+pub use sharding::ShardingStage;
 pub use spec_review::SpecReviewStage;
 
 use crate::lifecycle::fsm::Outcome;

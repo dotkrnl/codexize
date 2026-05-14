@@ -7,10 +7,8 @@
 //! implementations and registry keys even though the UI groups them under
 //! coarser modal categories.
 //!
-//! Introduced in Step 2 alongside the concrete `Stage` impls; the V2
-//! persistence layer ([`super::persist`]) and spec ([`super::spec`]) keep
-//! using this type so the on-disk shape never needs to know about the UI's
-//! `view::StageId`.
+//! Shared by [`super::spec`] and the legacy-run translator so lifecycle code
+//! can stay decoupled from the UI's grouped `view::StageId`.
 use serde::{Deserialize, Serialize};
 
 /// Identifier for every pipeline stage with its own [`super::Stage`] impl.
@@ -33,9 +31,8 @@ pub enum StageId {
 }
 
 impl StageId {
-    /// Stable string id used in V2 persistence and prompt paths. Matches the
-    /// existing `RunRecord.stage` literals in the current code so the V2
-    /// cutover can read legacy logs unchanged.
+    /// Stable string id used for prompt paths and legacy `RunRecord.stage`
+    /// matching.
     pub fn as_str(self) -> &'static str {
         match self {
             StageId::Brainstorm => "brainstorm",

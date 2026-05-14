@@ -37,8 +37,8 @@ const OFFICIAL_QUOTA_FLOOR: u8 = 21;
 /// `ProviderEntry.model == DashboardEntry.name`; provider `launch_name`
 /// is the CLI argument and is not used as a row key.
 ///
-/// Returns `(models, warnings)` where `warnings` is currently always
-/// empty; the slot is preserved to minimize churn at call sites.
+/// Returns `(models, warnings)`; warnings report configured providers whose
+/// canonical model names are absent from the IPBR/dashboard snapshot.
 pub fn assemble_universe(
     dashboard_entries: Vec<DashboardEntry>,
     quota_payload: QuotaPayload,

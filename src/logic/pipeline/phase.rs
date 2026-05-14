@@ -40,7 +40,7 @@ pub enum Phase {
     #[strum(to_string = "Sharding")]
     ShardingRunning,
     #[strum(to_string = "Skip Confirmation")]
-    SkipToImplPending, // New phase
+    SkipToImplPending,
     /// Coder agent is working on the current task in round N.
     #[strum(to_string = "Implementation Round {0}")]
     ImplementationRound(u32),

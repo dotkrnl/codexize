@@ -4,10 +4,9 @@
 //! what the next agent run should be". [`ActiveRun`] is what the launcher
 //! hands back once the run is confirmed running.
 //!
-//! Only the identifying fields are present in Step 1; the launch-side fields
-//! (model, effort, modes, prompt_path, …) land in Step 2 as the existing
-//! `launch_*` functions get migrated onto the [`Stage`](super::stage::Stage)
-//! trait.
+//! The spec stays intentionally small: launch-side details such as model,
+//! effort, modes, and prompt path are still resolved by the existing launcher
+//! bridge.
 use super::stage_id::StageId;
 use serde::{Deserialize, Serialize};
 

@@ -19,9 +19,8 @@ use crate::lifecycle::stages::{
 use std::path::{Path, PathBuf};
 
 /// Build a registry mirroring [`crate::lifecycle::stages::default_registry`]
-/// without depending on it directly — Step 3 owns the public helper, and
-/// this private builder keeps ops_tests stable if Step 3's signature
-/// shifts before cutover.
+/// without depending on it directly. This keeps ops tests focused on
+/// operator-command behavior rather than default-registry construction.
 fn full_registry() -> StageRegistry {
     let mut r = StageRegistry::new();
     r.register(Box::new(BrainstormStage));
@@ -543,9 +542,9 @@ fn latest_replaces_in_stop_precedence() {
 
 #[test]
 fn resolution_to_action_lifts_rewind_carry_back() {
-    // The confirm_dead handler in Step 5's App will call resolution_to_action
-    // to turn a StopResolution into the same Immediate plan the idle path
-    // produced. This test pins the mapping.
+    // The app's confirm-dead handler uses resolution_to_action to turn a
+    // StopResolution into the same Immediate plan the idle path produced.
+    // This test pins the mapping.
     let cleanup = CleanupPlan {
         delete: vec![PathBuf::from("/tmp/x")],
         restore_backups: vec![(PathBuf::from("/tmp/b"), PathBuf::from("/tmp/d"))],

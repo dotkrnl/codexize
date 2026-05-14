@@ -3,8 +3,7 @@
 //! Replaces the `*Paused` / `*Pending` variants on the old `Phase` enum. Each
 //! field is `Some(_)` when the lifecycle is waiting on the operator for that
 //! decision. The marker `*Data` structs are intentionally empty named-field
-//! structs (for TOML serialization); they may carry originating-phase context
-//! in a future migration step.
+//! structs (for TOML serialization).
 use super::phase::Phase;
 use serde::{Deserialize, Serialize};
 
@@ -59,8 +58,6 @@ impl PendingDecisions {
             && self.dreaming.is_none()
     }
 
-    /// True when any pending decision applies to `phase`.
-    ///
     /// True when any pending decision slot is populated.
     ///
     /// NOTE(step-5): currently permissive — every set slot blocks regardless

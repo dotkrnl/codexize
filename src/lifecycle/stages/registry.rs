@@ -1,9 +1,9 @@
 //! Default [`StageRegistry`] wiring.
 //!
-//! Step 3 introduces the function that hands the scheduler a registry
-//! populated with the 14 concrete [`Stage`](crate::lifecycle::stage::Stage)
-//! impls. The registry is constructed fresh on every call so callers that
-//! want to override a stage (tests, future plug-ins) can simply
+//! Builds the scheduler's registry with the 14 concrete
+//! [`Stage`](crate::lifecycle::stage::Stage) impls. The registry is
+//! constructed fresh on every call so callers that want to override a stage
+//! (tests, future plug-ins) can simply
 //! [`register`](crate::lifecycle::stage::StageRegistry::register) over the
 //! top.
 use crate::lifecycle::stage::StageRegistry;

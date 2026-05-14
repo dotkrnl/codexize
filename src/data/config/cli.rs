@@ -116,7 +116,7 @@ pub fn run_unset(key: &str, out: &mut dyn Write) -> Result<()> {
 /// every override under that section, rewriting the file in normalized
 /// sparse form. Without: delete the file entirely (loader's missing-file
 /// path then yields baked defaults on next launch). The bare-reset case
-/// requires `--yes` on a non-TTY stderr per spec §4.
+/// requires `--yes`; interactive confirmation is not implemented.
 pub fn run_reset(
     section: Option<&str>,
     yes: bool,

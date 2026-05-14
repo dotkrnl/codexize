@@ -1,8 +1,8 @@
 //! Runtime FSM for the agent lifecycle.
 //!
 //! [`Fsm`] enforces legal transitions between [`AgentState`] variants. It is
-//! intentionally storage-free — nothing here touches disk. Persistence lives
-//! in [`super::persist`].
+//! intentionally storage-free — nothing here touches disk. The app mirrors
+//! FSM state into the existing session persistence layer.
 use super::phase::Phase;
 use super::spec::{ActiveRun, StageSpec};
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ use std::path::PathBuf;
 /// `delete` entries are removed (recursively for directories). `restore_backups`
 /// entries are `(backup, dest)` pairs — when the backup exists, it is moved to
 /// `dest`. Every path here is absolute; [`super::ops::LifecycleOps`] is the
-/// builder, and the cutover handler (Step 5) is the applier.
+/// builder, and the app lifecycle bridge is the applier.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CleanupPlan {
     pub delete: Vec<PathBuf>,

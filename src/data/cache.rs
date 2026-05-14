@@ -189,7 +189,7 @@ pub fn save_dashboard_unlocked(dir: &Path, entries: &[DashboardEntry]) -> Result
         fetched_at: now_secs(),
         data: entries.to_vec(),
     });
-    atomic_write(dir, &file)
+    write_cache_file(dir, &file)
 }
 pub fn save_quotas_unlocked(dir: &Path, payload: &QuotaPayload) -> Result<()> {
     let mut file = load_raw_or_default(dir);
@@ -197,7 +197,7 @@ pub fn save_quotas_unlocked(dir: &Path, payload: &QuotaPayload) -> Result<()> {
         fetched_at: now_secs(),
         data: payload.clone(),
     });
-    atomic_write(dir, &file)
+    write_cache_file(dir, &file)
 }
 pub fn save_quota_resets_unlocked(dir: &Path, payload: &ResetPayload) -> Result<()> {
     let mut file = load_raw_or_default(dir);
@@ -205,7 +205,7 @@ pub fn save_quota_resets_unlocked(dir: &Path, payload: &ResetPayload) -> Result<
         fetched_at: now_secs(),
         data: payload.clone(),
     });
-    atomic_write(dir, &file)
+    write_cache_file(dir, &file)
 }
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -248,7 +248,7 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
         quota_resets: parsed.quota_resets,
     }
 }
-fn atomic_write(dir: &Path, file: &CacheFile) -> Result<()> {
+fn write_cache_file(dir: &Path, file: &CacheFile) -> Result<()> {
     fs::create_dir_all(dir).context("failed to create cache directory")?;
     let tmp_path = dir.join(".models.json.tmp");
     let final_path = dir.join("models.json");

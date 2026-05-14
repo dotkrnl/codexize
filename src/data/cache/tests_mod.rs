@@ -308,7 +308,7 @@ fn ttl_expiry_quotas() {
 }
 
 #[test]
-fn atomic_write_produces_valid_json() {
+fn write_cache_file_produces_valid_json() {
     let dir = TempDir::new().unwrap();
     save_dashboard(dir.path(), &sample_entries()).unwrap();
     let text = fs::read_to_string(dir.path().join("models.json")).unwrap();

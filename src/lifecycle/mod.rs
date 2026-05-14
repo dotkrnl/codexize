@@ -11,6 +11,7 @@
 //! - [`fsm`] — runtime FSM ([`AgentState`], [`Fsm`], outcomes).
 //! - [`pending`] — [`PendingDecisions`] replacing the old `*Paused`/`*Pending`
 //!   `Phase` variants.
+//! - [`stage`] — the [`Stage`] trait and [`StageRegistry`].
 //! - [`persist`] — V2 persistence shapes (added alongside the existing
 //!   `SessionState`/`RunRecord` types, not replacing them yet).
 pub mod fsm;
@@ -18,6 +19,7 @@ pub mod pending;
 pub mod persist;
 pub mod phase;
 pub mod spec;
+pub mod stage;
 
 pub use fsm::{
     AfterStop, AgentState, CancelledBy, FinalizedRun, Fsm, FsmError, Outcome, StopResolution,
@@ -29,3 +31,4 @@ pub use pending::{
 pub use persist::{RunRecordV2, SessionFileV2};
 pub use phase::Phase;
 pub use spec::{ActiveRun, StageSpec};
+pub use stage::{Stage, StageCtx, StageRegistry, SuccessOutcome, WorkUnit};

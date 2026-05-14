@@ -61,10 +61,10 @@ impl PendingDecisions {
 
     /// True when any pending decision applies to `phase`.
     ///
-    /// The phase-applicability map is intentionally permissive in Step 1: a
-    /// decision is "applicable" if it is set. Step 5 narrows this once the
+    /// The phase-applicability map is intentionally permissive: a
+    /// decision is "applicable" if it is set. This will narrow once the
     /// per-decision data carries the originating phase context.
-    // TODO: Step 5 — once the *Data variants carry their originating phase,
+    // NOTE(step-5): once the *Data variants carry their originating phase,
     // narrow `applicable_at` to a real per-decision phase map.
     pub fn blocks(&self, phase: Phase) -> bool {
         let _ = phase;

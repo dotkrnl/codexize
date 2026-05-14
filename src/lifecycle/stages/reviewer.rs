@@ -85,7 +85,7 @@ impl Stage for ReviewerStage {
         // FSM, not here — today's finalize_reviewer_success branches on
         // approval verdicts that aren't visible from this StageCtx
         // projection.
-        // TODO(step-5): verify mapping when wiring scheduler — the FSM may
+        // NOTE(step-5): verify mapping when wiring scheduler — the FSM may
         // need to consult PendingDecisions after this returns to decide
         // whether to launch Implementation(r+1), FinalValidation, or stay.
         Phase::Review(current_round(ctx))

@@ -219,16 +219,20 @@ impl App {
             // single debounced reload.
             app.setup_cache_watcher();
         }
-        if let Ok(run_id) = session_state::resume_running_runs(&mut app.state) {
-            app.current_run_id = run_id;
-            app.run_launched = run_id.is_some();
-            if let Some(rid) = run_id {
-                if let Some(run) = app.state.agent_runs.iter().find(|r| r.id == rid).cloned() {
-                    app.live_summary_path = Some(app.live_summary_path_for(&run));
-                    app.prime_yolo_exit_tracking(&run);
-                }
-                app.read_live_summary_pipeline();
-            }
+        // Backfill orphaned Running runs. The new lifecycle FSM does not
+        // persist `AgentState`; the App is always reconstructed as `Idle` on
+        // resume. Any `RunRecord` still marked `Running` is therefore the
+        // residue of a prior TUI invocation that exited mid-run — mark it
+        // Failed with an "aborted" error so the audit trail records what we
+        // did. The pre-existing `resume_running_runs` hostname/mount-mismatch
+        // path remains below as a defense-in-depth no-op on top of this.
+        backfill_orphaned_running_runs(&mut app.state);
+        if let Ok(_run_id) = session_state::resume_running_runs(&mut app.state) {
+            // FSM is Idle on resume; force the legacy mirrors to match.
+            // Whatever `resume_running_runs` reports is moot — the backfill
+            // above has already finalized every Running record.
+            app.current_run_id = None;
+            app.run_launched = false;
             app.messages = SessionState::load_messages(&app.state.session_id).unwrap_or_default();
             app.rebuild_tree_view(None);
             app.maybe_refocus_to_progress();
@@ -320,18 +324,66 @@ impl App {
                 }
             }
         }
-        #[cfg(test)]
-        for run in app
-            .state
-            .agent_runs
-            .iter()
-            .filter(|run| run.status == crate::state::RunStatus::Running)
-        {
-            crate::runner::register_test_run_id(&run.window_name, run.id);
-        }
+        // No `register_test_run_id` loop here: the backfill above demotes
+        // every Running record to Failed, so by this point there are no
+        // Running runs to register. Tests that want to simulate an alive
+        // window construct an `App` via `tests_support::mk_app` and seed
+        // the run state directly.
         let _ = app.setup_watcher();
         app
     }
+}
+
+/// Backfill any `RunRecord` left as `Running` from a prior TUI invocation
+/// that exited mid-run. The new FSM does not persist `AgentState`, so the
+/// in-memory FSM always starts `Idle`. Any persisted `Running` record is
+/// therefore orphaned by construction and must be finalized so the audit
+/// trail records what we did. Uses `session.toml`'s mtime as a best-effort
+/// "approximate death time" proxy, falling back to `now()`.
+fn backfill_orphaned_running_runs(state: &mut SessionState) {
+    let orphans: Vec<u64> = state
+        .agent_runs
+        .iter()
+        .filter(|run| {
+            run.status == crate::state::RunStatus::Running && run.ended_at.is_none()
+        })
+        .map(|run| run.id)
+        .collect();
+    if orphans.is_empty() {
+        return;
+    }
+    let approx_death = approximate_death_time(&state.session_id);
+    let mut events_to_log = Vec::new();
+    for id in &orphans {
+        if let Some(run) = state.agent_runs.iter_mut().find(|r| r.id == *id) {
+            run.status = crate::state::RunStatus::Failed;
+            run.ended_at = Some(approx_death);
+            run.error = Some("aborted: TUI exited while running".to_string());
+            events_to_log.push(format!(
+                "run {} backfilled as Failed on resume: aborted (TUI exited while running)",
+                run.id
+            ));
+        }
+    }
+    for msg in events_to_log {
+        let _ = state.log_event(msg);
+    }
+    if let Err(err) = state.save() {
+        tracing::warn!("failed to persist backfilled run records: {err}");
+    }
+}
+
+/// Best-effort "approximate death time" for orphaned runs: the mtime of
+/// the session's `session.toml`, falling back to `now()` if the file is
+/// missing or its mtime cannot be read.
+fn approximate_death_time(session_id: &str) -> chrono::DateTime<chrono::Utc> {
+    let path = crate::state::session_dir(session_id).join("session.toml");
+    if let Ok(meta) = std::fs::metadata(&path)
+        && let Ok(mtime) = meta.modified()
+    {
+        return chrono::DateTime::<chrono::Utc>::from(mtime);
+    }
+    chrono::Utc::now()
 }
 #[cfg(test)]
 fn app_runner_supervisor(

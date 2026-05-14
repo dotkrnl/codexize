@@ -1149,18 +1149,19 @@ estimated_tokens = 100
             assert_eq!(app.state.session_id, "20260511-091000-000000001");
             assert_eq!(shell.focused_session_id(), "20260511-091000-000000001");
 
-            // Shell-level run tracking is independent of focus; the prior
-            // running session must remain marked running.
-            assert_eq!(
-                shell.running_session_id(),
-                Some("20260511-090000-000000001")
-            );
+            // Step 6: persisted Running runs are backfilled to Failed on
+            // resume, so no session is "running" after a TUI restart until
+            // a launch fires in-process. The load-bearing assertion of this
+            // test is the focus swap above; the running-marker assertions
+            // are kept here as a regression guard against the new model
+            // ever resurrecting orphaned runs as live.
+            assert_eq!(shell.running_session_id(), None);
             let rows = shell.sidebar_view().rows;
-            let running_row = rows
+            let prior_row = rows
                 .iter()
                 .find(|r| r.session_id == "20260511-090000-000000001")
-                .expect("running session in sidebar");
-            assert!(running_row.running);
+                .expect("prior session in sidebar");
+            assert!(!prior_row.running);
         });
     }
 
@@ -1261,7 +1262,11 @@ estimated_tokens = 100
             let supervisor = shell
                 .workspace("20260511-090000-000000001")
                 .expect("background supervisor");
-            assert_eq!(supervisor.current_run_id(), Some(7));
+            // Step 6: persisted Running runs are backfilled to Failed on
+            // resume, so the supervisor reports no live run for the prior
+            // run id. The App-reuse assertion above is the load-bearing
+            // invariant for this test.
+            assert_eq!(supervisor.current_run_id(), None);
         });
     }
 
@@ -1514,6 +1519,10 @@ estimated_tokens = 100
 
             let report = shell.run_scheduler_tick().expect("tick");
 
+            // Step 6: persisted Running runs are backfilled to Failed on
+            // resume, so the prior orphan no longer occupies the lane —
+            // the scheduler sees the session in `ShardingRunning` with no
+            // live run and reports it as the lane-occupant for re-launch.
             assert!(matches!(
                 report.implementation,
                 ShellImplementationAction::LaneOccupied {
@@ -1523,8 +1532,20 @@ estimated_tokens = 100
             ));
             let reloaded =
                 SessionState::load("20260511-090000-000000001").expect("load sharding session");
-            assert_eq!(reloaded.current_phase, Phase::ImplementationRound(1));
-            assert_eq!(reloaded.agent_runs[0].status, RunStatus::Done);
+            // The phase stays at `ShardingRunning` (no auto-advance from a
+            // backfilled finish stamp), and run 7 carries the backfill's
+            // Failed status with the "aborted" error.
+            assert_eq!(reloaded.current_phase, Phase::ShardingRunning);
+            let run_7 = reloaded
+                .agent_runs
+                .iter()
+                .find(|r| r.id == 7)
+                .expect("run 7 must survive");
+            assert_eq!(run_7.status, RunStatus::Failed);
+            assert_eq!(
+                run_7.error.as_deref(),
+                Some("aborted: TUI exited while running")
+            );
         });
     }
 
@@ -1643,11 +1664,12 @@ estimated_tokens = 100
             shell
                 .open_session("20260511-090000-000000001")
                 .expect("open");
-            // Derived lookup should find session A as running even without any event application
-            assert_eq!(
-                shell.running_session_id(),
-                Some("20260511-090000-000000001")
-            );
+            // Step 6: any persisted Running run is treated as orphaned on
+            // resume and backfilled to Failed, so the derived `running`
+            // lookup finds no live session. The point of this test is that
+            // the lookup is *derived* (no mirrored field) — driving through
+            // a supervisor's `current_run_id()` is the load-bearing path.
+            assert_eq!(shell.running_session_id(), None);
         });
     }
 }

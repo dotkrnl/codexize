@@ -683,15 +683,18 @@ fn scheduler_tick_does_not_duplicate_background_planning_run_when_models_loaded(
             1,
             "tick 2: must not duplicate run"
         );
-        // The workspace's preserved current_run_id must continue to point at
-        // the existing run, not be reset to None by the rebuild.
+        // Step 6: persisted Running runs are backfilled to Failed on resume
+        // and the in-memory FSM/current_run_id always starts None. The
+        // no-duplicate-run invariant above is the load-bearing assertion;
+        // the workspace's `current_run_id` is intentionally None until a
+        // launch fires in-process.
         assert_eq!(
             shell
                 .workspace("20260511-090000-000000001")
                 .expect("ws")
                 .current_run_id(),
-            Some(42),
-            "workspace must preserve current_run_id across ticks"
+            None,
+            "workspace current_run_id stays None across ticks without a launch"
         );
     });
 }

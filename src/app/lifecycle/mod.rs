@@ -1,5 +1,7 @@
 // lifecycle/mod.rs
 mod init;
+#[cfg(test)]
+mod init_tests;
 mod poll;
 mod retry;
 #[cfg(test)]

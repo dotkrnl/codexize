@@ -18,7 +18,9 @@ pub mod selection {
     use crate::logic::selection::types::{CachedModel, SubscriptionKind};
     use crate::logic::selection::{SelectionPhase, selection as pure};
     fn sample_seed() -> u64 {
-        chrono::Utc::now().timestamp_subsec_nanos() as u64
+        let mut buf = [0u8; 8];
+        getrandom::fill(&mut buf).expect("getrandom failed");
+        u64::from_ne_bytes(buf)
     }
     pub fn pick_for_phase(
         models: &[CachedModel],

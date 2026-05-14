@@ -1,6 +1,6 @@
 use crate::acp::{AcpConfig, AcpLaunchPolicy, AcpLaunchRequest, PromptPayload};
 use crate::adapters::AgentRun;
-use crate::runner::transport::{ManagedAcpLaunch, acp_trace_path_from_cause_path};
+use crate::runner::transport::ManagedAcpLaunch;
 use anyhow::{Context, Result, anyhow, bail};
 use std::{fs, path::Path};
 #[allow(clippy::too_many_arguments)]
@@ -30,19 +30,13 @@ pub(super) fn build_managed_acp_launch(
         modes: run.modes,
         policy,
     };
-    let mut resolved = acp_config
+    let resolved = acp_config
         .resolve(&request)
         .map_err(|err| anyhow!("{err}"))?;
     ensure_program_exists(&resolved.spawn.program)?;
     let cause_path = artifacts_dir
         .join("run-finish")
         .join(format!("{run_key}.cause.txt"));
-    resolved.session.metadata.insert(
-        "codexize.acp_trace_path".to_string(),
-        acp_trace_path_from_cause_path(&cause_path)
-            .display()
-            .to_string(),
-    );
     Ok(ManagedAcpLaunch {
         resolved,
         window_name: window_name.to_string(),

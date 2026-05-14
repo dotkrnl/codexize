@@ -12,7 +12,7 @@ use crate::runner::exit::{
 };
 use crate::runner::transport::{
     AcpCancelReason, AcpClock, AcpDiagnostics, AcpInput, AcpTextStream, ManagedAcpLaunch,
-    RealAcpClock, RealAcpDiagnostics, append_acp_text_trace, find_launch_run_id,
+    RealAcpClock, RealAcpDiagnostics,
 };
 use crate::state::MessageKind;
 use anyhow::{Result, anyhow};
@@ -209,25 +209,11 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
                 // race where the vendor's turn finishes between the
                 // interrupt being queued and cancel propagation completing.
                 if interrupting_turn && let Some(text) = pending_input.pop_front() {
-                    // `queued` reports how many interrupt texts remain queued
-                    // *after* the resubmitted text has been popped; 0 means
-                    // this resubmit fully drained the interrupt buffer.
-                    let queued = pending_input.len();
                     let _ = waiting_for_input.send_replace(false);
                     session
                         .submit_prompt(&text)
                         .map_err(|err| anyhow!("{err}"))?;
                     interrupting_turn = false;
-                    diagnostics.record_event(
-                        launch,
-                        serde_json::json!({
-                            "type": "acp_resubmit_on_finished",
-                            "ts": chrono::Utc::now().to_rfc3339(),
-                            "run": find_launch_run_id(launch),
-                            "window": launch.window_name,
-                            "queued": queued,
-                        }),
-                    );
                     clock.park();
                     continue;
                 }
@@ -280,7 +266,6 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
                 };
             }
             Some(AcpRuntimeEvent::Text(text_event)) => {
-                append_acp_text_trace(launch, &text_event);
                 let text = text_event.text;
                 if text_event.thought {
                     thought_text.push_text_boundary(
@@ -362,16 +347,6 @@ impl CancelAckWatchdog {
             self.resend_at = Some(now);
             let msg = "ACP cancel not acknowledged after 60s; resending cancel. If still unresponsive after another 60s the run will be terminated.";
             diagnostics.persist_warning(launch, msg);
-            diagnostics.record_event(
-                launch,
-                serde_json::json!({
-                    "type": "acp_cancel_resent",
-                    "ts": chrono::Utc::now().to_rfc3339(),
-                    "run": find_launch_run_id(launch),
-                    "window": launch.window_name,
-                    "elapsed_ms": elapsed.as_millis(),
-                }),
-            );
             return Ok(());
         }
         if let Some(resend_at) = self.resend_at
@@ -381,16 +356,6 @@ impl CancelAckWatchdog {
             // vendor-failover path takes over.
             let msg = "ACP cancel still not acknowledged after 120s; terminating run, vendor failover will follow.";
             diagnostics.persist_warning(launch, msg);
-            diagnostics.record_event(
-                launch,
-                serde_json::json!({
-                    "type": "acp_cancel_timeout_terminate",
-                    "ts": chrono::Utc::now().to_rfc3339(),
-                    "run": find_launch_run_id(launch),
-                    "window": launch.window_name,
-                    "elapsed_ms": elapsed.as_millis(),
-                }),
-            );
             cancel.signal(AcpCancelReason::Terminate);
             self.clear();
         }

@@ -1,19 +1,16 @@
 //! ACP transport-side helpers: the typed input/cancel channels, the per-run
-//! launch context that crosses the runner boundary, the running text
+//! launch context that crosses the runner boundary, and the running text
 //! accumulator that translates ACP `session/update` events into transcript
-//! writes, and the on-disk ACP trace fan-out. The supervisor in
-//! `runner::supervise` consumes these primitives; nothing here owns process
-//! lifecycle or finish-stamp policy.
-use crate::acp::{AcpResolvedLaunch, AcpTextAccumulator, AcpTextBoundary, AcpTextEvent};
+//! writes. The supervisor in `runner::supervise` consumes these primitives;
+//! nothing here owns process lifecycle or finish-stamp policy.
+use crate::acp::{AcpResolvedLaunch, AcpTextAccumulator, AcpTextBoundary};
 use crate::state::{Message, MessageKind, MessageSender, RunStatus, SessionState};
 #[cfg(test)]
 use std::cell::Cell;
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
 use std::{
-    fs,
-    io::Write,
-    path::{Path, PathBuf},
+    path::PathBuf,
     thread,
     time::{Duration, Instant},
 };
@@ -81,46 +78,6 @@ pub(in crate::data::runner) struct ManagedAcpLaunch {
     pub(in crate::data::runner) stamp_path: PathBuf,
     pub(in crate::data::runner) cause_path: PathBuf,
     pub(in crate::data::runner) required_artifact: Option<PathBuf>,
-}
-/// Resolve the ACP trace path that mirrors a per-run cause file. Trace files
-/// share the same stem as the cause file so postmortems land in one
-/// directory.
-pub(in crate::data::runner) fn acp_trace_path_from_cause_path(cause_path: &Path) -> PathBuf {
-    let Some(file_name) = cause_path.file_name().and_then(|name| name.to_str()) else {
-        return cause_path.with_extension("acp.jsonl");
-    };
-    let trace_name = file_name.strip_suffix(".cause.txt").map_or_else(
-        || format!("{file_name}.acp.jsonl"),
-        |stem| format!("{stem}.acp.jsonl"),
-    );
-    cause_path.with_file_name(trace_name)
-}
-pub(in crate::data::runner) fn acp_text_trace_path(launch: &ManagedAcpLaunch) -> PathBuf {
-    acp_trace_path_from_cause_path(&launch.cause_path)
-}
-pub(in crate::data::runner) fn append_acp_text_trace(
-    launch: &ManagedAcpLaunch,
-    event: &AcpTextEvent,
-) {
-    let path = acp_text_trace_path(launch);
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let record = serde_json::json!({
-        "type": "text_event",
-        "ts": chrono::Utc::now().to_rfc3339(),
-        "stream": if event.thought { "thought" } else { "agent" },
-        "interactive": event.interactive,
-        "boundary": format!("{:?}", event.boundary),
-        "identity": event.identity,
-        "text": event.text,
-    });
-    let Ok(line) = serde_json::to_string(&record) else {
-        return;
-    };
-    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(file, "{line}");
-    }
 }
 fn find_transcript_run(session_id: &str, window_name: &str) -> Option<(u64, String, String)> {
     let state = SessionState::load(session_id).ok()?;
@@ -296,15 +253,6 @@ impl AcpTextStream {
     }
 }
 
-/// Resolve the active run id for a launch through the same session-state
-/// lookup used to persist transcript messages. Returns `None` for headless
-/// fixtures that have no `session_id` and for sessions whose run record has
-/// not been created yet.
-pub(in crate::data::runner) fn find_launch_run_id(launch: &ManagedAcpLaunch) -> Option<u64> {
-    let session_id = launch.session_id.as_deref()?;
-    find_transcript_run(session_id, &launch.window_name).map(|(run_id, _, _)| run_id)
-}
-
 /// Append a `MessageKind::SummaryWarn` dashboard message for the active run
 /// through the existing session-state persistence path. Best-effort — if the
 /// run record is not yet available (e.g. the app thread hasn't saved it) the
@@ -326,32 +274,12 @@ pub(in crate::data::runner) fn persist_system_warning(launch: &ManagedAcpLaunch,
     let _ = SessionState::load(session_id).and_then(|state| state.append_message(&msg));
 }
 
-/// Write a durable JSONL trace record to the per-run ACP trace file so
-/// headless/non-watching runs still leave a forensic audit trail.
-pub(in crate::data::runner) fn append_acp_event_trace(
-    launch: &ManagedAcpLaunch,
-    record: serde_json::Value,
-) {
-    let path = acp_text_trace_path(launch);
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let Ok(line) = serde_json::to_string(&record) else {
-        return;
-    };
-    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(file, "{line}");
-    }
-}
-
 /// Hook surface for cancel-ack diagnostics emitted from the ACP runtime
 /// loop. Production wires [`RealAcpDiagnostics`] which fans out to the
-/// existing message-persistence and JSONL trace paths; tests inject a
-/// recorder so they can assert the runtime actually surfaced warnings and
-/// trace events at the right thresholds.
+/// existing message-persistence path; tests inject a recorder so they can
+/// assert the runtime actually surfaced warnings at the right thresholds.
 pub(in crate::data::runner) trait AcpDiagnostics: Send + Sync {
     fn persist_warning(&self, launch: &ManagedAcpLaunch, text: &str);
-    fn record_event(&self, launch: &ManagedAcpLaunch, event: serde_json::Value);
 }
 
 pub(in crate::data::runner) struct RealAcpDiagnostics;
@@ -360,22 +288,17 @@ impl AcpDiagnostics for RealAcpDiagnostics {
     fn persist_warning(&self, launch: &ManagedAcpLaunch, text: &str) {
         persist_system_warning(launch, text);
     }
-    fn record_event(&self, launch: &ManagedAcpLaunch, event: serde_json::Value) {
-        append_acp_event_trace(launch, event);
-    }
 }
 
 #[cfg(test)]
 #[derive(Default)]
 pub(in crate::data::runner) struct FakeDiagState {
     pub(in crate::data::runner) warnings: Vec<String>,
-    pub(in crate::data::runner) events: Vec<serde_json::Value>,
 }
 
 /// Recording [`AcpDiagnostics`] for runtime tests. Captures every
-/// `persist_warning` and `record_event` call so assertions can verify the
-/// runtime actually fired the cancel-ack `SummaryWarn` messages and JSONL
-/// trace records mandated by the spec.
+/// `persist_warning` call so assertions can verify the runtime actually
+/// fired the cancel-ack `SummaryWarn` messages at the right thresholds.
 #[cfg(test)]
 #[derive(Default, Clone)]
 pub(in crate::data::runner) struct FakeAcpDiagnostics {
@@ -394,16 +317,6 @@ impl FakeAcpDiagnostics {
             .warnings
             .clone()
     }
-    pub(in crate::data::runner) fn events_of_type(&self, kind: &str) -> Vec<serde_json::Value> {
-        self.inner
-            .lock()
-            .expect("FakeAcpDiagnostics mutex poisoned")
-            .events
-            .iter()
-            .filter(|e| e.get("type").and_then(|v| v.as_str()) == Some(kind))
-            .cloned()
-            .collect()
-    }
 }
 
 #[cfg(test)]
@@ -414,12 +327,5 @@ impl AcpDiagnostics for FakeAcpDiagnostics {
             .expect("FakeAcpDiagnostics mutex poisoned")
             .warnings
             .push(text.to_string());
-    }
-    fn record_event(&self, _launch: &ManagedAcpLaunch, event: serde_json::Value) {
-        self.inner
-            .lock()
-            .expect("FakeAcpDiagnostics mutex poisoned")
-            .events
-            .push(event);
     }
 }

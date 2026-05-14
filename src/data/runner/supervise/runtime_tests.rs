@@ -360,14 +360,6 @@ fn non_interactive_finished_resubmits_queued_interrupt_text() {
     );
     assert_eq!(session_handle.cancel_calls(), 1);
     assert!(session_handle.closed());
-    // Durable trace recorded so headless runs leave evidence of the
-    // resubmit branch firing, with run id (null here, no SessionState)
-    // and the post-pop queue depth.
-    let resubmit_events = diagnostics.events_of_type("acp_resubmit_on_finished");
-    assert_eq!(resubmit_events.len(), 1);
-    assert_eq!(resubmit_events[0]["queued"], serde_json::json!(0));
-    assert!(resubmit_events[0]["window"].as_str().is_some());
-    assert!(resubmit_events[0].get("run").is_some());
 }
 
 #[test]
@@ -412,20 +404,6 @@ fn cancel_ack_timeout_resends_then_terminates() {
     assert_eq!(warnings.len(), 2, "expected 60s + 120s warnings");
     assert!(warnings[0].contains("60s"));
     assert!(warnings[1].contains("120s"));
-    // Forensic trace: one resend record then one terminate record, with
-    // monotonically nondecreasing elapsed_ms.
-    let resent = diagnostics.events_of_type("acp_cancel_resent");
-    assert_eq!(resent.len(), 1);
-    assert!(resent[0]["elapsed_ms"].as_u64().unwrap_or(0) >= 60_000);
-    let terminated = diagnostics.events_of_type("acp_cancel_timeout_terminate");
-    assert_eq!(terminated.len(), 1);
-    assert!(terminated[0]["elapsed_ms"].as_u64().unwrap_or(0) >= 120_000);
-    // Resubmit-on-Finished was not exercised on this path.
-    assert!(
-        diagnostics
-            .events_of_type("acp_resubmit_on_finished")
-            .is_empty(),
-    );
 }
 
 #[test]
@@ -474,12 +452,6 @@ fn cancel_ack_timer_disarmed_by_prompt_turn_failed_before_timeout() {
     assert_eq!(session_handle.submitted(), vec!["preempt".to_string()]);
     // No cancel-ack diagnostics fired because the timer was disarmed first.
     assert!(diagnostics.warnings().is_empty());
-    assert!(diagnostics.events_of_type("acp_cancel_resent").is_empty());
-    assert!(
-        diagnostics
-            .events_of_type("acp_cancel_timeout_terminate")
-            .is_empty(),
-    );
 }
 
 #[test]
@@ -525,13 +497,6 @@ fn second_interrupt_while_pending_does_not_reset_cancel_ack_timer() {
     assert_eq!(session_handle.cancel_calls(), 2);
     // SummaryWarn fired twice — once at 60s, once at 120s.
     assert_eq!(diagnostics.warnings().len(), 2);
-    assert_eq!(diagnostics.events_of_type("acp_cancel_resent").len(), 1);
-    assert_eq!(
-        diagnostics
-            .events_of_type("acp_cancel_timeout_terminate")
-            .len(),
-        1,
-    );
     // Neither queued interrupt text reached submit_prompt because the run
     // terminated before any PromptTurnFinished/Failed could resubmit.
     assert!(session_handle.submitted().is_empty());
@@ -605,11 +570,6 @@ fn interrupt_finished_resubmit_then_later_interrupt_arms_fresh_cancel() {
     // timer rather than swallowing the later interrupt.
     assert_eq!(session_handle.cancel_calls(), 2);
     assert!(session_handle.closed());
-    // Both resubmits were traced.
-    assert_eq!(
-        diagnostics.events_of_type("acp_resubmit_on_finished").len(),
-        2,
-    );
     // Neither cancel-ack timer reached its threshold because the vendor
     // emitted PromptTurnFinished promptly each time.
     assert!(diagnostics.warnings().is_empty());

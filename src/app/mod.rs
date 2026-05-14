@@ -289,10 +289,8 @@ pub struct App {
     pub(crate) pending_app_exit: bool,
     pub(crate) pending_shell_command: Option<String>,
     pub(crate) current_run_id: Option<u64>,
-    /// New lifecycle FSM. As of Step 5c the operator stop / restart /
-    /// rewind / cancel paths are all routed through it; the legacy
-    /// `current_run_id` / `run_launched` pair remains alongside as a
-    /// mirror until 5d collapses them into a single FSM-owned slot.
+    /// Lifecycle FSM. The `current_run_id` / `run_launched` pair remains
+    /// alongside as a mirror until the FSM owns those slots (Step 5d).
     pub(crate) fsm: crate::lifecycle::Fsm,
     /// Slim, round-aware lifecycle [`crate::lifecycle::Phase`] derived from
     /// `state.current_phase` via [`crate::lifecycle::slim_phase_for`].

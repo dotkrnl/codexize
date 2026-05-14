@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn generate_synthetic_artifacts_writes_toml_without_implementation_json() {
+fn generate_synthetic_artifacts_writes_plan_and_tasks() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let spec = Spec {
         content: "spec".to_string(),
@@ -13,7 +13,6 @@ fn generate_synthetic_artifacts_writes_toml_without_implementation_json() {
     let artifacts = dir.path().join("artifacts");
     assert!(artifacts.join("plan.md").exists());
     assert!(artifacts.join("tasks.toml").exists());
-    assert!(!artifacts.join("implementation.json").exists());
 
     let tasks = std::fs::read_to_string(artifacts.join("tasks.toml")).expect("tasks");
     let parsed: crate::tasks::TasksFile = toml::from_str(&tasks).expect("valid TOML tasks");

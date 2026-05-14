@@ -7,8 +7,7 @@
 //!   `view::StageId`; 14 pipeline-stage variants vs. the UI's 9 modal ones).
 //! - [`spec`] — [`StageSpec`] and [`ActiveRun`].
 //! - [`fsm`] — runtime FSM ([`AgentState`], [`Fsm`], outcomes).
-//! - [`pending`] — [`PendingDecisions`] replacing the old `*Paused`/`*Pending`
-//!   `Stage` variants.
+//! - [`pending`] — [`PendingDecisions`] for approval and operator-decision gates.
 //! - [`stage`] — the [`StageDriver`] trait and [`StageRegistry`].
 //! - [`stages`] — concrete stage-driver impls (one per [`StageId`]).
 //! - [`stage_id::stage_id_for_run`] — best-effort stage id from run

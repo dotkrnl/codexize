@@ -49,7 +49,7 @@ fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
 }
 
 #[test]
-fn session_round_trips_schema_v2_runs_and_messages() {
+fn session_round_trips_current_schema_runs_and_messages() {
     with_temp_root(|| {
         let mut state = SessionState::new("integration-session".to_string());
         state.modes.yolo = true;

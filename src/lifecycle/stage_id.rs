@@ -89,8 +89,8 @@ mod tests {
 
     #[test]
     fn as_str_matches_persisted_run_record_literals() {
-        // Spot-check the persisted stage strings the current `RunRecord.stage`
-        // values use so the V2 cutover can read pre-cutover logs verbatim.
+        // Spot-check persisted `RunRecord.stage` strings used by current
+        // session records and run-history matching.
         assert_eq!(StageId::Brainstorm.as_str(), "brainstorm");
         assert_eq!(StageId::Coder.as_str(), "coder");
         assert_eq!(StageId::Simplification.as_str(), "simplifier");

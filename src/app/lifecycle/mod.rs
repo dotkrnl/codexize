@@ -2,6 +2,8 @@
 mod init;
 mod poll;
 mod retry;
+#[cfg(test)]
+mod retry_tests;
 mod viewport;
 mod viewport_layout;
 use super::prompts::*;
@@ -591,12 +593,37 @@ impl App {
 
     /// Drive the legacy [`crate::state::Phase`] to the variant matching the
     /// rewind target and refresh the slim-phase mirror.
+    ///
+    /// Rewinds frequently cross the phase-graph's forward-only edges (e.g.
+    /// Implementation(r) → Idea on the skip-to-impl path), so the validated
+    /// [`Self::transition_to_phase`] would silently reject them. The legacy
+    /// `go_back` lived with that — it just discarded the error. 5b uses the
+    /// unchecked [`session_state::set_phase_for_operator_retry`] so the
+    /// rewind actually lands, then triggers the same downstream effects
+    /// `transition_to_phase` would have fired.
     fn apply_legacy_phase_change(&mut self, target: Option<crate::lifecycle::Phase>) {
         let Some(target) = target else {
             return;
         };
         let legacy = crate::lifecycle::slim_to_old_phase(target, &self.state.current_phase);
-        let _ = self.transition_to_phase(legacy);
+        session_state::set_phase_for_operator_retry(&mut self.state, legacy);
+        self.refresh_slim_phase();
+        self.agent_line_count = 0;
+        self.rebuild_tree_view(None);
+        self.enable_progress_follow_and_refocus();
+        self.set_follow_tail(true);
+        self.maybe_emit_phase_notification(legacy);
+        self.live_summary_cached_text.clear();
+        self.live_summary_cached_mtime = None;
+        // The validated path captures the round base at Implementation(r)
+        // entry; mirror that so the simplifier still sees a fresh base_sha.
+        if let crate::state::Phase::ImplementationRound(round) = legacy {
+            let round_dir = self
+                .session_dir()
+                .join("rounds")
+                .join(format!("{round:03}"));
+            self.capture_round_base(&round_dir);
+        }
     }
 
     /// Bridge a [`crate::lifecycle::StageSpec`] to the matching legacy

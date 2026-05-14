@@ -18,6 +18,6 @@ pub(super) use super::review_banner::{prepend_review_banner, strip_review_banner
 pub(crate) use super::stage_support::git_rev_parse_head;
 pub(crate) use super::stage_support::{
     assigned_revise_task_ids, auto_tough_effort, read_review_scope, read_review_scope_base_sha,
-    restore_artifacts, rewrite_tasks_for_revise, task_effort_for, task_toml_for,
-    validate_stage_toml_writes, write_review_scope_artifact,
+    rewrite_tasks_for_revise, task_effort_for, task_toml_for, validate_stage_toml_writes,
+    write_review_scope_artifact,
 };

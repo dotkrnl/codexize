@@ -2,13 +2,13 @@ use super::{
     RetryTarget, Severity, parse_task_label_id, retry_stage_for_label, retry_target_for_run,
 };
 use crate::app::App;
-use crate::app::prompts::restore_artifacts;
 use crate::app::tree::node_at_path;
-use crate::artifacts::ArtifactKind;
-use crate::lifecycle::{LifecycleOps, slim_phase_for_stage_retry, slim_phase_for_task_retry};
+use crate::lifecycle::{
+    LifecycleOps, Phase as SlimPhase, slim_phase_for_stage_retry, slim_phase_for_task_retry,
+};
 use crate::logic::rules::retry_phase_for_stage;
 use crate::scheduler::{is_implementation_lane_phase, manual_retry_allowed};
-use crate::state::{self as session_state, NodeKind, Phase, RunStatus};
+use crate::state::{self as session_state, NodeKind, Phase};
 use std::time::Duration;
 impl App {
     pub(crate) fn retry_allowed_by_project_lane(&mut self, target_phase: Phase) -> bool {
@@ -66,15 +66,6 @@ impl App {
         }
     }
 
-    fn cancel_run_label(&self, base: &str) {
-        let prefix = format!("{base} ");
-        for run in self.state.agent_runs.iter().filter(|run| {
-            run.status == RunStatus::Running
-                && (run.window_name == base || run.window_name.starts_with(&prefix))
-        }) {
-            self.runner_supervisor.cancel_run(run.id);
-        }
-    }
     pub(crate) fn selected_retry_target(&self) -> Option<RetryTarget> {
         let row = self.visible_rows.get(self.selected)?;
         for depth in (1..=row.path.len()).rev() {
@@ -123,204 +114,40 @@ impl App {
         self.run_lifecycle_op("retry", |ctx| LifecycleOps::rewind(ctx, target_phase));
     }
     pub(crate) fn go_back(&mut self) {
-        use std::fs;
-        let session_dir = self.session_dir();
-        let artifacts = session_dir.join("artifacts");
-        let prompts = session_dir.join("prompts");
-        // Interrupt the running agent (if any) so rewinding takes effect even
-        // when the phase-specific cancel_run_label base doesn't match the launch
-        // run label (e.g. "[Spec Review 1]" vs "[Spec Review]").
-        if let Some(run_id) = self.current_run_id {
-            let running = self
-                .state
-                .agent_runs
-                .iter()
-                .find(|r| r.id == run_id)
-                .cloned();
-            if let Some(run) = running {
-                self.cancel_run_label(&run.window_name);
-                if run.status == crate::state::RunStatus::Running {
-                    self.finalize_run_record(run_id, false, Some("aborted by user".to_string()));
-                }
+        // Pending decisions (git-guard, dreaming) are the legitimate exit path
+        // — go_back is a no-op while one is open. Mirrors the legacy
+        // GitGuardPending / DreamingPending branches that did nothing.
+        if self.pending_decisions.blocks(self.slim_phase) {
+            return;
+        }
+        let Some(mut target) = self.slim_phase.previous() else {
+            self.push_status(
+                "nothing to go back to".to_string(),
+                Severity::Warn,
+                Duration::from_secs(3),
+            );
+            return;
+        };
+        // Implementation(1) has two predecessors depending on whether the
+        // operator skipped spec / planning via the skip-to-impl path:
+        //   - skip_to_impl_rationale set → rewind all the way to Idea (the
+        //     slim phase brainstorm runs at; FSM will re-offer the modal).
+        //   - otherwise → Plan, and the legacy `reset_builder_after_rewind`
+        //     state mutator must fire to clear the pipeline.
+        if matches!(self.slim_phase, SlimPhase::Implementation(1)) {
+            if self.state.skip_to_impl_rationale.is_some() {
+                target = SlimPhase::Idea;
+            } else {
+                session_state::reset_builder_after_rewind(&mut self.state);
             }
         }
-        match self.state.current_phase {
-            Phase::BrainstormRunning => {
-                self.cancel_run_label("[Brainstorm]");
-                let _ = fs::remove_file(artifacts.join("spec.md"));
-                let _ = fs::remove_file(prompts.join("brainstorm.md"));
-                self.clear_agent_error();
-                let _ = self.transition_to_phase(Phase::IdeaInput);
-            }
-            Phase::SpecReviewRunning | Phase::SpecReviewPaused => {
-                self.cancel_run_label("[Spec Review]");
-                let rounds: Vec<u32> = self
-                    .state
-                    .agent_runs
-                    .iter()
-                    .filter(|r| r.stage == "spec-review")
-                    .map(|r| r.round)
-                    .collect();
-                for round in rounds {
-                    let _ = fs::remove_file(artifacts.join(format!("spec-review-{round}.md")));
-                    let _ = fs::remove_file(prompts.join(format!("spec-review-{round}.md")));
-                }
-                self.clear_agent_error();
-                let _ = self.transition_to_phase(Phase::BrainstormRunning);
-            }
-            Phase::PlanningRunning => {
-                self.cancel_run_label("[Planning]");
-                let _ = fs::remove_file(artifacts.join("plan.md"));
-                let _ = self.transition_to_phase(Phase::SpecReviewRunning);
-            }
-            Phase::PlanReviewRunning => {
-                self.cancel_run_label("[Plan Review 1]");
-                let rounds: Vec<u32> = self
-                    .state
-                    .agent_runs
-                    .iter()
-                    .filter(|r| r.stage == "plan-review")
-                    .map(|r| r.round)
-                    .collect();
-                for round in rounds {
-                    let _ = fs::remove_file(artifacts.join(format!("plan-review-{round}.md")));
-                    let _ = fs::remove_file(prompts.join(format!("plan-review-{round}.md")));
-                }
-                let plan_backup = artifacts.join("plan.pre-review-1.md");
-                let spec_backup = artifacts.join("spec.pre-review-1.md");
-                restore_artifacts(&[
-                    (plan_backup.as_path(), artifacts.join("plan.md").as_path()),
-                    (spec_backup.as_path(), artifacts.join("spec.md").as_path()),
-                ]);
-                self.clear_agent_error();
-                let _ = self.transition_to_phase(Phase::PlanningRunning);
-            }
-            Phase::PlanReviewPaused => {
-                let plan_backup = artifacts.join("plan.pre-review-1.md");
-                let spec_backup = artifacts.join("spec.pre-review-1.md");
-                restore_artifacts(&[
-                    (plan_backup.as_path(), artifacts.join("plan.md").as_path()),
-                    (spec_backup.as_path(), artifacts.join("spec.md").as_path()),
-                ]);
-                let rounds: Vec<u32> = self
-                    .state
-                    .agent_runs
-                    .iter()
-                    .filter(|r| r.stage == "plan-review")
-                    .map(|r| r.round)
-                    .collect();
-                for round in rounds {
-                    let _ = fs::remove_file(artifacts.join(format!("plan-review-{round}.md")));
-                    let _ = fs::remove_file(prompts.join(format!("plan-review-{round}.md")));
-                }
-                let _ = fs::remove_file(artifacts.join("plan.pre-review-1.md"));
-                let _ = fs::remove_file(artifacts.join("spec.pre-review-1.md"));
-                let _ = self.transition_to_phase(Phase::PlanningRunning);
-            }
-            Phase::ShardingRunning => {
-                self.cancel_run_label("[Sharding]");
-                let _ = fs::remove_file(artifacts.join("tasks.toml"));
-                let _ = fs::remove_file(prompts.join("sharding.md"));
-                let _ = self.transition_to_phase(Phase::PlanReviewRunning);
-            }
-            Phase::ImplementationRound(r) => {
-                self.cancel_run_label(&format!("[Builder r{r}]"));
-                let _ = fs::remove_dir_all(session_dir.join("rounds").join(format!("{r:03}")));
-                let prev = if r <= 1 {
-                    if self.state.skip_to_impl_rationale.is_some() {
-                        Phase::BrainstormRunning
-                    } else {
-                        session_state::reset_builder_after_rewind(&mut self.state);
-                        // Spec §Data model line 96: rewind from round 1 must
-                        // pause in WaitingToImplement so the scheduler re-verifies
-                        // the repository baseline before any sharding launch.
-                        Phase::WaitingToImplement
-                    }
-                } else {
-                    Phase::ReviewRound(r - 1)
-                };
-                let _ = self.transition_to_phase(prev);
-            }
-            Phase::ReviewRound(r) => {
-                self.cancel_run_label(&format!("[Review r{r}]"));
-                let _ = fs::remove_dir_all(session_dir.join("rounds").join(format!("{r:03}")));
-                let _ = self.transition_to_phase(Phase::ImplementationRound(r));
-            }
-            Phase::BuilderRecovery(r) => {
-                self.cancel_run_label("[Recovery]");
-                let _ = fs::remove_file(prompts.join(format!("recovery-r{r}.md")));
-                // Recovery is builder-only and should not be rewound into coder/reviewer; go back to
-                // the triggering review round so the operator can intervene.
-                let _ = self.transition_to_phase(Phase::ReviewRound(r));
-            }
-            Phase::BuilderRecoveryPlanReview(r) => {
-                self.cancel_run_label("[Recovery Plan Review]");
-                let _ = fs::remove_file(prompts.join(format!("recovery-plan-review-r{r}.md")));
-                let _ = self.transition_to_phase(Phase::BuilderRecovery(r));
-            }
-            Phase::BuilderRecoverySharding(r) => {
-                self.cancel_run_label("[Recovery Sharding]");
-                let _ = fs::remove_file(prompts.join(format!("recovery-sharding-r{r}.md")));
-                let _ = self.transition_to_phase(Phase::BuilderRecoveryPlanReview(r));
-            }
-            Phase::SkipToImplPending => {
-                self.cancel_run_label("[Skip Confirm]");
-                let _ = fs::remove_file(artifacts.join(ArtifactKind::SkipToImpl.filename()));
-                session_state::clear_skip_to_impl_proposal(&mut self.state);
-                self.clear_agent_error();
-                let _ = self.transition_to_phase(Phase::BrainstormRunning);
-            }
-            Phase::GitGuardPending => {
-                // No agent process owned by this phase; the modal is purely TUI.
-                // Operator handlers are the legitimate exit path; go_back is
-                // a no-op while the decision is pending.
-            }
-            Phase::DreamingPending => {
-                // The decision is persisted specifically so resume cannot
-                // re-run final validation and re-offer Dreaming; leave the
-                // modal as the only exit from this phase.
-            }
-            Phase::Dreaming(_) => {
-                self.cancel_run_label("[Dreaming]");
-            }
-            Phase::FinalValidation(r) => {
-                // Validator is non-mutating and can be rewound. Route back to
-                // ReviewRound(r) for any round; round-1 sessions on the
-                // skip-to-impl path can additionally rewind to ImplementationRound(1)
-                // via existing transitions, but the default rewind target is the
-                // matching review round to preserve per-task review history.
-                self.cancel_run_label("[FinalValidation]");
-                let target = if r >= 1 {
-                    Phase::ReviewRound(r)
-                } else {
-                    Phase::ImplementationRound(1)
-                };
-                let _ = self.transition_to_phase(target);
-            }
-            Phase::Simplification(r) => {
-                // Simplification is a code-producing stage; rewind to the
-                // matching ReviewRound to drop back into the loop on round >= 1
-                // or to ImplementationRound(1) on the skip-to-impl path.
-                self.cancel_run_label("[Simplifier]");
-                let target = if r >= 1 {
-                    Phase::ReviewRound(r)
-                } else {
-                    Phase::ImplementationRound(1)
-                };
-                let _ = self.transition_to_phase(target);
-            }
-            Phase::IdeaInput
-            | Phase::BlockedNeedsUser
-            | Phase::WaitingToImplement
-            | Phase::RepoStateUpdateRunning
-            | Phase::Done
-            | Phase::Cancelled => {}
+        // Rewinding away from a phase that owns the skip-to-impl proposal
+        // must clear the proposal too. The legacy go_back's SkipToImplPending
+        // branch did this inline; preserve it here so the modal doesn't
+        // re-fire after a rewind to brainstorm.
+        if self.state.current_phase == Phase::SkipToImplPending {
+            session_state::clear_skip_to_impl_proposal(&mut self.state);
         }
-        self.clear_agent_error();
-        self.run_launched = false;
-        self.current_run_id = None;
-        self.live_summary_cached_text.clear();
-        self.live_summary_cached_mtime = None;
-        self.save_state();
+        self.run_lifecycle_op("back", |ctx| LifecycleOps::rewind(ctx, target));
     }
 }

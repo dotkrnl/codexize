@@ -5,13 +5,6 @@ use crate::{
     tasks,
 };
 use anyhow::Context;
-pub(crate) fn restore_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) {
-    for (backup, target) in pairs {
-        if backup.exists() {
-            let _ = std::fs::copy(backup, target);
-        }
-    }
-}
 pub(crate) fn task_toml_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<String> {
     let tasks_path = session_dir.join("artifacts").join("tasks.toml");
     let parsed = tasks::validate(&tasks_path).context("load tasks.toml")?;

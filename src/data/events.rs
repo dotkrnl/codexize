@@ -116,7 +116,8 @@ pub fn dispatch(
             | DataRequest::ReadLiveSummary { .. }
             | DataRequest::DrainLiveSummary { .. }
             | DataRequest::ReadPromptBody { .. } => {
-                unreachable!("dispatch_observation should have handled {request:?}")
+                tracing::error!("dispatch_observation should have handled {request:?}");
+                DataOutcome::PromptBodyRead(None)
             }
         },
     }

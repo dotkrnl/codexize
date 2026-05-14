@@ -16,7 +16,9 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
             let _ =
                 state.log_event("resume: reverting RepoStateUpdateRunning to WaitingToImplement");
             state.current_phase = Phase::WaitingToImplement;
-            let _ = state.save();
+            if let Err(e) = state.save() {
+                tracing::warn!("resume: failed to save after phase revert: {e}");
+            }
         }
         Phase::WaitingToImplement => {
             // Idle phase; leave as-is and let the scheduler re-evaluate on the
@@ -45,7 +47,9 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
                     state.skip_to_impl_rationale = None;
                     state.skip_to_impl_kind = None;
                     state.current_phase = Phase::SpecReviewRunning;
-                    let _ = state.save();
+                    if let Err(e) = state.save() {
+                        tracing::warn!("resume: failed to save after skip-to-impl fallback: {e}");
+                    }
                 }
                 Err(err) => {
                     let _ = state.log_event(format!(
@@ -54,7 +58,9 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
                     state.skip_to_impl_rationale = None;
                     state.skip_to_impl_kind = None;
                     state.current_phase = Phase::SpecReviewRunning;
-                    let _ = state.save();
+                    if let Err(e) = state.save() {
+                        tracing::warn!("resume: failed to save after malformed artifact fallback: {e}");
+                    }
                 }
             }
         }

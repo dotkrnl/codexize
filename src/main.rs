@@ -305,7 +305,9 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
         }
     }
     let mut state = state::SessionState::load(&session_id)?;
-    let _ = state::resume_session(&mut state);
+    if let Err(e) = state::resume_session(&mut state) {
+        tracing::warn!("session resume produced warnings: {e:#}");
+    }
     let mut shell = app_shell::AppShell::new_with_app_lock(
         state,
         startup_origin,

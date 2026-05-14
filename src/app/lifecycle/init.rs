@@ -250,7 +250,7 @@ impl App {
                 app.record_agent_error("guard pending state missing on resume".to_string());
                 app.clear_builder_recovery_context();
                 let _ = app.transition_to_blocked(crate::state::BlockOrigin::GitGuard);
-                let _ = app.state.save();
+                app.save_state();
             }
         } else if app.state.pending_guard_decision.is_some() {
             // Stale: pending decision with no matching phase — clear it.
@@ -259,7 +259,7 @@ impl App {
                     .to_string(),
             );
             session_state::clear_pending_guard_decision(&mut app.state);
-            let _ = app.state.save();
+            app.save_state();
         }
         // Orphan sweep: remove stale live_summary.*.txt files that do not
         // correspond to a Running run record.

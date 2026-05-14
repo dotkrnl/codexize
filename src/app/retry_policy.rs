@@ -85,7 +85,9 @@ impl App {
         } else {
             origin
         };
-        let _ = self.transition_to_blocked(origin);
+        if let Err(e) = self.transition_to_blocked(origin) {
+            tracing::warn!("failed to transition to blocked after retry cap: {e}");
+        }
         self.append_system_message(failed_run.id, MessageKind::End, summary);
         if log_safety_cap {
             let _ = self.state.log_event(format!(

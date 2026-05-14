@@ -78,8 +78,11 @@ impl App {
         self.clear_agent_error();
         if let Err(err) = self.transition_to_phase(Phase::BuilderRecovery(triggering_round)) {
             self.record_agent_error(format!("failed to enter builder recovery: {err}"));
+            tracing::warn!("failed to enter builder recovery, blocking: {err}");
             self.clear_builder_recovery_context();
-            let _ = self.transition_to_blocked(crate::state::BlockOrigin::BuilderRecovery);
+            if let Err(e) = self.transition_to_blocked(crate::state::BlockOrigin::BuilderRecovery) {
+                tracing::warn!("failed to block after builder recovery entry failure: {e}");
+            }
         }
         true
     }
@@ -415,7 +418,9 @@ impl App {
             self.finalize_run_record(run.id, false, Some(reason.clone()));
             self.record_agent_error(reason);
             self.clear_builder_recovery_context();
-            let _ = self.transition_to_blocked(crate::state::BlockOrigin::BuilderRecovery);
+            if let Err(e) = self.transition_to_blocked(crate::state::BlockOrigin::BuilderRecovery) {
+                tracing::warn!("failed to block after task id collision: {e}");
+            }
             return Ok(());
         }
         self.finalize_run_record(run.id, true, None);

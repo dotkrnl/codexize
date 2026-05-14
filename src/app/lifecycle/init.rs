@@ -249,7 +249,9 @@ impl App {
             if app.state.pending_guard_decision.is_none() {
                 app.record_agent_error("guard pending state missing on resume".to_string());
                 app.clear_builder_recovery_context();
-                let _ = app.transition_to_blocked(crate::state::BlockOrigin::GitGuard);
+                if let Err(e) = app.transition_to_blocked(crate::state::BlockOrigin::GitGuard) {
+                    tracing::warn!("failed to block for missing guard decision on resume: {e}");
+                }
                 app.save_state();
             }
         } else if app.state.pending_guard_decision.is_some() {

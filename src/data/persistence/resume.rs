@@ -36,6 +36,9 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
                     }
                     state.skip_to_impl_rationale = Some(p.rationale);
                     state.skip_to_impl_kind = Some(p.status);
+                    if let Err(e) = state.save() {
+                        tracing::warn!("resume: failed to save skip-to-impl artifact state: {e}");
+                    }
                 }
                 Ok((_, warnings)) => {
                     for w in warnings {

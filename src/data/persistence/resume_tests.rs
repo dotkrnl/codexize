@@ -29,6 +29,7 @@ fn resume_skip_to_impl_pending_with_overlength_proposal_keeps_modal() {
         let session_id = "resume-skip-overlength";
         let mut state = SessionState::new(session_id.to_string());
         state.current_phase = Phase::SkipToImplPending;
+        state.save().unwrap();
 
         let session_dir = session_dir(session_id);
         let artifacts = session_dir.join("artifacts");
@@ -53,6 +54,18 @@ fn resume_skip_to_impl_pending_with_overlength_proposal_keeps_modal() {
             .skip_to_impl_rationale
             .expect("rationale should be set");
         assert_eq!(stored_rationale.chars().count(), 500);
+
+        let loaded = SessionState::load(session_id).expect("resume state should be saved");
+        assert_eq!(loaded.current_phase, Phase::SkipToImplPending);
+        assert_eq!(loaded.skip_to_impl_kind, Some(SkipProposalStatus::NothingToDo));
+        assert_eq!(
+            loaded
+                .skip_to_impl_rationale
+                .expect("saved rationale should be set")
+                .chars()
+                .count(),
+            500
+        );
     });
 }
 

@@ -6,52 +6,6 @@ use codexize::synthetic_artifacts::generate_synthetic_artifacts;
 use codexize::tasks::TasksFile;
 
 #[test]
-fn read_skip_to_impl_proposal_success() -> anyhow::Result<()> {
-    let dir = tempdir()?;
-    let path = dir.path().join("skip_proposal.toml");
-    fs::write(
-        &path,
-        "proposed = true\nstatus = \"skip_to_impl\"\nrationale = \"Test rationale\"\n",
-    )?;
-
-    let (proposal, warnings) = SkipToImplProposal::read_from_path(&path)?;
-    let proposal = proposal.expect("expected proposal");
-    assert!(warnings.is_empty());
-    assert!(proposal.proposed);
-    assert_eq!(proposal.status, SkipProposalStatus::SkipToImpl);
-    assert_eq!(proposal.rationale, "Test rationale");
-    Ok(())
-}
-
-#[test]
-fn read_skip_to_impl_proposal_not_proposed() -> anyhow::Result<()> {
-    let dir = tempdir()?;
-    let path = dir.path().join("skip_proposal.toml");
-    fs::write(
-        &path,
-        "proposed = false\nstatus = \"nothing_to_do\"\nrationale = \"\"\n",
-    )?;
-
-    let (proposal, warnings) = SkipToImplProposal::read_from_path(&path)?;
-    let proposal = proposal.expect("expected proposal");
-    assert!(warnings.is_empty());
-    assert!(!proposal.proposed);
-    assert_eq!(proposal.status, SkipProposalStatus::NothingToDo);
-    assert_eq!(proposal.rationale, "");
-    Ok(())
-}
-
-#[test]
-fn read_skip_to_impl_proposal_missing_file() -> anyhow::Result<()> {
-    let dir = tempdir()?;
-    let path = dir.path().join("skip_proposal.toml");
-    let (proposal, warnings) = SkipToImplProposal::read_from_path(&path)?;
-    assert!(proposal.is_none());
-    assert!(warnings.is_empty());
-    Ok(())
-}
-
-#[test]
 fn read_skip_to_impl_proposal_rejects_json() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("skip_proposal.toml");

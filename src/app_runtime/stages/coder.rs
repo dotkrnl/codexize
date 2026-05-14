@@ -155,7 +155,7 @@ impl App {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let round_dir = session_dir.join("rounds").join(format!("{round:03}"));
         let scope = read_review_scope(&round_dir.join("review_scope.toml"))?;
-        let _ = write_review_scope_artifact(&round_dir, &scope.base_sha);
+        write_review_scope_artifact(&round_dir, &scope.base_sha)?;
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
         if round == 1 && self.state.skip_to_impl_rationale.is_some() {

@@ -20,7 +20,6 @@ pub(crate) use crate::ui::palette;
 pub(crate) mod prior_attempts;
 mod prompt_builders;
 mod prompt_ctx;
-mod prompt_support;
 pub(crate) mod prompts;
 mod retry_policy;
 mod review_banner;

@@ -577,8 +577,7 @@ impl App {
             }
         }
         for (backup, dest) in &plan.restore_backups {
-            if backup.exists() {
-                let _ = std::fs::copy(backup, dest);
+            if backup.exists() && std::fs::copy(backup, dest).is_ok() {
                 let _ = std::fs::remove_file(backup);
             }
         }
@@ -1140,5 +1139,25 @@ impl App {
     }
     pub(crate) fn can_go_back(&self) -> bool {
         !matches!(self.state.current_phase, Phase::IdeaInput | Phase::Done)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_keeps_backup_when_restore_copy_fails() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let backup = temp.path().join("plan.pre-review-1.md");
+        let dest = temp.path().join("missing-parent").join("plan.md");
+        std::fs::write(&backup, "reviewed plan").unwrap();
+
+        App::apply_cleanup_plan(&crate::lifecycle::CleanupPlan {
+            delete: Vec::new(),
+            restore_backups: vec![(backup.clone(), dest)],
+        });
+
+        assert!(backup.exists(), "failed restore must not delete backup");
     }
 }

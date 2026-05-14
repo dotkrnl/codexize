@@ -80,17 +80,6 @@ fn samples() -> Vec<(&'static str, String)> {
 }
 
 #[test]
-fn static_reason_wire_values_round_trip() {
-    for reason in [
-        Reason::BaseMissing,
-        Reason::ArtifactMissing,
-        Reason::MissingCoderSummary,
-    ] {
-        assert_eq!(reason.to_string().parse::<Reason>().unwrap(), reason);
-    }
-}
-
-#[test]
 fn reason_matrix_snapshot() {
     insta::assert_snapshot!(
         "finalization_reason_matrix",

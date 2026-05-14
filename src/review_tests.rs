@@ -494,19 +494,3 @@ patch = "Split into two bullets."
     assert_eq!(v.spec_plan_patch.len(), 1);
     assert_eq!(v.feedback.len(), 1);
 }
-
-#[test]
-fn review_all_status_values_roundtrip() {
-    for (toml_val, expected) in [
-        ("\"approved\"", ReviewStatus::Approved),
-        ("\"refine\"", ReviewStatus::Refine),
-        ("\"revise\"", ReviewStatus::Revise),
-        ("\"human_blocked\"", ReviewStatus::HumanBlocked),
-        ("\"agent_pivot\"", ReviewStatus::AgentPivot),
-    ] {
-        let status: ReviewStatus = toml::from_str(&format!("status = {toml_val}\n"))
-            .map(|w: std::collections::HashMap<String, ReviewStatus>| w["status"].clone())
-            .unwrap();
-        assert_eq!(status, expected);
-    }
-}

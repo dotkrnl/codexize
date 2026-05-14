@@ -37,4 +37,3 @@ pub use crate::data::synthetic_artifacts;
 pub mod tasks;
 pub use crate::ui::tui;
 pub mod ui;
-pub use crate::data::warmup;

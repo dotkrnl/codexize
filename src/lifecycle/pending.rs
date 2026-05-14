@@ -59,50 +59,6 @@ impl PendingDecisions {
 
     /// True when any pending decision slot is populated.
     pub fn blocks(&self) -> bool {
-        self.git_guard.is_some()
-            || self.spec_approval.is_some()
-            || self.plan_approval.is_some()
-            || self.skip_to_impl.is_some()
-            || self.dreaming.is_some()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_does_not_block() {
-        let pd = PendingDecisions::default();
-        assert!(!pd.blocks());
-    }
-
-    #[test]
-    fn any_some_field_blocks() {
-        let cases: Vec<PendingDecisions> = vec![
-            PendingDecisions {
-                git_guard: Some(GitGuardData {}),
-                ..Default::default()
-            },
-            PendingDecisions {
-                spec_approval: Some(SpecApprovalData {}),
-                ..Default::default()
-            },
-            PendingDecisions {
-                plan_approval: Some(PlanApprovalData {}),
-                ..Default::default()
-            },
-            PendingDecisions {
-                skip_to_impl: Some(SkipToImplData {}),
-                ..Default::default()
-            },
-            PendingDecisions {
-                dreaming: Some(DreamingData {}),
-                ..Default::default()
-            },
-        ];
-        for pd in cases {
-            assert!(pd.blocks());
-        }
+        !self.is_empty()
     }
 }

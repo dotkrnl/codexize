@@ -51,7 +51,7 @@ fn message_chunks_preserve_continue_boundary() {
 }
 
 #[test]
-fn thought_chunks_are_ignored() {
+fn thought_chunks_become_thought_text_events() {
     let event = translate_update(
         ClientUpdate::Text {
             kind: ClientTextKind::Thought,
@@ -99,7 +99,7 @@ fn tool_call_text_becomes_thought_event_with_paragraph_break() {
 }
 
 #[test]
-fn tool_call_text_translates_unchanged_for_result_blocks() {
+fn tool_call_text_appends_paragraph_break_for_result_blocks() {
     let event = translate_update(
         ClientUpdate::Text {
             kind: ClientTextKind::Tool,

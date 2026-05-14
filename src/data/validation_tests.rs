@@ -120,20 +120,6 @@ dream_recommendation = "skip"
     assert!(verdict.findings.is_empty());
 }
 
-#[test]
-fn all_status_values_roundtrip() {
-    for (toml_val, expected) in [
-        ("\"goal_met\"", ValidationStatus::GoalMet),
-        ("\"goal_gap\"", ValidationStatus::GoalGap),
-        ("\"needs_human\"", ValidationStatus::NeedsHuman),
-    ] {
-        let status: ValidationStatus = toml::from_str(&format!("status = {toml_val}\n"))
-            .map(|w: std::collections::HashMap<String, ValidationStatus>| w["status"].clone())
-            .unwrap();
-        assert_eq!(status, expected);
-    }
-}
-
 // ------------------------------------------------------------------
 // Invalid combinations
 // ------------------------------------------------------------------

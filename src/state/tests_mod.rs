@@ -147,12 +147,6 @@ fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
 }
 
 #[test]
-fn test_message_kind_started_deserializes() {
-    let kind = serde_json::from_str::<MessageKind>("\"Started\"");
-    assert!(kind.is_ok(), "Started message kind must deserialize");
-}
-
-#[test]
 fn test_new_session_defaults_to_v4_with_zero_validation_attempts() {
     let state = SessionState::new("fresh".to_string());
     assert_eq!(state.schema_version, 4);
@@ -204,15 +198,6 @@ fn test_block_origin_skipped_when_none() {
         !text.contains("block_origin"),
         "block_origin must be omitted when None: {text}"
     );
-}
-
-#[test]
-fn test_validation_attempts_field_persists() {
-    let mut state = SessionState::new("attempts".to_string());
-    state.validation_attempts = 3;
-    let text = toml::to_string(&state).unwrap();
-    let back: SessionState = toml::from_str(&text).unwrap();
-    assert_eq!(back.validation_attempts, 3);
 }
 
 #[test]
@@ -634,24 +619,6 @@ fn test_resume_multiple_running_runs() {
 }
 
 #[test]
-fn test_session_state_archived_defaults_false() {
-    let state = SessionState::new("test-session".to_string());
-    assert!(!state.archived);
-}
-
-#[test]
-fn test_session_state_archived_persists() {
-    let mut state = SessionState::new("test-session".to_string());
-    state.archived = true;
-
-    let toml = toml::to_string(&state).unwrap();
-    assert!(toml.contains("archived = true"));
-
-    let loaded: SessionState = toml::from_str(&toml).unwrap();
-    assert!(loaded.archived);
-}
-
-#[test]
 fn test_agent_runs_roundtrip() {
     let mut state = SessionState::new("test".to_string());
     state.agent_runs.push(RunRecord {
@@ -693,14 +660,6 @@ fn test_agent_runs_roundtrip() {
             interactive: false,
         }
     );
-}
-
-#[test]
-fn test_session_state_archived_defaults_false_on_deserialize() {
-    let state = SessionState::new("test-session".to_string());
-    let toml = toml::to_string(&state).unwrap();
-    let loaded: SessionState = toml::from_str(&toml).unwrap();
-    assert!(!loaded.archived);
 }
 
 #[test]

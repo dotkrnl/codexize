@@ -327,7 +327,7 @@ impl App {
     /// the single refresh point so the derived slim phase stays in sync with
     /// the authoritative legacy phase.
     pub(crate) fn refresh_slim_phase(&mut self) {
-        self.slim_phase = crate::lifecycle::slim_phase_for(&self.state.current_phase);
+        self.slim_phase = self.state.current_phase.to_slim_phase();
     }
 
     /// Project the App's agent-run history into the slim
@@ -697,7 +697,7 @@ impl App {
         let Some(target) = target else {
             return;
         };
-        let legacy = crate::lifecycle::slim_to_old_phase(target);
+        let legacy = Phase::from_slim_phase(target);
         let leaving_blocked = matches!(self.state.current_phase, Phase::BlockedNeedsUser)
             && !matches!(legacy, Phase::BlockedNeedsUser);
         session_state::set_phase_for_operator_retry(&mut self.state, legacy);

@@ -80,14 +80,9 @@ impl Stage for ReviewerStage {
     }
 
     fn next_phase_on_success(&self, ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Phase {
-        // Stay on Review(r) in both cases. The decision to move into another
-        // implementation round vs. finalization lives in the round loop /
-        // FSM, not here — today's finalize_reviewer_success branches on
-        // approval verdicts that aren't visible from this StageCtx
-        // projection.
-        // NOTE(step-5): verify mapping when wiring scheduler — the FSM may
-        // need to consult PendingDecisions after this returns to decide
-        // whether to launch Implementation(r+1), FinalValidation, or stay.
+        // Stay on Review(r). The scheduler decides whether to launch
+        // Implementation(r+1), FinalValidation, or stay based on the
+        // builder queue state and PendingDecisions, not this return value.
         Phase::Review(current_round(ctx))
     }
 

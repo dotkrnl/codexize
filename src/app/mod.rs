@@ -132,9 +132,8 @@ pub(crate) enum ModalKind {
 /// until `finalize_run_record` confirms the agent is dead. At that point
 /// [`App::apply_after_stop_rewind`] consumes this slot.
 ///
-/// Step 5d removes the slot once `runs.toml` carries the queued rewind
-/// natively. Until then it lives in-memory; a TUI crash mid-rewind falls
-/// back to the resume path's repair logic.
+/// This slot lives in-memory only; a TUI crash mid-rewind falls back to
+/// the resume path's repair logic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingRewindApply {
     pub(crate) target: crate::lifecycle::Phase,
@@ -298,13 +297,13 @@ pub struct App {
     pub(crate) pending_app_exit: bool,
     pub(crate) pending_shell_command: Option<String>,
     pub(crate) current_run_id: Option<u64>,
-    /// Lifecycle FSM. The `current_run_id` / `run_launched` pair remains
-    /// alongside as a mirror until the FSM owns those slots (Step 5d).
+    /// Lifecycle FSM. `current_run_id` is the legacy mirror; the FSM owns
+    /// `ActiveRun` but the app still needs the run id for UI binding.
     pub(crate) fsm: crate::lifecycle::Fsm,
     /// Slim, round-aware lifecycle [`crate::lifecycle::Phase`] derived from
-    /// `state.current_phase` via [`crate::lifecycle::slim_phase_for`].
-    /// Refreshed by [`crate::app::App::refresh_slim_phase`] at every legacy-
-    /// phase mutation site.
+    /// `state.current_phase` via [`Phase::to_slim_phase`].
+    /// Refreshed by [`crate::app::App::refresh_slim_phase`] at every phase
+    /// mutation site.
     pub(crate) slim_phase: crate::lifecycle::Phase,
     /// Slot for the slim phase the lifecycle was paused at when the
     /// operator issued `:stop`. None outside `Stopping`/`Idle`-after-stop

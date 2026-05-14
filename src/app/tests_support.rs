@@ -69,7 +69,7 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
     let nodes = build_tree(&state);
     let current = current_node_index(&nodes);
     let selected_key = node_key_at_path(&nodes, &[current]);
-    let initial_slim_phase = crate::lifecycle::slim_phase_for(&state.current_phase);
+    let initial_slim_phase = state.current_phase.to_slim_phase();
     let mut app = App {
         state,
         nodes,

@@ -11,8 +11,8 @@
 //!   `Phase` variants.
 //! - [`stage`] — the [`Stage`] trait and [`StageRegistry`].
 //! - [`stages`] — concrete `Stage` impls (one per [`StageId`]).
-//! - [`translate`] — bridge between the legacy 24-variant `Phase` and the slim
-//!   8-variant [`Phase`].
+//! - [`stage_id::stage_id_for_run`] — best-effort stage id from legacy run
+//!   record fields.
 pub mod fsm;
 pub mod ops;
 pub mod pending;
@@ -22,7 +22,7 @@ pub mod spec;
 pub mod stage;
 pub mod stage_id;
 pub mod stages;
-pub mod translate;
+
 
 pub use fsm::{
     AfterStop, AgentState, CancelledBy, CleanupPlan, FinalizedRun, Fsm, FsmError, Outcome,
@@ -39,7 +39,4 @@ pub use scheduler::{BlockReason, Scheduler, TickInput, TickOutcome};
 pub use stage::{RunHistoryEntry, Stage, StageCtx, StageRegistry, SuccessOutcome, WorkUnit};
 pub use stage_id::StageId;
 pub use stages::default_registry;
-pub use translate::{
-    slim_phase_for, slim_phase_for_stage_retry, slim_phase_for_task_retry, slim_to_old_phase,
-    stage_id_for_run,
-};
+pub use stage_id::stage_id_for_run;

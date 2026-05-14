@@ -27,7 +27,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         .filter(|row| row.is_expandable())
         .map(|row| (row.key.clone(), super::super::ExpansionOverride::Expanded))
         .collect();
-    let initial_slim_phase = crate::lifecycle::slim_phase_for(&state.current_phase);
+    let initial_slim_phase = state.current_phase.to_slim_phase();
     let app = App {
         state,
         nodes,

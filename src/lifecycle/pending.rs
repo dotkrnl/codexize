@@ -58,10 +58,6 @@ impl PendingDecisions {
     }
 
     /// True when any pending decision slot is populated.
-    ///
-    /// NOTE(step-5): currently permissive — every set slot blocks regardless
-    /// of the caller's phase. Will narrow once per-decision data carries the
-    /// originating phase context.
     pub fn blocks(&self) -> bool {
         self.git_guard.is_some()
             || self.spec_approval.is_some()

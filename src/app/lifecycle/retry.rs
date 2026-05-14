@@ -3,9 +3,7 @@ use super::{
 };
 use crate::app::App;
 use crate::app::tree::node_at_path;
-use crate::lifecycle::{
-    LifecycleOps, Phase as SlimPhase, slim_phase_for_stage_retry, slim_phase_for_task_retry,
-};
+use crate::lifecycle::{LifecycleOps, Phase as SlimPhase};
 use crate::state::{self as session_state, NodeKind, Phase};
 use std::time::Duration;
 
@@ -148,4 +146,31 @@ impl App {
         }
         self.run_lifecycle_op("back", |ctx| LifecycleOps::rewind(ctx, target));
     }
+}
+
+/// Slim phase to rewind to when the operator retries a specific task.
+pub(crate) fn slim_phase_for_task_retry(task_id: u32, state: &crate::state::SessionState) -> SlimPhase {
+    let max_round = state
+        .agent_runs
+        .iter()
+        .filter(|run| run.task_id == Some(task_id))
+        .map(|run| run.round)
+        .max();
+    let phase_round = match state.current_phase {
+        Phase::ImplementationRound(r) | Phase::ReviewRound(r) => Some(r),
+        Phase::BuilderRecovery(r)
+        | Phase::BuilderRecoveryPlanReview(r)
+        | Phase::BuilderRecoverySharding(r) => Some(r),
+        _ => None,
+    };
+    let round = max_round.or(phase_round).unwrap_or(1);
+    SlimPhase::Implementation(round)
+}
+
+/// Slim phase to rewind to when the operator retries a stage by name.
+pub(crate) fn slim_phase_for_stage_retry(stage: &str) -> SlimPhase {
+    use crate::logic::rules::retry_phase_for_stage;
+    retry_phase_for_stage(stage)
+        .map(|p| p.to_slim_phase())
+        .unwrap_or(SlimPhase::Plan)
 }

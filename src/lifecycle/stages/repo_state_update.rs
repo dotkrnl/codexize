@@ -58,11 +58,8 @@ impl Stage for RepoStateUpdateStage {
     }
 
     fn next_phase_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Phase {
-        // NOTE(step-5): verify mapping when wiring scheduler — today's
-        // finalize_repo_state_update_success routes to BlockedNeedsUser
-        // on a `not_implementable` verdict. The slim Phase enum has no
-        // BlockedNeedsUser variant; that decision will live in
-        // PendingDecisions and consumes Phase::Plan as the staging point.
+        // A `not_implementable` verdict blocks via PendingDecisions.plan_approval
+        // while the slim phase stays on Plan.
         Phase::Plan
     }
 

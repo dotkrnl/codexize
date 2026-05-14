@@ -53,6 +53,36 @@ impl StageId {
     }
 }
 
+/// Best-effort lifecycle [`StageId`] for a legacy run record's `stage` string
+/// and `window_name` discriminators.
+///
+/// Synthesizes a [`StageId`] from the existing `RunRecord` fields.
+/// Recovery sub-stages share the `stage == "recovery"` string, so we key off
+/// the human-readable window label to preserve fidelity.
+pub fn stage_id_for_run(stage: &str, window_name: &str) -> Option<StageId> {
+    if window_name.contains("[Recovery Plan Review]") {
+        return Some(StageId::RecoveryPlanReview);
+    }
+    if window_name.contains("[Recovery Sharding]") {
+        return Some(StageId::RecoverySharding);
+    }
+    Some(match stage {
+        "brainstorm" => StageId::Brainstorm,
+        "spec-review" => StageId::SpecReview,
+        "planning" => StageId::Planning,
+        "plan-review" => StageId::PlanReview,
+        "sharding" => StageId::Sharding,
+        "recovery" => StageId::Recovery,
+        "coder" => StageId::Coder,
+        "reviewer" => StageId::Reviewer,
+        "final-validation" => StageId::FinalValidation,
+        "simplifier" => StageId::Simplification,
+        "dreaming" => StageId::Dreaming,
+        "repo-state-update" => StageId::RepoStateUpdate,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,5 +95,34 @@ mod tests {
         assert_eq!(StageId::Coder.as_str(), "coder");
         assert_eq!(StageId::Simplification.as_str(), "simplifier");
         assert_eq!(StageId::RepoStateUpdate.as_str(), "repo-state-update");
+    }
+
+    #[test]
+    fn stage_id_for_run_handles_recovery_subwindows() {
+        assert_eq!(
+            stage_id_for_run("recovery", "[Recovery Plan Review]"),
+            Some(StageId::RecoveryPlanReview)
+        );
+        assert_eq!(
+            stage_id_for_run("recovery", "[Recovery Sharding] r1"),
+            Some(StageId::RecoverySharding)
+        );
+        assert_eq!(
+            stage_id_for_run("recovery", "[Recovery]"),
+            Some(StageId::Recovery)
+        );
+    }
+
+    #[test]
+    fn stage_id_for_run_maps_stage_strings() {
+        assert_eq!(
+            stage_id_for_run("coder", "[Builder r1]"),
+            Some(StageId::Coder)
+        );
+        assert_eq!(
+            stage_id_for_run("simplifier", "[Simplifier]"),
+            Some(StageId::Simplification)
+        );
+        assert_eq!(stage_id_for_run("unknown-stage", ""), None);
     }
 }

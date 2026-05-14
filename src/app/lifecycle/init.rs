@@ -83,7 +83,7 @@ impl App {
         let current = current_node_index(&nodes);
         let selected_key = node_key_at_path(&nodes, &[current]);
         let failed_models = Self::rebuild_failed_models(&state);
-        let initial_slim_phase = crate::lifecycle::slim_phase_for(&state.current_phase);
+        let initial_slim_phase = state.current_phase.to_slim_phase();
         // Lift the persisted lifecycle-overlay fields out of `state` into the
         // App mirrors. `App::save_state` writes them back before each save so
         // disk and memory stay in sync.

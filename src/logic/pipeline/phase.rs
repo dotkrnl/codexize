@@ -90,6 +90,48 @@ pub enum Phase {
     BlockedNeedsUser,
 }
 impl Phase {
+    /// Project this legacy phase down to the slim lifecycle phase.
+    pub fn to_slim_phase(self) -> crate::lifecycle::Phase {
+        use crate::lifecycle::Phase as SlimPhase;
+        match self {
+            Phase::IdeaInput | Phase::BrainstormRunning => SlimPhase::Idea,
+            Phase::SpecReviewRunning | Phase::SpecReviewPaused => SlimPhase::Spec,
+            Phase::PlanningRunning
+            | Phase::PlanReviewRunning
+            | Phase::PlanReviewPaused
+            | Phase::ShardingRunning
+            | Phase::RepoStateUpdateRunning
+            | Phase::WaitingToImplement
+            | Phase::SkipToImplPending => SlimPhase::Plan,
+            Phase::ImplementationRound(r)
+            | Phase::BuilderRecovery(r)
+            | Phase::BuilderRecoveryPlanReview(r)
+            | Phase::BuilderRecoverySharding(r) => SlimPhase::Implementation(r),
+            Phase::ReviewRound(r) | Phase::Simplification(r) => SlimPhase::Review(r),
+            Phase::FinalValidation(_)
+            | Phase::Dreaming(_)
+            | Phase::DreamingPending => SlimPhase::Finalization,
+            Phase::Done => SlimPhase::Done,
+            Phase::Cancelled => SlimPhase::Cancelled,
+            Phase::BlockedNeedsUser | Phase::GitGuardPending => SlimPhase::Plan,
+        }
+    }
+
+    /// Pick a representative legacy phase to land on when rewinding to `target`.
+    pub fn from_slim_phase(target: crate::lifecycle::Phase) -> Self {
+        use crate::lifecycle::Phase as SlimPhase;
+        match target {
+            SlimPhase::Idea => Phase::IdeaInput,
+            SlimPhase::Spec => Phase::SpecReviewRunning,
+            SlimPhase::Plan => Phase::PlanningRunning,
+            SlimPhase::Implementation(r) => Phase::ImplementationRound(r),
+            SlimPhase::Review(r) => Phase::ReviewRound(r),
+            SlimPhase::Finalization => Phase::FinalValidation(1),
+            SlimPhase::Done => Phase::Done,
+            SlimPhase::Cancelled => Phase::Cancelled,
+        }
+    }
+
     fn round(self) -> Option<u32> {
         match self {
             Phase::ImplementationRound(round)

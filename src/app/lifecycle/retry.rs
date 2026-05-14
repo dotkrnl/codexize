@@ -101,7 +101,7 @@ impl App {
     pub(crate) fn retry_selected_target(&mut self) {
         let Some(target) = self.selected_retry_target() else {
             self.push_status(
-                "retry: select a stage or task first".to_string(),
+                "rewind: select a stage or task first".to_string(),
                 Severity::Warn,
                 Duration::from_secs(3),
             );

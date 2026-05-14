@@ -735,7 +735,7 @@ impl App {
             .is_none()
         {
             self.push_status(
-                "retry: current run is not retryable".to_string(),
+                "restart: current run is not restartable".to_string(),
                 Severity::Warn,
                 Duration::from_secs(3),
             );
@@ -748,7 +748,7 @@ impl App {
         self.pending_quit_confirmation_run_id = None;
         self.runner_supervisor.cancel_run(run_id);
         self.push_status(
-            "Stopping agent and queuing retry...".to_string(),
+            "Stopping agent and queuing restart...".to_string(),
             Severity::Warn,
             Duration::from_secs(5),
         );

@@ -45,7 +45,7 @@ impl App {
             PaletteCommand {
                 name: "stop",
                 aliases: &[],
-                help: "Stop the running agent without retry",
+                help: "Stop the running agent (no auto-restart)",
                 key_hint: Some("Ctrl-C"),
             },
             PaletteCommand {
@@ -59,18 +59,18 @@ impl App {
             commands.push(PaletteCommand {
                 name: "back",
                 aliases: &["b"],
-                help: "Go back",
+                help: "Rewind to the previous phase",
                 key_hint: None,
             });
         }
         if self.has_running_agent() || self.selected_retry_target().is_some() {
             commands.push(PaletteCommand {
                 name: "retry",
-                aliases: &["r"],
+                aliases: &["r", "restart", "rewind"],
                 help: if self.has_running_agent() {
-                    "Stop and retry the running agent"
+                    "Restart the running agent (same stage, attempt+1)"
                 } else {
-                    "Retry selected stage or task"
+                    "Rewind to the selected stage or task"
                 },
                 key_hint: None,
             });
@@ -93,7 +93,7 @@ impl App {
             commands.push(PaletteCommand {
                 name: "cancel",
                 aliases: &[],
-                help: "Cancel this session",
+                help: "Cancel this session (no further auto-launch)",
                 key_hint: None,
             });
         }

@@ -67,7 +67,7 @@ impl SessionState {
         let mut file = read_messages_file(&path)?;
         file.messages.push(message.clone());
         let text = toml::to_string_pretty(&file).context("failed to serialize messages")?;
-        atomic_write(&path, text.as_bytes())
+        crate::data::atomic::atomic_write(&path, text.as_bytes())
             .with_context(|| format!("failed to write messages to {}", path.display()))?;
         Ok(())
     }
@@ -98,7 +98,7 @@ impl SessionState {
         file.messages
             .retain(|message| !run_ids.contains(&message.run_id));
         let text = toml::to_string_pretty(&file).context("failed to serialize messages")?;
-        atomic_write(&path, text.as_bytes())
+        crate::data::atomic::atomic_write(&path, text.as_bytes())
             .with_context(|| format!("failed to write messages to {}", path.display()))?;
         Ok(())
     }
@@ -295,28 +295,4 @@ fn read_messages_file(path: &std::path::Path) -> Result<MessagesFile> {
     toml::from_str(&text)
         .with_context(|| format!("failed to parse messages from {}", path.display()))
 }
-/// Write `bytes` to `path` atomically: serialise to a sibling temp file, then
-/// rename over the target. Concurrent readers therefore see either the old
-/// contents or the new contents in full — never the empty/partial window
-/// `fs::write` exposes between its `O_TRUNC` and the trailing write.
-///
-/// `messages.toml` is the load-bearing case (the runner appends from a
-/// blocking task while the main tick reloads via `update_agent_progress`,
-/// and an empty TOML deserialises to an empty `Vec<Message>`, which would
-/// blank out the chat pane).
-fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    let tmp = match path.file_name() {
-        Some(name) => {
-            let mut tmp_name = std::ffi::OsString::from(name);
-            tmp_name.push(".tmp");
-            path.with_file_name(tmp_name)
-        }
-        None => return Err(std::io::Error::other("atomic_write: path has no filename")),
-    };
-    fs::write(&tmp, bytes)?;
-    if let Err(err) = fs::rename(&tmp, path) {
-        let _ = fs::remove_file(&tmp);
-        return Err(err);
-    }
-    Ok(())
-}
+

@@ -229,7 +229,7 @@ fn opening_or_focusing_session_does_not_launch_or_mutate_phase() {
         save_session("20260511-091000-000000001", Phase::WaitingToImplement);
 
         let mut shell = AppShell::new(
-            first.clone(),
+            first,
             AppStartupOrigin::Default,
             Arc::new(Config::baked_defaults()),
         )

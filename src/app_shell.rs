@@ -1407,7 +1407,7 @@ estimated_tokens = 100
             changed.title = Some("disk-only title".to_string());
             changed.save().expect("save disk-only title");
 
-            let mut event_state = first.clone();
+            let mut event_state = first;
             event_state.agent_runs.push(running_sharding_run(42));
             shell.apply_event(ShellEvent::SessionStateChanged {
                 session_id: "20260511-080000-000000001".to_string(),

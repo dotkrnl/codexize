@@ -305,7 +305,7 @@ mod tests {
         let mut fsm = Fsm::new();
         let s = spec(StageId::Brainstorm, 1);
         fsm.start(s.clone()).unwrap();
-        fsm.confirm_running(active(s.clone(), 1)).unwrap();
+        fsm.confirm_running(active(s, 1)).unwrap();
         let err = fsm.start(spec(StageId::SpecReview, 1)).unwrap_err();
         assert_eq!(err, FsmError::AlreadyActive);
     }
@@ -332,7 +332,7 @@ mod tests {
         let mut fsm = Fsm::new();
         let s = spec(StageId::Brainstorm, 1);
         fsm.start(s.clone()).unwrap();
-        fsm.confirm_running(active(s.clone(), 7)).unwrap();
+        fsm.confirm_running(active(s, 7)).unwrap();
         fsm.request_stop(AfterStop::GoIdle).unwrap();
         let res = fsm.confirm_dead(Outcome::Done).unwrap();
         assert_eq!(res.outcome, Outcome::Done);
@@ -347,7 +347,7 @@ mod tests {
         let mut fsm = Fsm::new();
         let s = spec(StageId::Brainstorm, 1);
         fsm.start(s.clone()).unwrap();
-        fsm.confirm_running(active(s.clone(), 1)).unwrap();
+        fsm.confirm_running(active(s, 1)).unwrap();
 
         let restart = AfterStop::Restart {
             spec: spec(StageId::Brainstorm, 2),
@@ -366,7 +366,7 @@ mod tests {
         let mut fsm = Fsm::new();
         let s = spec(StageId::Brainstorm, 1);
         fsm.start(s.clone()).unwrap();
-        fsm.confirm_running(active(s.clone(), 1)).unwrap();
+        fsm.confirm_running(active(s, 1)).unwrap();
 
         let restart = AfterStop::Restart {
             spec: spec(StageId::Brainstorm, 2),
@@ -387,7 +387,7 @@ mod tests {
         let mut fsm = Fsm::new();
         let s = spec(StageId::Brainstorm, 1);
         fsm.start(s.clone()).unwrap();
-        fsm.confirm_running(active(s.clone(), 1)).unwrap();
+        fsm.confirm_running(active(s, 1)).unwrap();
 
         let next_spec = spec(StageId::Brainstorm, 2);
         fsm.request_stop(AfterStop::Restart {

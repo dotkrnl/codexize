@@ -88,11 +88,27 @@ impl Stage for CoderStage {
         Phase::Implementation(1)
     }
 
-    fn next_phase_on_success(&self, ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Phase {
+    fn next_phase_on_success(&self, ctx: &StageCtx<'_>, outcome: &SuccessOutcome) -> Phase {
         let round = current_round(ctx);
+        let completed_task = if outcome.run.spec.stage_id == StageId::Coder
+            && outcome.run.spec.round == round
+        {
+            outcome.run.spec.task_id
+        } else {
+            None
+        };
         // Stay on Implementation(r) while any task is still pending; once
         // the round is fully Done, the FSM moves us to Review(r).
-        if next_pending_task(ctx, round).is_some() {
+        let has_pending = ctx.pending_task_ids.iter().copied().any(|task_id| {
+            Some(task_id) != completed_task
+                && !ctx.prior_runs.iter().any(|r| {
+                    r.stage_id == StageId::Coder
+                        && r.task_id == Some(task_id)
+                        && r.round == round
+                        && r.outcome == Some(Outcome::Done)
+                })
+        });
+        if has_pending {
             Phase::Implementation(round)
         } else {
             Phase::Review(round)
@@ -198,6 +214,23 @@ mod tests {
                 started_at: chrono::Utc::now(),
             },
         };
+        assert_eq!(s.next_phase_on_success(&ctx, &outcome), Phase::Review(2));
+    }
+
+    #[test]
+    fn next_phase_counts_successful_run_before_prior_history_updates() {
+        let s = CoderStage;
+        let pending = [1u32];
+        let prior: [RunHistoryEntry; 0] = [];
+        let ctx = mk_ctx(Phase::Implementation(2), &prior, &pending);
+        let outcome = SuccessOutcome {
+            run: crate::lifecycle::spec::ActiveRun {
+                run_id: 1,
+                spec: s.build_spec(&ctx),
+                started_at: chrono::Utc::now(),
+            },
+        };
+
         assert_eq!(s.next_phase_on_success(&ctx, &outcome), Phase::Review(2));
     }
 

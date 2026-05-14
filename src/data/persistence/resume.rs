@@ -49,6 +49,7 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
                     );
                     state.skip_to_impl_rationale = None;
                     state.skip_to_impl_kind = None;
+                    state.pending_decisions.skip_to_impl = None;
                     state.current_phase = Phase::SpecReviewRunning;
                     if let Err(e) = state.save() {
                         tracing::warn!("resume: failed to save after skip-to-impl fallback: {e}");
@@ -60,6 +61,7 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
                     ));
                     state.skip_to_impl_rationale = None;
                     state.skip_to_impl_kind = None;
+                    state.pending_decisions.skip_to_impl = None;
                     state.current_phase = Phase::SpecReviewRunning;
                     if let Err(e) = state.save() {
                         tracing::warn!("resume: failed to save after malformed artifact fallback: {e}");

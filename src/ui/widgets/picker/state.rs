@@ -18,6 +18,7 @@ use ratatui::{
     widgets::{Clear, Paragraph},
 };
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 #[path = "view.rs"]
 mod view;
@@ -564,11 +565,14 @@ pub fn create_session(
     }
     Ok(session_id)
 }
+static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 pub fn generate_session_id() -> String {
     let now: DateTime<Local> = SystemTime::now().into();
-    // Include nanosecond precision so two sessions created in the same
-    // wall-clock second cannot collide on the session directory name.
-    now.format("%Y%m%d-%H%M%S-%9f").to_string()
+    // Include nanosecond precision plus a monotonic process counter so
+    // two sessions created in rapid succession cannot collide.
+    let counter = SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{:09}-{:04}", now.format("%Y%m%d-%H%M%S"), now.timestamp_subsec_nanos(), counter)
 }
 #[cfg(test)]
 fn truncate_idea(idea: &Option<String>) -> String {

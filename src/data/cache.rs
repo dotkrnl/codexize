@@ -8,7 +8,8 @@ use std::io::Write;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-pub const TTL: Duration = Duration::from_secs(10 * 60);
+/// Maximum backoff cap for quota retry delays (used by app/models.rs).
+pub const MAX_QUOTA_RETRY_BACKOFF: Duration = Duration::from_secs(10 * 60);
 /// Current cache schema version. Cached dashboard rows must refresh into the
 /// exact provider/IPBR canonical shape.
 pub const CACHE_VERSION: u32 = 10;

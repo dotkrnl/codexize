@@ -7,10 +7,23 @@ impl App {
         run: &crate::state::RunRecord,
         failure_reason: Option<String>,
     ) -> Result<()> {
-        let pending_cancellation = self.pending_termination.as_ref().is_some_and(|pending| {
+        let legacy_cancellation = self.pending_termination.as_ref().is_some_and(|pending| {
             pending.run_id == run.id && pending.intent == TerminationIntent::CancelSession
         });
-        if pending_cancellation {
+        // 5c routes :cancel and the quit-running modal through
+        // LifecycleOps::cancel, which leaves the FSM in `Stopping { after:
+        // Cancel }` until confirm_dead lands inside `finalize_run_record`.
+        // Recognize that state alongside the legacy `pending_termination`
+        // mirror so callers migrated to the FSM still terminate to
+        // Phase::Cancelled exactly like the legacy CancelSession intent.
+        let fsm_cancellation = matches!(
+            self.fsm.view(),
+            crate::lifecycle::AgentState::Stopping {
+                after: crate::lifecycle::AfterStop::Cancel,
+                ..
+            }
+        );
+        if legacy_cancellation || fsm_cancellation {
             self.pending_termination = None;
             self.clear_agent_error();
             self.finalize_run_record(run.id, failure_reason.is_none(), failure_reason);

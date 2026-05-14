@@ -407,10 +407,7 @@ impl App {
                     );
                 }
                 AfterStop::Cancel => {
-                    tracing::warn!(
-                        "lifecycle op {label}: AfterStop::Cancel is not handled in 5b; \
-                         deferred to 5c"
-                    );
+                    self.apply_pending_stop_cancel(label);
                 }
             },
         }
@@ -606,7 +603,17 @@ impl App {
             return;
         };
         let legacy = crate::lifecycle::slim_to_old_phase(target, &self.state.current_phase);
+        let leaving_blocked = matches!(self.state.current_phase, Phase::BlockedNeedsUser)
+            && !matches!(legacy, Phase::BlockedNeedsUser);
         session_state::set_phase_for_operator_retry(&mut self.state, legacy);
+        if leaving_blocked {
+            // Mirror the `execute_transition` invariant: leaving
+            // BlockedNeedsUser clears the block_origin so a subsequent
+            // re-block records a fresh provenance. Required for the cancel
+            // path from a final-validation block — the lane gate would
+            // otherwise let stale provenance satisfy the force-ship guard.
+            self.state.block_origin = None;
+        }
         self.refresh_slim_phase();
         self.agent_line_count = 0;
         self.rebuild_tree_view(None);
@@ -664,6 +671,32 @@ impl App {
             L::Dreaming => self.launch_dreaming(),
             L::RepoStateUpdate => self.launch_repo_state_update(),
         }
+    }
+
+    /// Apply [`crate::lifecycle::AfterStop::Cancel`] when the operator
+    /// cancels a session while an agent is live.
+    ///
+    /// The FSM is already in `Stopping(Cancel)`; the runner supervisor still
+    /// needs an explicit cancel so the agent process terminates. The legacy
+    /// `current_phase` is left untouched here — `complete_run_finalization`
+    /// observes the FSM state once `confirm_dead` lands and drives the
+    /// transition to [`Phase::Cancelled`] from there.
+    fn apply_pending_stop_cancel(&mut self, _label: &'static str) {
+        let Some(run_id) = self.current_run_id else {
+            return;
+        };
+        let marker = format!("session_cancel_requested_by_user: run_id={run_id}");
+        if !self.marker_already_logged(&marker) {
+            let _ = self.state.log_event(marker);
+        }
+        self.pending_quit_confirmation_run_id = None;
+        self.pending_cancel_confirmation = false;
+        self.runner_supervisor.cancel_run(run_id);
+        self.push_status(
+            "Cancelling session...".to_string(),
+            Severity::Warn,
+            Duration::from_secs(5),
+        );
     }
 
     fn apply_pending_stop_go_idle(&mut self, _label: &'static str) {

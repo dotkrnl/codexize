@@ -1,7 +1,7 @@
 use super::super::palette::{self, PaletteCommand};
 use super::super::status_line::Severity;
-use super::super::{App, ModalKind, PendingTermination, StageId, TerminationIntent};
-use crate::state::{Phase, RunStatus};
+use super::super::{App, ModalKind, StageId};
+use crate::state::Phase;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::time::Duration;
 impl App {
@@ -334,27 +334,15 @@ impl App {
     pub(crate) fn handle_quit_running_agent_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Enter | KeyCode::Char('y') => {
-                let Some(run_id) = self.pending_quit_confirmation_run_id.take() else {
+                if self.pending_quit_confirmation_run_id.take().is_none() {
                     return false;
-                };
-                let Some(run) = self
-                    .state
-                    .agent_runs
-                    .iter()
-                    .find(|candidate| {
-                        candidate.id == run_id && candidate.status == RunStatus::Running
-                    })
-                    .cloned()
-                else {
-                    return false;
-                };
-                self.request_termination(
-                    PendingTermination {
-                        run_id,
-                        intent: TerminationIntent::StopAndQuit,
-                    },
-                    run.window_name,
-                );
+                }
+                // Confirm + cancel + quit: the modal cancels the session via
+                // the lifecycle FSM (which kills the running agent and marks
+                // the phase Cancelled) and then signals the App loop to exit
+                // on the next tick.
+                self.run_lifecycle_op("cancel", crate::lifecycle::LifecycleOps::cancel);
+                self.pending_app_exit = true;
                 false
             }
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') | KeyCode::Char('Q') => {
@@ -376,11 +364,17 @@ impl App {
             );
             return;
         }
-        if self
-            .pending_termination
-            .as_ref()
-            .is_some_and(|pending| pending.intent == TerminationIntent::CancelSession)
-        {
+        // Repeat-press idempotency: the FSM is the source of truth. When a
+        // cancel is already in flight the FSM sits in `Stopping { after:
+        // Cancel }`; just push a confirmation toast instead of re-opening
+        // the modal.
+        if matches!(
+            self.fsm.view(),
+            crate::lifecycle::AgentState::Stopping {
+                after: crate::lifecycle::AfterStop::Cancel,
+                ..
+            }
+        ) {
             self.push_status(
                 "Cancellation already pending.".to_string(),
                 Severity::Info,
@@ -412,28 +406,7 @@ impl App {
         if !self.cancel_command_available() {
             return;
         }
-        let running = self
-            .running_run()
-            .or_else(|| {
-                self.state
-                    .agent_runs
-                    .iter()
-                    .find(|candidate| candidate.status == RunStatus::Running)
-            })
-            .cloned();
-        if let Some(run) = running {
-            self.request_termination(
-                PendingTermination {
-                    run_id: run.id,
-                    intent: TerminationIntent::CancelSession,
-                },
-                run.window_name,
-            );
-            return;
-        }
-        if let Err(err) = self.transition_to_phase(Phase::Cancelled) {
-            self.surface_boundary_error(format!("cancel failed: {err:#}"), false);
-        }
+        self.run_lifecycle_op("cancel", crate::lifecycle::LifecycleOps::cancel);
     }
     pub(crate) fn handle_stage_error_modal_key(
         &mut self,

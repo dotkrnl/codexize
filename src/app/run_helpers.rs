@@ -440,6 +440,10 @@ impl App {
             self.pending_termination = None;
             self.apply_after_stop_rewind(*target, spec.clone(), cleanup.clone(), *clear_pending);
         }
+        // FSM-driven Cancel runs through `complete_run_finalization`, which
+        // reads the FSM's `Stopping(Cancel)` state and drives the
+        // Phase::Cancelled transition. No handling needed here.
+        let _ = resolution;
         let Some(finished) =
             session_state::finish_run_record(&mut self.state, run_id, success, error)
         else {

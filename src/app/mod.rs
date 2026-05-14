@@ -163,10 +163,22 @@ impl RetryLaunch {
 pub(crate) enum TerminationIntent {
     StopOnly,
     StopAndRetry(RetryLaunch),
+    // Step 5c-B routed the quit-while-running modal through
+    // `LifecycleOps::cancel` + `pending_app_exit`, so nothing constructs
+    // this variant any more. Tagged so the unmigrated `complete.rs` match
+    // arm keeps compiling under -D warnings; the whole enum disappears in
+    // Step 5c-C.
+    #[allow(dead_code)]
     StopAndQuit,
     CancelSession,
 }
 impl TerminationIntent {
+    // Step 5c-C removes this type entirely; the inherent methods are dead
+    // once `request_termination` is gone but they still pair with the enum
+    // for any caller still holding a `PendingTermination` (the rewind /
+    // stop mirror in apply_op_outcome). Tagged dead_code so this commit
+    // compiles cleanly under -D warnings.
+    #[allow(dead_code)]
     fn summary(&self) -> &'static str {
         match self {
             Self::StopOnly => "stop without retry",
@@ -175,6 +187,7 @@ impl TerminationIntent {
             Self::CancelSession => "cancel session",
         }
     }
+    #[allow(dead_code)]
     fn in_progress_status(&self) -> &'static str {
         match self {
             Self::StopOnly => "Stopping agent...",
@@ -206,6 +219,10 @@ pub(crate) struct PendingRewindApply {
     pub(crate) clear_pending: bool,
 }
 impl PendingTermination {
+    // See `TerminationIntent` — this method is dead once `request_termination`
+    // is removed in Step 5c-C. Preserved here for one commit so the stop /
+    // retry mirror still type-checks without further churn.
+    #[allow(dead_code)]
     fn marker(&self) -> &'static str {
         match self.intent {
             TerminationIntent::StopOnly | TerminationIntent::StopAndQuit => "agent_stopped_by_user",

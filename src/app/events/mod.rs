@@ -13,6 +13,10 @@ impl App {
         let events_path = self.session_dir().join("events.toml");
         std::fs::read_to_string(&events_path).is_ok_and(|events| events.contains(marker))
     }
+    // Step 5c-C removes this function entirely; the cancel path now flows
+    // through `LifecycleOps::cancel` and the stop / retry mirror that still
+    // writes `pending_termination` does so inline in `apply_op_outcome`.
+    #[allow(dead_code)]
     fn request_termination(&mut self, pending: PendingTermination, _window_name: String) {
         if let Some(existing) = self.pending_termination.as_ref()
             && existing.run_id == pending.run_id

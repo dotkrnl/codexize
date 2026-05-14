@@ -141,6 +141,7 @@ impl App {
             cache_watcher: None,
             pending_drain_deadline: None,
             pending_termination: None,
+            pending_rewind_apply: None,
             pending_quit_confirmation_run_id: None,
             pending_cancel_confirmation: false,
             interactive_exit_prompt_dismissed_at: None,

@@ -5,10 +5,10 @@ use crate::app::App;
 use crate::app::prompts::restore_artifacts;
 use crate::app::tree::node_at_path;
 use crate::artifacts::ArtifactKind;
+use crate::lifecycle::{LifecycleOps, slim_phase_for_stage_retry, slim_phase_for_task_retry};
 use crate::logic::rules::retry_phase_for_stage;
 use crate::scheduler::{is_implementation_lane_phase, manual_retry_allowed};
-use crate::state::{self as session_state, NodeKind, Phase, PipelineItemStatus, RunStatus};
-use std::collections::BTreeSet;
+use crate::state::{self as session_state, NodeKind, Phase, RunStatus};
 use std::time::Duration;
 impl App {
     pub(crate) fn retry_allowed_by_project_lane(&mut self, target_phase: Phase) -> bool {
@@ -116,187 +116,11 @@ impl App {
             );
             return;
         };
-        match target {
-            RetryTarget::Task(task_id) => self.retry_task(task_id),
-            RetryTarget::Stage(stage) => self.retry_stage(stage),
-        }
-    }
-    fn retry_task(&mut self, task_id: u32) {
-        let task_rounds = self
-            .state
-            .agent_runs
-            .iter()
-            .filter(|run| run.task_id == Some(task_id))
-            .map(|run| run.round)
-            .collect::<BTreeSet<_>>();
-        let retry_round = task_rounds
-            .iter()
-            .next_back()
-            .copied()
-            .or(match self.state.current_phase {
-                Phase::ImplementationRound(round) | Phase::ReviewRound(round) => Some(round),
-                Phase::BuilderRecovery(round)
-                | Phase::BuilderRecoveryPlanReview(round)
-                | Phase::BuilderRecoverySharding(round) => Some(round),
-                _ => None,
-            })
-            .unwrap_or(1);
-        if !self.retry_allowed_by_project_lane(Phase::ImplementationRound(retry_round)) {
-            return;
-        }
-        let recovery_context_matches = self.state.builder.recovery_trigger_task_id == Some(task_id);
-        let removed_runs = self
-            .state
-            .agent_runs
-            .iter()
-            .filter(|run| {
-                run.task_id == Some(task_id)
-                    || (recovery_context_matches
-                        && task_rounds.contains(&run.round)
-                        && run.task_id.is_none()
-                        && (run.stage == "recovery"
-                            || run.window_name.contains("[Recovery Plan Review]")
-                            || run.window_name.contains("[Recovery Sharding]")))
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        if removed_runs.is_empty() {
-            self.push_status(
-                format!("retry: no attempt logs for task {task_id}"),
-                Severity::Warn,
-                Duration::from_secs(3),
-            );
-            return;
-        }
-        // Preserve failed RunRecord rows and their messages so the next
-        // attempt's prompt can include the prior-attempt transcript and
-        // the operator does not have to re-type previously-answered
-        // recovery decisions. Only running runs are preempted.
-        let prior_ids = self.preempt_prior_runs(&removed_runs);
-        self.failed_models.retain(|(stage, key_task_id, _), _| {
-            *key_task_id != Some(task_id) && stage != "recovery"
-        });
-        if let Some(item) = self
-            .state
-            .builder
-            .pipeline_items
-            .iter_mut()
-            .find(|item| item.stage == "coder" && item.task_id == Some(task_id))
-        {
-            item.status = PipelineItemStatus::Pending;
-            item.round = None;
-        } else {
-            self.state
-                .builder
-                .push_pipeline_item(crate::state::PipelineItem {
-                    id: 0,
-                    stage: "coder".to_string(),
-                    task_id: Some(task_id),
-                    round: None,
-                    status: PipelineItemStatus::Pending,
-                    title: self.state.builder.task_titles.get(&task_id).cloned(),
-                    mode: None,
-                    trigger: None,
-                    interactive: None,
-                    iteration: self.state.builder.iteration.max(1),
-                });
-        }
-        self.clear_agent_error();
-        self.current_run_id = None;
-        self.run_launched = false;
-        self.live_summary_cached_text.clear();
-        self.live_summary_cached_mtime = None;
-        session_state::set_phase_for_operator_retry(
-            &mut self.state,
-            Phase::ImplementationRound(retry_round),
-        );
-        let _ = self.state.log_event(format!(
-            "palette_retry: task={task_id} prior_runs={}",
-            prior_ids.len()
-        ));
-        self.save_state();
-        self.rebuild_tree_view(None);
-        self.launch_coder();
-    }
-    fn retry_stage(&mut self, stage: &'static str) {
-        let removed_runs = self
-            .state
-            .agent_runs
-            .iter()
-            .filter(|run| run.stage == stage && run.task_id.is_none())
-            .cloned()
-            .collect::<Vec<_>>();
-        if removed_runs.is_empty() {
-            self.push_status(
-                format!(
-                    "retry: no attempt logs for {}",
-                    RetryTarget::Stage(stage).label()
-                ),
-                Severity::Warn,
-                Duration::from_secs(3),
-            );
-            return;
-        }
-        if let Some(phase) = Self::retry_gate_phase_for_stage(stage)
-            && !self.retry_allowed_by_project_lane(phase)
-        {
-            return;
-        }
-        let prior_ids = self.preempt_prior_runs(&removed_runs);
-        self.failed_models
-            .retain(|(key_stage, key_task_id, _), _| key_stage != stage || key_task_id.is_some());
-        self.clear_agent_error();
-        self.current_run_id = None;
-        self.run_launched = false;
-        self.live_summary_cached_text.clear();
-        self.live_summary_cached_mtime = None;
-        if let Some(phase) = retry_phase_for_stage(stage) {
-            session_state::set_phase_for_operator_retry(&mut self.state, phase);
-        }
-        let _ = self.state.log_event(format!(
-            "palette_retry: stage={stage} prior_runs={}",
-            prior_ids.len()
-        ));
-        self.save_state();
-        self.rebuild_tree_view(None);
-        match stage {
-            "brainstorm" => {
-                let idea = self.state.idea_text.clone().unwrap_or_default();
-                self.launch_brainstorm(idea);
-            }
-            "spec-review" => self.launch_spec_review(),
-            "planning" => self.launch_planning(),
-            "plan-review" => self.launch_plan_review(),
-            "sharding" => {
-                // Phase was already set to WaitingToImplement by
-                // retry_phase_for_stage above. The shell scheduler dispatches
-                // it on a later tick so the repo-state baseline is re-verified
-                // before any sharding launch — spec §Data model line 96.
-            }
-            _ => {}
-        }
-    }
-    /// Preempt the prior runs of a stage so the operator can launch a
-    /// fresh attempt — but keep the failed `RunRecord`s and their
-    /// `messages.toml` rows. The new attempt's prompt builder reads them
-    /// to render the prior-attempts transcript so the operator does not
-    /// have to re-answer questions they already answered upstream. Files
-    /// under `artifacts/` are kept too: every per-attempt path is
-    /// suffixed with the attempt number, so they coexist with the
-    /// new attempt's outputs and serve as audit trail.
-    fn preempt_prior_runs(&mut self, prior_runs: &[crate::state::RunRecord]) -> BTreeSet<u64> {
-        let prior_ids = prior_runs.iter().map(|run| run.id).collect::<BTreeSet<_>>();
-        for run in prior_runs {
-            if run.status == RunStatus::Running {
-                self.cancel_run_label(&run.window_name);
-                self.finalize_run_record(
-                    run.id,
-                    false,
-                    Some("preempted by operator retry".to_string()),
-                );
-            }
-        }
-        prior_ids
+        let target_phase = match target {
+            RetryTarget::Task(task_id) => slim_phase_for_task_retry(task_id, &self.state),
+            RetryTarget::Stage(stage) => slim_phase_for_stage_retry(stage),
+        };
+        self.run_lifecycle_op("retry", |ctx| LifecycleOps::rewind(ctx, target_phase));
     }
     pub(crate) fn go_back(&mut self) {
         use std::fs;

@@ -189,6 +189,22 @@ pub(crate) struct PendingTermination {
     run_id: u64,
     intent: TerminationIntent,
 }
+/// Side effects parked on the App when an operator rewind lands while an
+/// agent is still alive. The runner is asked to cancel synchronously; the
+/// FSM stays in `Stopping` carrying [`crate::lifecycle::AfterStop::Rewind`]
+/// until `finalize_run_record` confirms the agent is dead. At that point
+/// [`App::apply_after_stop_rewind`] consumes this slot.
+///
+/// Step 5d removes the slot once `runs.toml` carries the queued rewind
+/// natively. Until then it lives in-memory; a TUI crash mid-rewind falls
+/// back to the resume path's repair logic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingRewindApply {
+    pub(crate) target: crate::lifecycle::Phase,
+    pub(crate) spec: Option<crate::lifecycle::StageSpec>,
+    pub(crate) cleanup: crate::lifecycle::CleanupPlan,
+    pub(crate) clear_pending: bool,
+}
 impl PendingTermination {
     fn marker(&self) -> &'static str {
         match self.intent {
@@ -336,6 +352,11 @@ pub struct App {
     pub(crate) cache_watcher: Option<crate::data::cache::CacheWatcher>,
     pub(crate) pending_drain_deadline: Option<Instant>,
     pub(crate) pending_termination: Option<PendingTermination>,
+    /// Rewind side effects waiting on the runner-confirmed-dead signal.
+    /// Set by [`crate::app::App::apply_op_outcome`] when a rewind lands
+    /// while an agent is live; consumed by `finalize_run_record` once the
+    /// previous agent dies. See [`PendingRewindApply`].
+    pub(crate) pending_rewind_apply: Option<PendingRewindApply>,
     pub(crate) pending_quit_confirmation_run_id: Option<u64>,
     pub(crate) pending_cancel_confirmation: bool,
     pub(crate) interactive_exit_prompt_dismissed_at: Option<(u64, usize)>,

@@ -409,7 +409,37 @@ impl App {
                 .fsm
                 .request_stop(crate::lifecycle::AfterStop::GoIdle);
         }
-        let _ = self.fsm_confirm_dead_mirroring(fsm_outcome);
+        let resolution = self.fsm_confirm_dead_mirroring(fsm_outcome).ok();
+        // If the operator queued a rewind via LifecycleOps::rewind on a live
+        // agent, the FSM's resolution carries the spec inside
+        // AfterStop::Rewind. Read it back and merge it into the parked
+        // pending_rewind_apply, then drive the post-stop apply.
+        if let (
+            Some(crate::lifecycle::StopResolution {
+                next:
+                    crate::lifecycle::AfterStop::Rewind {
+                        target,
+                        spec,
+                        cleanup,
+                        clear_pending,
+                    },
+                ..
+            }),
+            Some(pending),
+        ) = (resolution.as_ref(), self.pending_rewind_apply.take())
+        {
+            // The FSM-carried target wins over the App-side mirror: the FSM
+            // is the source of truth for what AfterStop::Rewind ultimately
+            // resolved to under stop-precedence. Cleanup likewise comes
+            // from the resolution so a fresh request_stop that replaced an
+            // earlier rewind is honored.
+            let _ = pending; // keep the slot drained; spec/target/cleanup taken from FSM.
+            // The legacy pending_termination mirror is cleared so the
+            // finalization::complete path doesn't double-dispatch a stop
+            // intent against the same run.
+            self.pending_termination = None;
+            self.apply_after_stop_rewind(*target, spec.clone(), cleanup.clone(), *clear_pending);
+        }
         let Some(finished) =
             session_state::finish_run_record(&mut self.state, run_id, success, error)
         else {

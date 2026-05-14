@@ -26,14 +26,6 @@ pub(crate) enum RetryTarget {
     Task(u32),
     Stage(&'static str),
 }
-impl RetryTarget {
-    fn label(&self) -> String {
-        match self {
-            Self::Task(task_id) => format!("task {task_id}"),
-            Self::Stage(stage) => stage.replace('-', " "),
-        }
-    }
-}
 fn retry_stage_for_label(label: &str) -> Option<&'static str> {
     match label {
         "Brainstorm" => Some("brainstorm"),
@@ -357,14 +349,17 @@ impl App {
         f(&mut ctx)
     }
 
-    /// Apply the side effects of a [`crate::lifecycle::OpOutcome`] from a
-    /// running-agent operator command (`:stop` or `:retry`).
+    /// Apply the side effects of a [`crate::lifecycle::OpOutcome`] from any
+    /// operator command (`:stop`, `:retry`, `:back`, tree-row rewind).
     ///
-    /// 5a only handles the [`crate::lifecycle::OpAction::PendingStop`] paths
-    /// for `AfterStop::GoIdle` and `AfterStop::Restart` — the two cases
-    /// `LifecycleOps::stop` and `LifecycleOps::restart` ever produce.
-    /// Rewind / Cancel still flow through the legacy `go_back` and
-    /// `confirm_cancel_session` paths until 5b/5c migrate them.
+    /// 5a handled the [`crate::lifecycle::OpAction::PendingStop`] paths for
+    /// `AfterStop::GoIdle` and `AfterStop::Restart`. 5b extends the surface
+    /// to handle [`crate::lifecycle::OpAction::Immediate`] (for rewinds
+    /// while the FSM is idle) and `AfterStop::Rewind` (for rewinds while an
+    /// agent is live; the deferred cleanup/launch fires from
+    /// `finalize_run_record` via [`Self::apply_after_stop_rewind`]).
+    /// Cancel remains routed through the legacy `confirm_cancel_session`
+    /// path until 5c migrates it.
     pub(crate) fn apply_op_outcome(
         &mut self,
         outcome: crate::lifecycle::OpOutcome,
@@ -375,21 +370,261 @@ impl App {
             OpOutcome::NoOp(reason) => {
                 self.push_status(reason, Severity::Info, Duration::from_secs(3));
             }
-            OpOutcome::Staged(OpAction::Immediate { .. }) => {
-                tracing::warn!(
-                    "lifecycle op {label}: Immediate path is not handled in 5a; ignoring"
+            OpOutcome::Staged(OpAction::Immediate {
+                phase_change,
+                cleanup,
+                clear_paused,
+                clear_pending,
+                start_spec,
+            }) => {
+                self.apply_immediate_op_action(
+                    label,
+                    phase_change,
+                    cleanup,
+                    clear_paused,
+                    clear_pending,
+                    start_spec,
                 );
             }
-            OpOutcome::Staged(OpAction::PendingStop { after, .. }) => match after {
+            OpOutcome::Staged(OpAction::PendingStop {
+                after,
+                cleanup,
+                phase_change,
+                clear_paused,
+                clear_pending,
+            }) => match after {
                 AfterStop::GoIdle => self.apply_pending_stop_go_idle(label),
                 AfterStop::Restart { .. } => self.apply_pending_stop_restart(label),
-                AfterStop::Rewind { .. } | AfterStop::Cancel => {
+                AfterStop::Rewind { .. } => {
+                    self.apply_pending_stop_rewind(
+                        label,
+                        cleanup,
+                        phase_change,
+                        clear_paused,
+                        clear_pending,
+                    );
+                }
+                AfterStop::Cancel => {
                     tracing::warn!(
-                        "lifecycle op {label}: AfterStop::{after:?} is not handled in 5a; \
-                         deferred to 5b/5c"
+                        "lifecycle op {label}: AfterStop::Cancel is not handled in 5b; \
+                         deferred to 5c"
                     );
                 }
             },
+        }
+    }
+
+    /// Apply an [`crate::lifecycle::OpAction::Immediate`] plan synchronously.
+    ///
+    /// Used by operator rewinds (`:back`, tree-row Enter) when no agent is
+    /// active. The cleanup is applied first so the launch dispatcher sees
+    /// the post-rewind tree shape; the legacy [`crate::state::Phase`] is
+    /// then driven through the canonical transition helper so any other
+    /// observers stay in sync.
+    fn apply_immediate_op_action(
+        &mut self,
+        label: &'static str,
+        phase_change: Option<crate::lifecycle::Phase>,
+        cleanup: crate::lifecycle::CleanupPlan,
+        clear_paused: bool,
+        clear_pending: bool,
+        start_spec: Option<crate::lifecycle::StageSpec>,
+    ) {
+        // The lane gate is the scheduler's job in 5c, but until then we keep
+        // the in-flight cutover safe by gating any rewind that would land on
+        // a Phase whose legacy projection sits inside the implementation
+        // lane. Skipping the launch leaves the FSM idle and the operator
+        // sees the "implementation lane is occupied" status push from
+        // `retry_allowed_by_project_lane`.
+        if let Some(target) = phase_change {
+            let legacy_target = crate::lifecycle::slim_to_old_phase(target, &self.state.current_phase);
+            if !self.retry_allowed_by_project_lane(legacy_target) {
+                return;
+            }
+        }
+        // Apply file-level cleanup first so the launcher sees the post-
+        // rewind tree shape.
+        Self::apply_cleanup_plan(&cleanup);
+        self.apply_legacy_phase_change(phase_change);
+        if clear_paused {
+            self.paused_at_phase = None;
+        }
+        if clear_pending {
+            // The slim PendingDecisions slot is still mostly unused in 5b;
+            // touch it so the field stays observable for 5c's modal cutover.
+            self.pending_decisions = crate::lifecycle::PendingDecisions::default();
+        }
+        // The Immediate path means the FSM was Idle; reset the per-launch
+        // mirror state the legacy code resets in retry.rs.
+        self.clear_agent_error();
+        self.current_run_id = None;
+        self.run_launched = false;
+        self.live_summary_cached_text.clear();
+        self.live_summary_cached_mtime = None;
+        self.save_state();
+        self.rebuild_tree_view(None);
+        let _ = self.state.log_event(format!("lifecycle_op: {label} immediate"));
+        if let Some(spec) = start_spec {
+            // The FSM is still Idle at this point; clear paused_at_phase so
+            // the legacy auto-launch dispatcher (driven by current_phase)
+            // doesn't double-fire.
+            self.dispatch_start(&spec);
+        }
+    }
+
+    /// Apply an [`crate::lifecycle::AfterStop::Rewind`] resolution once the
+    /// runner confirms the previously-running agent is dead.
+    ///
+    /// Mirror of the Immediate path with one difference: cancel_run was
+    /// already issued at request-time via `apply_pending_stop_rewind`, so
+    /// the runner side is already winding down. Cleanup happens here so the
+    /// dead run's artifacts don't race the cleanup; the deferred launch
+    /// dispatches once cleanup completes.
+    pub(crate) fn apply_after_stop_rewind(
+        &mut self,
+        target: crate::lifecycle::Phase,
+        spec: Option<crate::lifecycle::StageSpec>,
+        cleanup: crate::lifecycle::CleanupPlan,
+        clear_pending: bool,
+    ) {
+        let legacy_target = crate::lifecycle::slim_to_old_phase(target, &self.state.current_phase);
+        if !self.retry_allowed_by_project_lane(legacy_target) {
+            return;
+        }
+        Self::apply_cleanup_plan(&cleanup);
+        self.apply_legacy_phase_change(Some(target));
+        self.paused_at_phase = None;
+        if clear_pending {
+            self.pending_decisions = crate::lifecycle::PendingDecisions::default();
+        }
+        self.clear_agent_error();
+        self.current_run_id = None;
+        self.run_launched = false;
+        self.live_summary_cached_text.clear();
+        self.live_summary_cached_mtime = None;
+        self.save_state();
+        self.rebuild_tree_view(None);
+        if let Some(spec) = spec {
+            self.dispatch_start(&spec);
+        }
+    }
+
+    /// Issue the runner cancel and stash the rewind plan as a
+    /// `PendingTermination` so the deferred apply runs once the dead-run
+    /// signal lands. Keeps the legacy `pending_termination` mirror in sync
+    /// for any path that still observes it (e.g. tests, finalize_run_record).
+    fn apply_pending_stop_rewind(
+        &mut self,
+        _label: &'static str,
+        cleanup: crate::lifecycle::CleanupPlan,
+        phase_change: Option<crate::lifecycle::Phase>,
+        _clear_paused: bool,
+        clear_pending: bool,
+    ) {
+        let Some(run_id) = self.current_run_id else {
+            return;
+        };
+        let target = phase_change.unwrap_or(self.slim_phase);
+        let marker = format!("lifecycle_op_rewind_requested: run_id={run_id}");
+        if !self.marker_already_logged(&marker) {
+            let _ = self.state.log_event(marker);
+        }
+        self.pending_quit_confirmation_run_id = None;
+        // Park the rewind side effects on the App so finalize_run_record can
+        // pick them up when the runner confirms the agent is dead. The slot
+        // is per-App and only one rewind is in flight at a time (the FSM is
+        // already in Stopping, which precludes additional starts).
+        self.pending_rewind_apply = Some(PendingRewindApply {
+            target,
+            spec: None, // The FSM's confirm_dead carries the spec; see below.
+            cleanup,
+            clear_pending,
+        });
+        // The FSM holds the operator's spec inside AfterStop::Rewind. When
+        // confirm_dead resolves, we read the spec back out of the resolution
+        // and merge it into the parked apply.
+        self.pending_termination = Some(PendingTermination {
+            run_id,
+            intent: TerminationIntent::StopOnly,
+        });
+        self.runner_supervisor.cancel_run(run_id);
+        self.push_status(
+            "Rewinding session...".to_string(),
+            Severity::Warn,
+            Duration::from_secs(5),
+        );
+    }
+
+    /// Run an `OpsCtx` closure and apply its [`crate::lifecycle::OpOutcome`]
+    /// uniformly. Used by all operator commands — `:stop`, `:retry`, `:back`,
+    /// tree-row rewinds — so the apply path is one throat.
+    pub(crate) fn run_lifecycle_op<F>(&mut self, label: &'static str, op: F)
+    where
+        F: FnOnce(&mut crate::lifecycle::OpsCtx<'_>) -> crate::lifecycle::OpOutcome,
+    {
+        self.ensure_fsm_running_mirror();
+        let outcome = self.with_running_agent_ops_ctx(op);
+        self.apply_op_outcome(outcome, label);
+    }
+
+    /// Apply a [`crate::lifecycle::CleanupPlan`] to disk.
+    ///
+    /// Mirrors the legacy `go_back` semantics: missing files / directories
+    /// are not an error (rewind is best-effort cleanup); `restore_backups`
+    /// move a backup to its destination only when the backup actually
+    /// exists, then remove the backup so a second rewind doesn't replay it.
+    fn apply_cleanup_plan(plan: &crate::lifecycle::CleanupPlan) {
+        for path in &plan.delete {
+            if path.is_dir() {
+                let _ = std::fs::remove_dir_all(path);
+            } else {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        for (backup, dest) in &plan.restore_backups {
+            if backup.exists() {
+                let _ = std::fs::copy(backup, dest);
+                let _ = std::fs::remove_file(backup);
+            }
+        }
+    }
+
+    /// Drive the legacy [`crate::state::Phase`] to the variant matching the
+    /// rewind target and refresh the slim-phase mirror.
+    fn apply_legacy_phase_change(&mut self, target: Option<crate::lifecycle::Phase>) {
+        let Some(target) = target else {
+            return;
+        };
+        let legacy = crate::lifecycle::slim_to_old_phase(target, &self.state.current_phase);
+        let _ = self.transition_to_phase(legacy);
+    }
+
+    /// Bridge a [`crate::lifecycle::StageSpec`] to the matching legacy
+    /// `launch_X` entry point. 5c will make `launch_*` take the spec as a
+    /// parameter; for 5b we route by `stage_id`.
+    fn dispatch_start(&mut self, spec: &crate::lifecycle::StageSpec) {
+        use crate::lifecycle::StageId as L;
+        match spec.stage_id {
+            L::Brainstorm => {
+                let idea = self.state.idea_text.clone().unwrap_or_default();
+                self.launch_brainstorm(idea);
+            }
+            L::SpecReview => self.launch_spec_review(),
+            L::Planning => self.launch_planning(),
+            L::PlanReview => self.launch_plan_review(),
+            L::Sharding => {
+                // Sharding launches lazily on the next scheduler tick after a
+                // baseline check; today the legacy auto_launch handles this.
+            }
+            L::Coder => self.launch_coder(),
+            L::Reviewer => self.launch_reviewer(),
+            L::Recovery => self.launch_recovery(),
+            L::RecoveryPlanReview => self.launch_recovery_plan_review(),
+            L::RecoverySharding => self.launch_recovery_sharding(),
+            L::FinalValidation => self.launch_final_validation(),
+            L::Simplification => self.launch_simplifier(),
+            L::Dreaming => self.launch_dreaming(),
+            L::RepoStateUpdate => self.launch_repo_state_update(),
         }
     }
 

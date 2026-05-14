@@ -173,10 +173,10 @@ fn decode_meta(item: &Item, out: &mut MetaSection, parent: &str) -> Result<(), L
         match k {
             "version" => {
                 let n = require_integer(v, &dotted(parent, "version"))?;
-                if n as u32 != SUPPORTED_VERSION {
+                if n != i64::from(SUPPORTED_VERSION) {
                     return Err(LoadError::UnsupportedVersion { found: n });
                 }
-                out.version = n as u32;
+                out.version = SUPPORTED_VERSION;
             }
             other => {
                 return unknown(parent, other, v, &["version"]);
@@ -1265,6 +1265,15 @@ mod tests {
         let err = load_str("[meta]\nversion = 2\n").unwrap_err();
         match err {
             LoadError::UnsupportedVersion { found } => assert_eq!(found, 2),
+            other => panic!("wrong error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unsupported_wrapping_version_rejected() {
+        let err = load_str("[meta]\nversion = 4294967297\n").unwrap_err();
+        match err {
+            LoadError::UnsupportedVersion { found } => assert_eq!(found, 4_294_967_297),
             other => panic!("wrong error: {other:?}"),
         }
     }

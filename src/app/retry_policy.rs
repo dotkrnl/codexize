@@ -149,8 +149,9 @@ impl App {
             // Sharding's auto-fallback retry must re-enter the
             // WaitingToImplement gate so the shell scheduler re-verifies
             // the repo-state baseline before dispatching sharding again —
-            // spec §Data model line 96. Other stages can be picked up
-            // directly by the next scheduler tick from the failed phase.
+            // spec §Data model line 96. BuilderRecoverySharding is exempt
+            // because it is already inside a recovery sub-pipeline; the
+            // scheduler handles its baseline differently.
             let sharding_pause = matches!(failed_run.stage.as_str(), "sharding")
                 && !matches!(
                     self.state.current_phase,

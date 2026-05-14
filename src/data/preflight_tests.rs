@@ -69,6 +69,9 @@ fn claude_acp_install_root_uses_home_codexize_acp() {
 
 #[test]
 fn detect_ignored_accepts_required_directory_entry_before_dir_exists() {
+    if !git_available() {
+        return;
+    }
     with_temp_dir(|| {
         git_cmd(&["init"]);
         fs::write(".gitignore", ".codexize/\n").unwrap();
@@ -79,6 +82,9 @@ fn detect_ignored_accepts_required_directory_entry_before_dir_exists() {
 
 #[test]
 fn detect_ignored_accepts_required_entry_when_old_session_file_is_tracked() {
+    if !git_available() {
+        return;
+    }
     with_temp_dir(|| {
         git_cmd(&["init"]);
         fs::write(".gitignore", ".codexize/\n").unwrap();
@@ -147,6 +153,16 @@ fn gitignore_generation_is_deterministic_without_runtime_launch() {
     });
 }
 
+fn git_available() -> bool {
+    Command::new("git")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 fn git_cmd(args: &[&str]) {
     let status = Command::new("git").args(args).status().unwrap();
     assert!(
@@ -202,6 +218,9 @@ fn write_fake_executable(path: &Path, script: &str) {
 
 #[test]
 fn gitignore_modal_clean_repo_auto_commits_with_fixed_subject() {
+    if !git_available() {
+        return;
+    }
     with_temp_dir(|| {
         init_repo_with_head();
         append_to_gitignore(".codexize/").unwrap();
@@ -219,6 +238,9 @@ fn gitignore_modal_clean_repo_auto_commits_with_fixed_subject() {
 
 #[test]
 fn gitignore_modal_staged_gitignore_still_auto_commits() {
+    if !git_available() {
+        return;
+    }
     with_temp_dir(|| {
         init_repo_with_head();
         fs::write(".gitignore", "target/\nlogs/\n").unwrap();
@@ -242,6 +264,9 @@ fn gitignore_modal_staged_gitignore_still_auto_commits() {
 
 #[test]
 fn gitignore_modal_dirty_repo_skips_auto_commit() {
+    if !git_available() {
+        return;
+    }
     with_temp_dir(|| {
         init_repo_with_head();
         let previous_head = git_output(&["rev-parse", "HEAD"]);
@@ -257,6 +282,9 @@ fn gitignore_modal_dirty_repo_skips_auto_commit() {
 
 #[test]
 fn gitignore_modal_only_codexize_changes_skips_auto_commit() {
+    if !git_available() {
+        return;
+    }
     with_temp_dir(|| {
         init_repo_with_head();
         let previous_head = git_output(&["rev-parse", "HEAD"]);
@@ -270,6 +298,9 @@ fn gitignore_modal_only_codexize_changes_skips_auto_commit() {
 
 #[test]
 fn gitignore_modal_missing_identity_is_swallowed_and_warned() {
+    if !git_available() {
+        return;
+    }
     with_temp_dir(|| {
         git_cmd(&["init"]);
         git_cmd(&["config", "user.name", ""]);

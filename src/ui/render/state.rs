@@ -340,18 +340,18 @@ pub(crate) fn modal_accent_color(kind: ModalKind) -> Color {
         ModalKind::FinalValidationBlocked => Color::Red,
     }
 }
-pub(crate) fn modal_title(kind: ModalKind) -> Option<&'static str> {
+pub(crate) fn modal_title(kind: ModalKind) -> &'static str {
     match kind {
-        ModalKind::SkipToImpl => Some("Skip to implementation?"),
-        ModalKind::GitGuard => Some("Git guard"),
-        ModalKind::QuitRunningAgent => Some("Stop running agent and quit?"),
-        ModalKind::CancelSession => Some("Cancel this session?"),
-        ModalKind::InteractiveExitPrompt => Some("Any requests?"),
-        ModalKind::SpecReviewPaused => Some("Spec review complete"),
-        ModalKind::PlanReviewPaused => Some("Plan review complete"),
-        ModalKind::StageError(stage_id) => Some(stage_error_title(stage_id)),
-        ModalKind::FinalValidationBlocked => Some("Final Validation Blocked"),
-        ModalKind::DreamingDecision => Some("Run Dreaming?"),
+        ModalKind::SkipToImpl => "Skip to implementation?",
+        ModalKind::GitGuard => "Git guard",
+        ModalKind::QuitRunningAgent => "Stop running agent and quit?",
+        ModalKind::CancelSession => "Cancel this session?",
+        ModalKind::InteractiveExitPrompt => "Any requests?",
+        ModalKind::SpecReviewPaused => "Spec review complete",
+        ModalKind::PlanReviewPaused => "Plan review complete",
+        ModalKind::StageError(stage_id) => stage_error_title(stage_id),
+        ModalKind::FinalValidationBlocked => "Final Validation Blocked",
+        ModalKind::DreamingDecision => "Run Dreaming?",
     }
 }
 pub(crate) fn stage_error_content(

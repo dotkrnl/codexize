@@ -234,7 +234,7 @@ impl SessionPicker {
                 }
                 Ok(KeyAction::Continue)
             }
-            KeyCode::Enter => self.handle_select(),
+            KeyCode::Enter => Ok(self.handle_select()),
             KeyCode::Char('n') => {
                 self.input_mode = true;
                 self.input_buffer.clear();
@@ -473,14 +473,14 @@ impl SessionPicker {
         let _ = crate::input_editor::apply(&mut self.input_buffer, &mut self.input_cursor, key);
         Ok(KeyAction::Continue)
     }
-    fn handle_select(&self) -> Result<KeyAction> {
+    fn handle_select(&self) -> KeyAction {
         if let Some(entry) = self.selected_entry() {
-            Ok(KeyAction::SelectSession(PickerSelection {
+            KeyAction::SelectSession(PickerSelection {
                 session_id: entry.session_id.clone(),
                 created: false,
-            }))
+            })
         } else {
-            Ok(KeyAction::Continue)
+            KeyAction::Continue
         }
     }
     fn handle_restore(&mut self) -> Result<KeyAction> {

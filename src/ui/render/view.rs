@@ -253,7 +253,7 @@ impl App {
                 frame,
                 area,
                 modal_accent_color(m),
-                modal_title(m),
+                Some(modal_title(m)),
                 content,
                 modal_keymap,
             );
@@ -396,11 +396,11 @@ impl App {
         let right = self.top_rule_right_text();
         top_rule_with_left_spans(
             top_rule_left_spans_for(&self.project_name, view.modes),
-            right.as_deref(),
+            Some(right.as_str()),
             width,
         )
     }
-    fn top_rule_right_text(&self) -> Option<String> {
+    fn top_rule_right_text(&self) -> String {
         // When a run is active, show "<agent-name> · <live-summary-title>".
         // Otherwise show "<stage-label> · <state-label>".
         if let Some(run_id) = self.current_run_id
@@ -412,11 +412,11 @@ impl App {
             } else {
                 extract_short_title(&self.live_summary_cached_text)
             };
-            return Some(format!("{} · {}", agent, summary));
+            return format!("{} · {}", agent, summary);
         }
         let label = self.state.current_phase.label();
         let state_label = self.phase_state_label();
-        Some(format!("{} · {}", label, state_label))
+        format!("{} · {}", label, state_label)
     }
     fn phase_state_label(&self) -> &'static str {
         if self.state.agent_error.is_some() {

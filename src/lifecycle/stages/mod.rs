@@ -5,3 +5,6 @@
 //! into a [`StageRegistry`](super::StageRegistry) yet — Step 3 owns the
 //! registration step. The structs and their tests exist now so the trait
 //! contract is exercised before the FSM scheduler turns them on.
+pub mod brainstorm;
+
+pub use brainstorm::BrainstormStage;

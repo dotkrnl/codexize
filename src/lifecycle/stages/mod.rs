@@ -9,6 +9,7 @@ pub mod brainstorm;
 pub mod coder;
 pub mod plan_review;
 pub mod planning;
+pub mod reviewer;
 pub mod sharding;
 pub mod spec_review;
 
@@ -16,6 +17,7 @@ pub use brainstorm::BrainstormStage;
 pub use coder::CoderStage;
 pub use plan_review::PlanReviewStage;
 pub use planning::PlanningStage;
+pub use reviewer::ReviewerStage;
 pub use sharding::ShardingStage;
 pub use spec_review::SpecReviewStage;
 

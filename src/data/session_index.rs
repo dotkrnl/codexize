@@ -361,8 +361,7 @@ mod tests {
 
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
         let _guard = test_fs_lock()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         // Safety: tests are serialised by `test_fs_lock`, so the env var is
         // not touched by another thread concurrently.

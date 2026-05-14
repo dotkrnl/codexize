@@ -155,8 +155,7 @@ fn test_try_parse_toml_artifact_valid() {
 /// cleaned up.
 fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
     let _guard = crate::state::test_fs_lock()
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
+        .lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     // SAFETY: `set_var`/`remove_var` are not thread-safe on *nix; the

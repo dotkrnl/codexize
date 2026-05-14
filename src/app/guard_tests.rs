@@ -133,8 +133,7 @@ fn guard_mode_round_trips_through_toml() {
 
 fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
     let _guard = crate::state::test_fs_lock()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+        .lock();
     let prev = std::env::current_dir().unwrap();
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         std::env::set_current_dir(dir).unwrap();

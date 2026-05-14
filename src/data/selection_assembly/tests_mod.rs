@@ -297,8 +297,7 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
         ]),
     );
     let _guard = crate::state::test_fs_lock()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+        .lock();
     let original_available = std::env::var_os("CODEXIZE_TEST_AVAILABLE_VENDORS");
     let original_claude = std::env::var_os("CODEXIZE_TEST_ACP_CLAUDE_PROGRAM");
     let original_codex = std::env::var_os("CODEXIZE_TEST_ACP_CODEX_PROGRAM");
@@ -377,8 +376,7 @@ fn with_temp_home_cache<T>(
     f: impl FnOnce(&std::path::Path) -> T,
 ) -> T {
     let _guard = crate::state::test_fs_lock()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+        .lock();
     let temp = tempfile::TempDir::new().unwrap();
     let original = std::env::var_os("HOME");
     let original_claude = std::env::var_os("CODEXIZE_TEST_ACP_CLAUDE_PROGRAM");

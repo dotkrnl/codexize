@@ -16,8 +16,7 @@ use super::*;
 /// Serialized via `test_fs_lock` since env mutation is process-global.
 pub(crate) fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
     let _guard = crate::state::test_fs_lock()
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
+        .lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let prev_root = std::env::var_os("CODEXIZE_ROOT");
 
@@ -42,8 +41,7 @@ pub(crate) fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
 /// via `test_fs_lock` since chdir is process-global.
 pub(crate) fn with_temp_root_and_cwd<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
     let _guard = crate::state::test_fs_lock()
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
+        .lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let prev_root = std::env::var_os("CODEXIZE_ROOT");
     let prev_cwd = std::env::current_dir().ok();

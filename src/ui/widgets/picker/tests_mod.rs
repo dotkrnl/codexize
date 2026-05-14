@@ -32,8 +32,7 @@ fn test_idea_summary_truncates() {
 
 fn with_temp_codexize_root<T>(f: impl FnOnce() -> T) -> T {
     let _guard = crate::state::test_fs_lock()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+        .lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     // SAFETY: serialized via test_fs_lock; restored unconditionally.

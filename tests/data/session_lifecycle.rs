@@ -32,8 +32,7 @@ fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
     static TEST_ROOT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     let _guard = TEST_ROOT_LOCK
         .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
+        .lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let prev = std::env::var_os("CODEXIZE_ROOT");
 

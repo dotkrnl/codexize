@@ -3,7 +3,7 @@ use crate::state::test_fs_lock;
 use std::ffi::OsStr;
 
 fn with_temp_dir<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = test_fs_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = test_fs_lock().lock();
     let dir = tempfile::TempDir::new().unwrap();
     let prev = std::env::current_dir().unwrap();
 
@@ -48,7 +48,7 @@ fn test_append_to_gitignore_appends() {
 
 #[test]
 fn claude_acp_install_root_uses_home_codexize_acp() {
-    let _guard = test_fs_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = test_fs_lock().lock();
     let prev_home = std::env::var_os("HOME");
     let home = tempfile::TempDir::new().unwrap();
     unsafe {

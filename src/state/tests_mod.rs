@@ -127,7 +127,7 @@ fn pending_guard_decision_round_trips() {
 }
 
 fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = test_fs_lock().lock().unwrap_or_else(|err| err.into_inner());
+    let _guard = test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
 

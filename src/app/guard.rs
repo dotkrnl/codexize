@@ -76,8 +76,7 @@ fn git_stdout(args: &[&str]) -> Option<String> {
 fn git_head() -> Option<String> {
     #[cfg(test)]
     let _guard = crate::state::test_fs_lock()
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
+        .lock();
     let trimmed = git_stdout(&["rev-parse", "HEAD"])?.trim().to_string();
     (!trimmed.is_empty()).then_some(trimmed)
 }
@@ -87,8 +86,7 @@ pub fn git_status_dirty() -> bool {
 fn git_status() -> Option<String> {
     #[cfg(test)]
     let _guard = crate::state::test_fs_lock()
-        .lock()
-        .unwrap_or_else(|err| err.into_inner());
+        .lock();
     git_stdout(&["status", "--porcelain"])
 }
 fn git_diff_head() -> Option<String> {

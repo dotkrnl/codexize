@@ -508,31 +508,31 @@ std::thread_local! {
 }
 #[cfg(test)]
 impl TestFsLock {
-    pub(crate) fn lock(&'static self) -> std::sync::LockResult<TestFsGuard<'static>> {
+    pub(crate) fn lock(&'static self) -> TestFsGuard<'static> {
         // Tests frequently nest filesystem/cwd helpers (e.g. `with_temp_dir` holding
         // the lock while guard code probes git state). A plain `Mutex<()>` would
         // deadlock on re-entry, so we treat "already held on this thread" as a
         // no-op lock acquisition.
         if TEST_FS_LOCK_HELD.with(std::cell::Cell::get) {
-            return Ok(TestFsGuard {
+            return TestFsGuard {
                 _inner: None,
                 reset_owner: false,
-            });
+            };
         }
         match self.inner.lock() {
             Ok(guard) => {
                 TEST_FS_LOCK_HELD.with(|held| held.set(true));
-                Ok(TestFsGuard {
+                TestFsGuard {
                     _inner: Some(guard),
                     reset_owner: true,
-                })
+                }
             }
             Err(err) => {
                 TEST_FS_LOCK_HELD.with(|held| held.set(true));
-                Ok(TestFsGuard {
+                TestFsGuard {
                     _inner: Some(err.into_inner()),
                     reset_owner: true,
-                })
+                }
             }
         }
     }

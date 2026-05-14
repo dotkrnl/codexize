@@ -969,8 +969,7 @@ mod tests {
 
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
         let _guard = crate::state::test_fs_lock()
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
+            .lock();
         let temp = tempfile::TempDir::new().expect("tempdir");
         let prev = std::env::var_os("CODEXIZE_ROOT");
         unsafe {

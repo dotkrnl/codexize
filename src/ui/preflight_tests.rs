@@ -49,7 +49,7 @@ fn scenario_body_line_count(scenario: Scenario, width: u16, height: u16) -> usiz
 
 #[test]
 fn preflight_modals_use_shared_visual_contract_for_each_scenario() {
-    let _guard = test_fs_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = test_fs_lock().lock();
     for scenario in [
         Scenario::NoGitEmpty,
         Scenario::NoGitHasFiles,
@@ -111,7 +111,7 @@ fn preflight_modals_use_shared_visual_contract_for_each_scenario() {
 
 #[test]
 fn preflight_modal_action_markers_keep_allowed_semantic_colors() {
-    let _guard = test_fs_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = test_fs_lock().lock();
     let width = 100;
     let height = 30;
     let buf = render_preflight_buf(Scenario::GitExistsNotIgnored, width, height);

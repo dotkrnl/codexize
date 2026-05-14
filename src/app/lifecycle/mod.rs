@@ -262,9 +262,9 @@ impl App {
     /// Recompute `App::slim_phase` from `state.current_phase`.
     ///
     /// The slim phase is a derived projection — it never lives on disk and
-    /// must be refreshed every time the legacy phase mutates. This helper
-    /// is the single throat the cutover paths call so the cutover-era code
-    /// can't accidentally fall out of sync with the legacy enum.
+    /// must be refreshed every time the legacy phase mutates. This helper is
+    /// the single refresh point so the derived slim phase stays in sync with
+    /// the authoritative legacy phase.
     pub(crate) fn refresh_slim_phase(&mut self) {
         self.slim_phase = crate::lifecycle::slim_phase_for(&self.state.current_phase);
     }
@@ -272,8 +272,8 @@ impl App {
     /// Project the App's agent-run history into the slim
     /// [`crate::lifecycle::RunHistoryEntry`] shape `LifecycleOps` consumes.
     /// Outcomes are best-effort approximations of the legacy `RunStatus`
-    /// values; the cutover paths in 5a only need this for restart's
-    /// `build_spec` lookup, which doesn't inspect the outcome variant.
+    /// values. Used by restart's `build_spec` lookup, which doesn't inspect
+    /// the outcome variant.
     pub(crate) fn slim_run_history(&self) -> Vec<crate::lifecycle::RunHistoryEntry> {
         use crate::state::RunStatus;
         self.state
@@ -431,8 +431,8 @@ impl App {
         clear_pending: bool,
         start_spec: Option<crate::lifecycle::StageSpec>,
     ) {
-        // 8a removed the in-line project-lane gate that the 5b/5c cutover
-        // ran here. The shell scheduler's per-tick lane-occupancy check
+        // The in-line project-lane gate was removed; the shell scheduler's
+        // per-tick lane-occupancy check
         // (`AppShell::apply_implementation_decision`) is now the single
         // throat for cross-session implementation-lane gating; the FSM
         // applies the rewind locally and a subsequent scheduler tick
@@ -446,8 +446,8 @@ impl App {
             self.paused_at_phase = None;
         }
         if clear_pending {
-            // The slim PendingDecisions slot is still mostly unused in 5b;
-            // touch it so the field stays observable for 5c's modal cutover.
+            // Clear any pending operator decisions so they don't linger
+            // across phase changes.
             self.pending_decisions = crate::lifecycle::PendingDecisions::default();
         }
         // The Immediate path means the FSM was Idle; reset the per-launch
@@ -845,8 +845,8 @@ impl App {
     /// Does not yet set `current_run_id` — the run id isn't known until
     /// `confirm_running`. Used by the launch-time mirroring shim
     /// installed in `start_run_tracking`. Errors from the FSM are logged
-    /// and discarded; mid-cutover the legacy path is still authoritative,
-    /// so a misordered transition isn't fatal yet.
+    /// and discarded; the legacy path is authoritative for persistence,
+    /// so a misordered FSM transition isn't fatal.
     pub(crate) fn fsm_start_mirroring(
         &mut self,
         spec: crate::lifecycle::StageSpec,
@@ -863,8 +863,7 @@ impl App {
     }
 
     /// Mirror [`crate::lifecycle::Fsm::confirm_running`] and sync the
-    /// legacy `current_run_id` field. Errors are logged and discarded
-    /// during the cutover window.
+    /// legacy `current_run_id` field. Errors are logged and discarded.
     pub(crate) fn fsm_confirm_running_mirroring(
         &mut self,
         run: crate::lifecycle::ActiveRun,

@@ -1,9 +1,9 @@
-//! Tests for the 5b operator-driven rewind paths.
+//! Tests for operator-driven rewind paths.
 //!
 //! These exercise the App-level wiring of `LifecycleOps::rewind` through
 //! `go_back` / `retry_selected_target`. The slim-phase translator helpers
 //! and `LifecycleOps` itself have their own unit tests in
-//! `src/lifecycle/`; this suite focuses on what 5b's cutover does *with*
+//! `src/lifecycle/`; this suite focuses on what the App does *with*
 //! those primitives: cleanup is applied to disk, the legacy
 //! `state.current_phase` lands on the right variant, and the special-case
 //! state mutators (`reset_builder_after_rewind`, skip-to-impl branch,

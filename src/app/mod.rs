@@ -303,8 +303,8 @@ pub struct App {
     /// avoid relaunching the same stage immediately after a stop.
     pub(crate) paused_at_phase: Option<crate::lifecycle::Phase>,
     /// Operator-decision slots used by the slim lifecycle. Populated by
-    /// the cutover paths as 5b–5c moves modals onto this surface; today
-    /// only the `:stop` / `:retry` paths touch it.
+    /// operator paths that raise modal decisions (`:stop`, `:retry`,
+    /// guard approvals, etc.).
     pub(crate) pending_decisions: crate::lifecycle::PendingDecisions,
     /// Lifecycle scheduler. Owns the [`crate::lifecycle::StageRegistry`]
     /// that operator ops and the per-tick auto-launch path consult.

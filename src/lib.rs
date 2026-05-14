@@ -10,6 +10,7 @@ pub use crate::data::adapters;
 pub mod app;
 pub mod app_runtime;
 pub mod app_shell;
+pub mod lifecycle;
 pub use crate::data::artifacts;
 pub use crate::data::cache;
 pub use crate::data::cache_lock;

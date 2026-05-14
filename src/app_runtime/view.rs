@@ -35,7 +35,9 @@ pub struct StatusMessage {
 /// to disambiguate when surfacing a stage-error modal or routing a retry
 /// command. Mirrors the app-layer stage identifiers used by focus-local
 /// handlers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum StageId {
     Brainstorm,
     SpecReview,

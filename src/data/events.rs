@@ -6,11 +6,10 @@
 //! (filesystem, runner registry, providers); logic stays pure; the runtime
 //! routes between them.
 //!
-//! This is the shape that lets a future server-mode binary reuse `data` and
-//! `logic` without pulling in the TUI: the same request/event types mediate
-//! every interaction. Today the App still calls some primitives directly,
-//! but those calls go through the data layer's public surface — the runtime
-//! seam is just the reified version of that surface as enums.
+//! The request/event types mediate runtime interactions without pulling in
+//! the TUI. Today the App still calls some primitives directly, but those
+//! calls go through the data layer's public surface — the runtime seam is
+//! the reified version of that surface as enums.
 use crate::data::observation::{LiveSummaryProbe, LiveSummarySnapshot};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -63,9 +62,8 @@ impl std::fmt::Debug for LiveSummaryEvents {
 /// Side-effect requests dispatched by the runtime to the data layer.
 ///
 /// Each request maps onto a primitive in [`crate::data`]. Variants cover the
-/// observation and runner-registry surface relocated by this refactor.
-/// Future slices may extend this enum with artifact writes, event-log
-/// appends, and agent spawns — `app_runtime` is the only caller of dispatch.
+/// observation and runner-registry surface used by `app_runtime`, which is
+/// the only caller of dispatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DataRequest {
     /// Cheap mtime-only probe of the live-summary file at `path`.

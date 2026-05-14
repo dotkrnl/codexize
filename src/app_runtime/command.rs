@@ -3,7 +3,7 @@
 //! `AppCommand` is the only way a UI expresses operator intent. Commands
 //! are domain-level (approve a plan, retry a stage, quit, …) — never raw
 //! terminal key codes. The TUI translates `KeyEvent`s into `AppCommand`s
-//! inside `ui/`; a future web UI translates HTTP requests into the same
+//! inside `ui/`; other UI frontends translate their own input into the same
 //! enum. The runtime routes the command into [`crate::logic`] and any
 //! resulting [`crate::data::events::DataRequest`].
 //!

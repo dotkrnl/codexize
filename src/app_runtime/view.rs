@@ -13,9 +13,8 @@
 use crate::logic::pipeline::Stage;
 use crate::state::{RunRecord, RunStatus};
 use std::sync::Arc;
-/// Severity tag for a UI-neutral status message. The TUI maps each variant
-/// to a colour/style; a future web UI maps the same variants to its own
-/// presentation primitives.
+/// Severity tag for a UI-neutral status message. Each UI maps the variants
+/// to its own presentation primitives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusSeverity {
     Info,
@@ -70,9 +69,8 @@ pub enum ModalKind {
     DreamingDecision,
 }
 /// Compact run summary for tree rows. The full [`RunRecord`] is also
-/// available in [`AppView::agent_runs`]; this projection exists so a
-/// future server-mode UI can render lists without re-deriving the
-/// per-row label.
+/// available in [`AppView::agent_runs`]; this projection lets UI callers
+/// render lists without re-deriving the per-row label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentRunSummary {
     pub id: u64,

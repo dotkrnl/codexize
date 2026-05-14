@@ -1,11 +1,9 @@
 //! Plan review stage: per-round review of `artifacts/plan.md`. Produces
 //! `artifacts/plan-review-{round}.md`.
 //!
-//! Single-shot per round. Runs on [`Stage::Plan`]. The persisted code restores
-//! `plan.pre-review-1.md`/`spec.pre-review-1.md` only on round-1 rewind —
-//! this stage preserves that asymmetry verbatim. Future work may revisit
-//! per-round backups; until then, matching today's behavior is the
-//! contract.
+//! Single-shot per round. Runs on [`Stage::Plan`]. Rewind restores
+//! `plan.pre-review-1.md`/`spec.pre-review-1.md` only for round 1; later
+//! rounds overwrite `plan.md` in place without restore backups.
 use super::{has_succeeded, next_attempt};
 use crate::lifecycle::Stage;
 use crate::lifecycle::spec::StageSpec;
@@ -98,10 +96,6 @@ impl StageDriver for PlanReviewStage {
                 ),
             ]
         } else {
-            // Persisted retry.rs only restores round-1 backups; later rounds
-            // overwrite plan.md in place without a fresh backup. Preserve
-            // that behavior verbatim — future work may revisit per-round
-            // backups, but Step 2 is behavior-preserving.
             Vec::new()
         }
     }

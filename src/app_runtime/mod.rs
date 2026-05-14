@@ -16,8 +16,7 @@
 //! [`view::AppView`] and [`command::AppCommand`] are intentionally
 //! UI-neutral: they carry no `ratatui`/`crossterm` types and no mutable
 //! cache handles. [`harness`] proves the seam by wiring a stubbed UI to
-//! the runtime side without touching the terminal — the same shape a
-//! future server-mode binary or web frontend will reuse.
+//! the runtime side without touching the terminal.
 pub mod command;
 pub(crate) mod stages;
 pub mod terminal;

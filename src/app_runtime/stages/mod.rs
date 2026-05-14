@@ -1,12 +1,10 @@
 // Per-stage runtime modules.
 //
 // Each pipeline stage owns one file under `src/app_runtime/stages/<name>.rs`
-// holding that stage's launch wiring (and, where the prior god files made
-// the cross-stage cut natural, finalize/event hooks). The orchestrator
-// (`crate::app::App`) reaches the per-stage helpers as plain methods because
-// the impl blocks all extend `App` — physical location moved out of
-// `src/app/launch/` so a future server-mode binary can drive `app_runtime`
-// directly.
+// holding that stage's launch wiring plus finalize/event hooks where those
+// hooks naturally belong to the same stage. The orchestrator (`crate::app::App`)
+// reaches the per-stage helpers as plain methods because the impl blocks all
+// extend `App`.
 //
 // Shared bookkeeping (model picking, run tracking, retry routing) stays in
 // this `mod.rs` so per-stage files remain reviewable in isolation.

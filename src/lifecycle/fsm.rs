@@ -6,6 +6,32 @@
 use super::phase::Phase;
 use super::spec::{ActiveRun, StageSpec};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+/// Side-effect plan attached to an [`AfterStop`] variant.
+///
+/// `delete` entries are removed (recursively for directories). `restore_backups`
+/// entries are `(backup, dest)` pairs — when the backup exists, it is moved to
+/// `dest`. Every path here is absolute; [`super::ops::LifecycleOps`] is the
+/// builder, and the cutover handler (Step 5) is the applier.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CleanupPlan {
+    pub delete: Vec<PathBuf>,
+    pub restore_backups: Vec<(PathBuf, PathBuf)>,
+}
+
+impl CleanupPlan {
+    /// Construct an empty plan — used by operator commands whose intent
+    /// carries no artifact cleanup (`:stop`, `:cancel`).
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// True when no deletes and no restores are queued.
+    pub fn is_empty(&self) -> bool {
+        self.delete.is_empty() && self.restore_backups.is_empty()
+    }
+}
 
 /// Runtime state of the single agent slot.
 ///
@@ -24,6 +50,12 @@ pub enum AgentState {
 ///
 /// Mutated in place by [`Fsm::request_stop`] when a second stop request
 /// arrives mid-shutdown — see the precedence rules on that method.
+///
+/// `Rewind` carries an optional `spec` (None when the target phase has no
+/// next stage to schedule, e.g., rewinding to [`Phase::Idea`]), the
+/// [`CleanupPlan`] to apply once the run is dead, and a `clear_pending` flag
+/// so the caller's confirm-dead handler can drop pending decisions that no
+/// longer apply at the rewound phase.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AfterStop {
     /// Plain stop. The FSM returns to [`AgentState::Idle`].
@@ -32,10 +64,16 @@ pub enum AfterStop {
     /// [`AgentState::Starting`] with the supplied [`StageSpec`].
     Restart { spec: StageSpec },
     /// Roll the session [`Phase`] back to `target`, then start the supplied
-    /// spec. The phase rewind itself lives outside the FSM; this variant only
-    /// records the operator's intent so the resolution carries it back to the
-    /// caller.
-    Rewind { target: Phase, spec: StageSpec },
+    /// spec (if any). The actual phase rewind, file cleanup, and pending-
+    /// decision pruning live outside the FSM; this variant records the
+    /// operator's intent so the resolution carries everything back to the
+    /// caller's confirm-dead handler.
+    Rewind {
+        target: Phase,
+        spec: Option<StageSpec>,
+        cleanup: CleanupPlan,
+        clear_pending: bool,
+    },
     /// Mark the session [`Phase::Cancelled`]. Once requested, this outcome
     /// cannot be downgraded — see [`Fsm::request_stop`].
     Cancel,
@@ -204,12 +242,18 @@ impl Fsm {
                     ended_at: chrono::Utc::now(),
                 };
                 // Move the FSM to the appropriate follow-on state. The phase
-                // rewind in `AfterStop::Rewind` is the caller's job; the FSM
-                // only sets itself up to launch the supplied spec next.
+                // rewind, file cleanup, and pending-decision pruning in
+                // `AfterStop::Rewind` are the caller's job; the FSM only sets
+                // itself up to launch the supplied spec next (when there is
+                // one — rewinding to a phase with no follow-on stage parks
+                // the FSM in [`AgentState::Idle`]).
                 self.state = match &after {
                     AfterStop::GoIdle | AfterStop::Cancel => AgentState::Idle,
                     AfterStop::Restart { spec } => AgentState::Starting { spec: spec.clone() },
-                    AfterStop::Rewind { spec, .. } => AgentState::Starting { spec: spec.clone() },
+                    AfterStop::Rewind { spec: Some(spec), .. } => AgentState::Starting {
+                        spec: spec.clone(),
+                    },
+                    AfterStop::Rewind { spec: None, .. } => AgentState::Idle,
                 };
                 Ok(StopResolution {
                     outcome,

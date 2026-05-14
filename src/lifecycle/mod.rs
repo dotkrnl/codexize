@@ -28,7 +28,8 @@ pub mod stage_id;
 pub mod stages;
 
 pub use fsm::{
-    AfterStop, AgentState, CancelledBy, FinalizedRun, Fsm, FsmError, Outcome, StopResolution,
+    AfterStop, AgentState, CancelledBy, CleanupPlan, FinalizedRun, Fsm, FsmError, Outcome,
+    StopResolution,
 };
 pub use pending::{
     DreamingData, GitGuardData, PendingDecisions, PlanApprovalData, SkipToImplData,

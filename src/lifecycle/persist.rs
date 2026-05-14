@@ -7,8 +7,8 @@
 use super::fsm::Outcome;
 use super::pending::PendingDecisions;
 use super::phase::Phase;
+use super::stage_id::StageId;
 use crate::adapters::EffortLevel;
-use crate::app_runtime::view::StageId;
 use crate::data::config::schema::EffortMapping;
 use crate::state::{LaunchModes, Modes};
 use serde::{Deserialize, Serialize};

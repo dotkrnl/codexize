@@ -228,7 +228,7 @@ impl Fsm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_runtime::view::StageId;
+    use crate::lifecycle::StageId;
 
     fn spec(stage: StageId, attempt: u32) -> StageSpec {
         StageSpec {

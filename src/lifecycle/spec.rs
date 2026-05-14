@@ -8,7 +8,7 @@
 //! (model, effort, modes, prompt_path, …) land in Step 2 as the existing
 //! `launch_*` functions get migrated onto the [`Stage`](super::stage::Stage)
 //! trait.
-use crate::app_runtime::view::StageId;
+use super::stage_id::StageId;
 use serde::{Deserialize, Serialize};
 
 /// Descriptor for a stage attempt the lifecycle wants to launch.

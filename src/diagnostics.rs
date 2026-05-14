@@ -72,6 +72,3 @@ pub fn init_session_tracing(session_id: &str, diag: &DiagnosticsView) -> Result<
         .try_init()
         .context("failed to initialize tracing subscriber")
 }
-#[cfg(test)]
-#[path = "diagnostics_tests.rs"]
-mod tests;

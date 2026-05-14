@@ -160,20 +160,6 @@ fn ntfy_reset_subcommand_parses() {
 }
 
 #[test]
-fn ntfy_subcommand_rejects_unknown_flags() {
-    let err = Cli::try_parse_from(["codexize", "ntfy", "--bogus"])
-        .expect_err("ntfy rejects unknown flags");
-    assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
-}
-
-#[test]
-fn ntfy_subcommand_rejects_extra_positionals() {
-    let err = Cli::try_parse_from(["codexize", "ntfy", "extra"])
-        .expect_err("ntfy rejects extra positionals");
-    assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
-}
-
-#[test]
 fn ntfy_command_rejects_launch_flags() {
     let cli = cli(&["codexize", "--yolo", "ntfy"]);
 

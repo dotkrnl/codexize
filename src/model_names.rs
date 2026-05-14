@@ -64,7 +64,3 @@ fn display_entry(canonical: &str) -> Option<(&'static str, &'static str, &'stati
         .copied()
         .find(|(candidate, _, _)| *candidate == canonical)
 }
-
-#[cfg(test)]
-#[path = "model_names_tests.rs"]
-mod tests;

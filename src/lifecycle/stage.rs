@@ -1,10 +1,8 @@
 //! Stage trait and registry.
 //!
-//! Step 1 introduced the trait and registry shapes. Step 2 adds the concrete
-//! [`Stage`] impls (under [`super::stages`]) and expands [`StageCtx`] with
-//! the read-only borrows those impls actually consume. Step 3 will implement
-//! [`StageRegistry::next_stage_for_phase`] and [`StageRegistry::stages_after`]
-//! and register the impls.
+//! The [`Stage`] trait defines the per-stage lifecycle contract. Concrete impls
+//! live under [`super::stages`]. The [`StageRegistry`] maps [`StageId`] to
+//! implementations and provides phase-advancement queries.
 use super::fsm::Outcome;
 use super::phase::Phase;
 use super::spec::{ActiveRun, StageSpec};
@@ -16,7 +14,7 @@ use std::path::{Path, PathBuf};
 /// queue next or whether a fresh attempt is required.
 ///
 /// Only the fields stage scheduling actually reads land here — the full
-/// [`super::RunRecordV2`] carries more (model selection, effort, timestamps).
+/// [`crate::state::RunRecord`] carries more (model selection, effort, timestamps).
 /// Keeping this projection lean makes it trivial to construct in unit tests
 /// for the Stage impls without dragging in the persistence layer.
 #[derive(Debug, Clone, PartialEq, Eq)]

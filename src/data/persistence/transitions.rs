@@ -12,7 +12,6 @@ use crate::logic::pipeline::transitions::{
 use crate::state::{BlockOrigin, LaunchModes, RunStatus, SectionPart, SessionState};
 use anyhow::{Context, Result};
 use chrono::Utc;
-use std::path::Path;
 /// Execute a validated transition, updating the state and persisting it.
 ///
 /// Force-ship guard: `BlockedNeedsUser -> Done` is rejected at runtime unless

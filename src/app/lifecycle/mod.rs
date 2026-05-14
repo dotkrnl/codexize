@@ -698,8 +698,9 @@ impl App {
             return;
         };
         let legacy = Phase::from_slim_phase(target);
-        let leaving_blocked = matches!(self.state.current_phase, Phase::BlockedNeedsUser)
-            && !matches!(legacy, Phase::BlockedNeedsUser);
+        // from_slim_phase never returns BlockedNeedsUser, so any blocked
+        // current_phase is always leaving the blocked state.
+        let leaving_blocked = matches!(self.state.current_phase, Phase::BlockedNeedsUser);
         session_state::set_phase_for_operator_retry(&mut self.state, legacy);
         if leaving_blocked {
             // Mirror the `execute_transition` invariant: leaving

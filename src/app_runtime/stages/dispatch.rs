@@ -39,9 +39,9 @@ impl App {
         if matches!(self.state.current_phase, Phase::WaitingToImplement) {
             return;
         }
-        // DreamingPending is the operator-decision modal; preserve the
-        // legacy no-op until that modal is represented only by
-        // PendingDecisions.
+        // DreamingPending is the operator-decision modal. It is not yet
+        // represented in PendingDecisions (pending_decisions.dreaming is
+        // never populated), so we still gate on the legacy phase.
         if matches!(self.state.current_phase, Phase::DreamingPending) {
             return;
         }

@@ -110,9 +110,8 @@ impl App {
         self.run_lifecycle_op("retry", |ctx| LifecycleOps::rewind(ctx, target_phase));
     }
     pub(crate) fn go_back(&mut self) {
-        // Pending decisions (git-guard, dreaming) are the legitimate exit path
-        // — go_back is a no-op while one is open. Mirrors the legacy
-        // GitGuardPending / DreamingPending branches that did nothing.
+        // Pending decisions are the legitimate exit path — go_back is a
+        // no-op while one is open.
         if self.pending_decisions.blocks() {
             return;
         }

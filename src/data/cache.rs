@@ -136,20 +136,8 @@ pub fn load(dir: &Path) -> LoadedCache {
     };
     // Dashboard and quota payloads are only trusted when the cache file is the
     // current schema version. Quota-reset shape is stable.
-    let dashboard_section = if parsed.version == CACHE_VERSION {
-        parsed
-            .dashboard
-            .and_then(|raw| serde_json::from_value::<Section<Vec<DashboardEntry>>>(raw).ok())
-    } else {
-        None
-    };
-    let quota_section = if parsed.version == CACHE_VERSION {
-        parsed
-            .quotas
-            .and_then(|raw| serde_json::from_value::<Section<QuotaPayload>>(raw).ok())
-    } else {
-        None
-    };
+    let dashboard_section = parse_if_current::<Section<Vec<DashboardEntry>>>(&parsed, parsed.dashboard.clone());
+    let quota_section = parse_if_current::<Section<QuotaPayload>>(&parsed, parsed.quotas.clone());
     let now = now_secs();
     LoadedCache {
         dashboard: dashboard_section.map(|s| LoadedSection {
@@ -228,20 +216,8 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
     };
     // Same per-section policy as `load`: only current-version dashboard and
     // quota payloads are trusted. Quota-reset shape is stable.
-    let dashboard = if parsed.version == CACHE_VERSION {
-        parsed
-            .dashboard
-            .and_then(|raw| serde_json::from_value::<Section<Vec<DashboardEntry>>>(raw).ok())
-    } else {
-        None
-    };
-    let quotas = if parsed.version == CACHE_VERSION {
-        parsed
-            .quotas
-            .and_then(|raw| serde_json::from_value::<Section<QuotaPayload>>(raw).ok())
-    } else {
-        None
-    };
+    let dashboard = parse_if_current::<Section<Vec<DashboardEntry>>>(&parsed, parsed.dashboard.clone());
+    let quotas = parse_if_current::<Section<QuotaPayload>>(&parsed, parsed.quotas.clone());
     CacheFile {
         version: CACHE_VERSION,
         dashboard,
@@ -249,6 +225,16 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
         quota_resets: parsed.quota_resets,
     }
 }
+fn parse_if_current<T: serde::de::DeserializeOwned>(
+    parsed: &VersionedFile,
+    raw: Option<serde_json::Value>,
+) -> Option<T> {
+    if parsed.version != CACHE_VERSION {
+        return None;
+    }
+    raw.and_then(|v| serde_json::from_value(v).ok())
+}
+
 fn write_cache_file(dir: &Path, file: &CacheFile) -> Result<()> {
     fs::create_dir_all(dir).context("failed to create cache directory")?;
     let tmp_path = dir.join(".models.json.tmp");

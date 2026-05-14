@@ -1,5 +1,5 @@
 use codexize::{
-    smoke,
+    snapshot,
     state::{
         LaunchModes, Message, MessageKind, MessageSender, RunRecord, RunStatus, SessionState,
         session_dir,
@@ -97,16 +97,16 @@ fn create_smoke_session() -> String {
 fn smoke_baseline_matches_normalized_artifacts() {
     with_temp_root(|| {
         let session_id = create_smoke_session();
-        let actual = smoke::normalize_session_artifacts(
+        let actual = snapshot::normalize_session_artifacts(
             &session_dir(&session_id),
             &session_id,
             &std::env::var("CODEXIZE_ROOT").expect("root"),
         )
         .expect("normalize actual artifacts");
         let baseline =
-            smoke::load_normalized_fixture_tree(Path::new("tests/fixtures/smoke_baseline"))
+            snapshot::load_normalized_fixture_tree(Path::new("tests/fixtures/smoke_baseline"))
                 .unwrap_or_else(|err| panic!("load baseline: {err}\n--- actual ---\n{actual:#?}"));
-        let diff = smoke::diff_normalized_trees(&baseline, &actual);
+        let diff = snapshot::diff_normalized_trees(&baseline, &actual);
         assert!(
             diff.is_empty(),
             "normalized smoke baseline drifted:\n{}",

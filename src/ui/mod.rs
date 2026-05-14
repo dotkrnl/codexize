@@ -16,6 +16,6 @@ pub mod widgets;
 pub use crate::app as runtime;
 pub use crate::dashboard;
 pub use crate::picker;
-pub use crate::smoke;
+pub use crate::snapshot;
 pub use crate::ui::widgets::chat::view as chat_widget;
 pub use crate::ui::widgets::models_area::view as models_area;

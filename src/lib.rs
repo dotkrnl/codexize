@@ -31,7 +31,7 @@ pub use crate::data::runner;
 pub mod scheduler;
 pub mod selection;
 pub mod simplification;
-pub use crate::data::snapshot as smoke;
+pub use crate::data::snapshot;
 pub mod state;
 pub use crate::data::synthetic_artifacts;
 pub mod tasks;

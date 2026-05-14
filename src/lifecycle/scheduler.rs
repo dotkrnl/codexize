@@ -119,7 +119,7 @@ impl Scheduler {
         if input.paused_at_phase == Some(input.phase) {
             return TickOutcome::Blocked(BlockReason::Paused);
         }
-        if input.pending_decisions.blocks(input.phase) {
+        if input.pending_decisions.blocks() {
             return TickOutcome::Blocked(BlockReason::PendingDecision);
         }
         if !input.project_lane_allows {

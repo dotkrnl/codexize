@@ -2,9 +2,9 @@
 //!
 //! Replaces the `*Paused` / `*Pending` variants on the old `Phase` enum. Each
 //! field is `Some(_)` when the lifecycle is waiting on the operator for that
-//! decision. The marker `*Data` structs are intentionally empty in Step 1;
-//! Step 5 will fill them in with the data currently carried inline on the
-//! old [`crate::logic::pipeline::Phase`] variants.
+//! decision. The marker `*Data` structs are intentionally empty named-field
+//! structs (for TOML serialization); they may carry originating-phase context
+//! in a future migration step.
 use super::phase::Phase;
 use serde::{Deserialize, Serialize};
 
@@ -61,13 +61,12 @@ impl PendingDecisions {
 
     /// True when any pending decision applies to `phase`.
     ///
-    /// The phase-applicability map is intentionally permissive: a
-    /// decision is "applicable" if it is set. This will narrow once the
-    /// per-decision data carries the originating phase context.
-    // NOTE(step-5): once the *Data variants carry their originating phase,
-    // narrow `applicable_at` to a real per-decision phase map.
-    pub fn blocks(&self, phase: Phase) -> bool {
-        let _ = phase;
+    /// True when any pending decision slot is populated.
+    ///
+    /// NOTE(step-5): currently permissive — every set slot blocks regardless
+    /// of the caller's phase. Will narrow once per-decision data carries the
+    /// originating phase context.
+    pub fn blocks(&self) -> bool {
         self.git_guard.is_some()
             || self.spec_approval.is_some()
             || self.plan_approval.is_some()
@@ -114,9 +113,7 @@ mod tests {
     #[test]
     fn default_does_not_block() {
         let pd = PendingDecisions::default();
-        assert!(!pd.blocks(Phase::Idea));
-        assert!(!pd.blocks(Phase::Spec));
-        assert!(!pd.blocks(Phase::Implementation(3)));
+        assert!(!pd.blocks());
     }
 
     #[test]
@@ -144,7 +141,7 @@ mod tests {
             },
         ];
         for pd in cases {
-            assert!(pd.blocks(Phase::Plan));
+            assert!(pd.blocks());
         }
     }
 

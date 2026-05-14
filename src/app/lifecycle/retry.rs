@@ -140,7 +140,7 @@ impl App {
         // Pending decisions (git-guard, dreaming) are the legitimate exit path
         // — go_back is a no-op while one is open. Mirrors the legacy
         // GitGuardPending / DreamingPending branches that did nothing.
-        if self.pending_decisions.blocks(self.slim_phase) {
+        if self.pending_decisions.blocks() {
             return;
         }
         let Some(mut target) = self.slim_phase.previous() else {

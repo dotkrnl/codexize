@@ -6,9 +6,11 @@
 //! registration step. The structs and their tests exist now so the trait
 //! contract is exercised before the FSM scheduler turns them on.
 pub mod brainstorm;
+pub mod planning;
 pub mod spec_review;
 
 pub use brainstorm::BrainstormStage;
+pub use planning::PlanningStage;
 pub use spec_review::SpecReviewStage;
 
 use crate::lifecycle::fsm::Outcome;

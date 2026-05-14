@@ -458,7 +458,7 @@ impl AppShell {
                 app.run_external_view_editor(terminal, &path);
                 input = crate::ui::tui::CrosstermInputAdapter::spawn();
             }
-            if app.runtime_tick_before_data_drain()? {
+            if app.runtime_tick_before_data_drain() {
                 app.drain_notifications_for_shutdown();
                 self.return_app_to_supervisor(app);
                 return Ok(());

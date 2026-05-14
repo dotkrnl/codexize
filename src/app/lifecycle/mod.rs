@@ -220,17 +220,17 @@ impl App {
     /// Pre-data-drain phase of the per-tick coordination. The runtime calls
     /// this, then drains and routes any [`DataEvent`](crate::data::events::DataEvent)s,
     /// then finishes the tick via [`Self::runtime_tick_after_data_drain`].
-    pub(crate) fn runtime_tick_before_data_drain(&mut self) -> Result<bool> {
+    pub(crate) fn runtime_tick_before_data_drain(&mut self) -> bool {
         self.refresh_models_if_due();
         self.poll_agent_run();
         if self.pending_app_exit {
             self.runner_supervisor.shutdown_all_runs();
-            return Ok(true);
+            return true;
         }
         self.maybe_yolo_auto_resolve();
         self.maybe_auto_launch();
         self.update_agent_progress();
-        Ok(false)
+        false
     }
     /// Post-data-drain phase: watchdog evaluation and split-target sync after
     /// the runtime has applied any drained `DataEvent`s. Watchdog state is

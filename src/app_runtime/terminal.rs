@@ -113,7 +113,7 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
             app.run_external_view_editor(terminal, &path);
             input = crate::ui::tui::CrosstermInputAdapter::spawn();
         }
-        if app.runtime_tick_before_data_drain()? {
+        if app.runtime_tick_before_data_drain() {
             app.drain_notifications_for_shutdown();
             return Ok(());
         }

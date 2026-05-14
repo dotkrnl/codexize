@@ -5,7 +5,6 @@ use crate::app::{App, guard};
 use crate::artifacts::{RecoveryArtifact, ReviewStatus as RecoveryStatus};
 use crate::state::{self as session_state, MessageKind, PendingGuardDecision, PipelineItemStatus};
 use crate::{coder_summary, final_validation, review, tasks};
-use anyhow::Result;
 impl App {
     const ARTIFACT_REASON_TABLE: &[(&'static str, &'static [&'static str])] = &[
         ("brainstorm", &["artifacts/spec.md"]),
@@ -152,7 +151,7 @@ impl App {
     pub(crate) fn normalized_failure_reason(
         &mut self,
         run: &crate::state::RunRecord,
-    ) -> Result<Option<String>> {
+    ) -> Option<String> {
         let session_dir = self.session_dir();
         let (has_artifact_check, artifact_reason) = match run.stage.as_str() {
             "brainstorm" | "spec-review" | "planning" | "plan-review" => (
@@ -254,13 +253,13 @@ impl App {
                     for w in warnings {
                         self.append_system_message(run.id, MessageKind::SummaryWarn, w);
                     }
-                    return Ok(None);
+                    return None;
                 }
                 guard::VerifyResult::HardError { reason, warnings } => {
                     for w in warnings {
                         self.append_system_message(run.id, MessageKind::SummaryWarn, w);
                     }
-                    return Ok(Some(reason));
+                    return Some(reason);
                 }
                 guard::VerifyResult::PendingDecision {
                     captured_head,
@@ -280,7 +279,7 @@ impl App {
                             warnings,
                         },
                     );
-                    return Ok(None);
+                    return None;
                 }
             }
         }
@@ -308,15 +307,15 @@ impl App {
                     "run {} ({}) exited {code}: signal_received={signal_received}{log_suffix}",
                     run.id, run.stage
                 ));
-                return Ok(Some(match operator_marker {
+                return Some(match operator_marker {
                     Some(OperatorTerminationMarker::Stopped) => Reason::OperatorKilled.to_string(),
                     Some(OperatorTerminationMarker::RetryRequested) => {
                         Reason::UserForcedRetry.to_string()
                     }
                     None => Reason::Killed { signal_num, detail }.to_string(),
-                }));
+                });
             }
-            return Ok(Some(Reason::ExitCode(code).to_string()));
+            return Some(Reason::ExitCode(code).to_string());
         }
         let (mut guard_reason, guard_warnings) = match self.enforce_run_guard(run) {
             guard::VerifyResult::Ok { warnings } => (None, warnings),
@@ -336,7 +335,7 @@ impl App {
             self.log_yolo_auto_approved("path_violation");
             guard_reason = None;
         }
-        Ok(guard_reason.or(artifact_reason))
+        guard_reason.or(artifact_reason)
     }
     fn operator_termination_marker(
         session_dir: &std::path::Path,

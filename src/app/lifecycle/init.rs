@@ -337,7 +337,7 @@ impl App {
         // Running runs to register. Tests that want to simulate an alive
         // window construct an `App` via `tests_support::mk_app` and seed
         // the run state directly.
-        let _ = app.setup_watcher();
+        app.setup_watcher();
         app
     }
 }

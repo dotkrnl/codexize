@@ -493,7 +493,7 @@ impl App {
     }
     pub(crate) fn finalize_current_run(&mut self, run: &crate::state::RunRecord) -> Result<()> {
         self.drain_live_summary(run);
-        let failure_reason = self.normalized_failure_reason(run)?;
+        let failure_reason = self.normalized_failure_reason(run);
         if failure_reason.is_none()
             && self
                 .state

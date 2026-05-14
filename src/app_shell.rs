@@ -361,7 +361,7 @@ impl AppShell {
             event_bus: ShellEventBus::new(),
             session_index,
         };
-        shell.refresh_sidebar_rows()?;
+        shell.refresh_sidebar_rows();
         Ok(shell)
     }
 
@@ -428,7 +428,7 @@ impl AppShell {
         }
         self.return_app_to_supervisor(app);
         self.sidebar.mark_dirty();
-        let _ = self.refresh_sidebar_rows();
+        self.refresh_sidebar_rows();
         self.take_focused_app()
     }
 
@@ -536,7 +536,7 @@ impl AppShell {
         self.sidebar.visible = !self.sidebar.visible;
         self.sidebar.mark_dirty();
         if self.sidebar.visible {
-            self.refresh_sidebar_rows()?;
+            self.refresh_sidebar_rows();
         } else if self.sidebar.focus == ShellFocus::Sidebar {
             self.sidebar.focus = ShellFocus::Workspace;
         }
@@ -638,7 +638,7 @@ impl AppShell {
     }
 
     pub fn select_sidebar_session(&mut self, session_id: &str) -> Result<()> {
-        self.refresh_sidebar_rows()?;
+        self.refresh_sidebar_rows();
         if let Some(index) = self
             .sidebar
             .rows
@@ -682,7 +682,7 @@ impl AppShell {
         self.focused_session_id = session_id.to_string();
         self.sidebar.focus = ShellFocus::Workspace;
         self.sidebar.mark_dirty();
-        self.refresh_sidebar_rows()?;
+        self.refresh_sidebar_rows();
         Ok(())
     }
 
@@ -717,7 +717,7 @@ impl AppShell {
                 self.sidebar.mark_dirty();
             }
         }
-        let _ = self.refresh_sidebar_rows();
+        self.refresh_sidebar_rows();
     }
 
     pub fn run_scheduler_tick(&mut self) -> Result<ShellSchedulerReport> {
@@ -739,7 +739,7 @@ impl AppShell {
 
         let implementation = self.apply_implementation_decision(&tick)?;
         let running_session_id = self.running_session_id().map(str::to_string);
-        self.refresh_sidebar_rows_with_running(running_session_id.as_deref())?;
+        self.refresh_sidebar_rows_with_running(running_session_id.as_deref());
         Ok(ShellSchedulerReport {
             planning_session_ids,
             implementation,
@@ -898,22 +898,21 @@ impl AppShell {
         }
     }
 
-    fn refresh_sidebar_rows(&mut self) -> Result<()> {
+    fn refresh_sidebar_rows(&mut self) {
         let running_session_id = self.running_session_id().map(str::to_string);
-        self.refresh_sidebar_rows_with_running(running_session_id.as_deref())
+        self.refresh_sidebar_rows_with_running(running_session_id.as_deref());
     }
 
     fn refresh_sidebar_rows_with_running(
         &mut self,
         running_session_id: Option<&str>,
-    ) -> Result<()> {
+    ) {
         self.sidebar.refresh_if_dirty(
             &self.session_index,
             &self.focused_session_id,
             running_session_id,
             &self.supervisors,
         );
-        Ok(())
     }
 }
 

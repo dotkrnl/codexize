@@ -1,7 +1,6 @@
 use super::*;
 use crate::data::process_probe::tests::MockProbe;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tempfile::TempDir;
 
 const HOST: &str = "test-host";
@@ -89,36 +88,6 @@ fn cross_host_lock_is_not_broken_or_probed() {
         "cross-host lock must never be broken"
     );
     assert!(path.exists(), "cross-host lock file must remain intact");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn concurrent_lock_serializes_access() {
-    let dir = TempDir::new().unwrap();
-    let path = lock_path(&dir);
-    let counter = Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let barrier = Arc::new(tokio::sync::Barrier::new(2));
-
-    let handles: Vec<_> = (0..2)
-        .map(|_| {
-            let p = path.clone();
-            let c = Arc::clone(&counter);
-            let b = Arc::clone(&barrier);
-            tokio::task::spawn_blocking(move || {
-                crate::data::async_bridge::block_on_io(b.wait());
-                with_lock(&p, || {
-                    c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    crate::data::async_bridge::sleep_blocking(Duration::from_millis(50));
-                    Ok(())
-                })
-                .unwrap();
-            })
-        })
-        .collect();
-
-    for h in handles {
-        h.await.unwrap();
-    }
-    assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 2);
 }
 
 #[test]

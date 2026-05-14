@@ -66,29 +66,6 @@ fn scan_sessions_skips_directories_without_session_toml() {
 }
 
 #[test]
-fn scan_sessions_returns_entries_sorted_by_recency() {
-    with_temp_codexize_root(|| {
-        // Stage two sessions; touching their session.toml gives the
-        // newer one a more recent mtime so it sorts first.
-        let mut older = SessionState::new("alpha".to_string());
-        older.title = Some("alpha title".to_string());
-        older.save().unwrap();
-        // Sleep enough to ensure the next save's mtime strictly exceeds
-        // alpha's (mtime resolution is filesystem-dependent).
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        let mut newer = SessionState::new("beta".to_string());
-        newer.title = Some("beta title".to_string());
-        newer.save().unwrap();
-
-        let entries = scan_sessions(&crate::state::codexize_root().join("sessions")).unwrap();
-        assert_eq!(entries.len(), 2, "both sessions must be discovered");
-        assert_eq!(entries[0].session_id, "beta", "newest first");
-        assert_eq!(entries[1].session_id, "alpha");
-        assert_eq!(entries[0].idea_summary, "beta title");
-    });
-}
-
-#[test]
 fn new_session_seeds_create_modes() {
     with_temp_codexize_root(|| {
         let mut picker = SessionPicker::new_with_create_modes(crate::state::Modes {

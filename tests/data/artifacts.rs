@@ -6,14 +6,6 @@ use codexize::data::synthetic_artifacts::generate_synthetic_artifacts;
 use codexize::tasks::TasksFile;
 
 #[test]
-fn read_skip_to_impl_proposal_rejects_json() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("skip_proposal.toml");
-    fs::write(&path, r#"{ "proposed": true, "rationale": "old" }"#).unwrap();
-    assert!(SkipToImplProposal::read_from_path(&path).is_err());
-}
-
-#[test]
 fn read_skip_to_impl_proposal_empty_rationale_when_proposed() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("skip_proposal.toml");

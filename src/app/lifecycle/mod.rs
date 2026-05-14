@@ -66,8 +66,8 @@ impl LifecycleStageProjection {
     }
 }
 
-/// Stage-selection gates derived from the persisted stage while the lifecycle
-/// cutover is in progress.
+/// Stage-selection gates derived from persisted session state for lifecycle
+/// scheduler projection.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct LifecycleStageGates {
     recovery_active: bool,
@@ -948,11 +948,11 @@ impl App {
 
     /// Mirror [`crate::lifecycle::Fsm::start`] into persisted fields.
     ///
-    /// Does not yet set `current_run_id` — the run id isn't known until
-    /// `confirm_running`. Used by the launch-time mirroring shim
-    /// installed in `start_run_tracking`. Errors from the FSM are logged
-    /// and discarded; the persisted path is authoritative for persistence,
-    /// so a misordered FSM transition isn't fatal.
+    /// Does not set `current_run_id`; the run id is known at
+    /// `confirm_running`. Used by the launch-time mirroring shim installed
+    /// in `start_run_tracking`. Errors from the FSM are logged and discarded;
+    /// the persisted path is authoritative for persistence, so a misordered
+    /// FSM transition isn't fatal.
     pub(crate) fn fsm_start_mirroring(
         &mut self,
         spec: crate::lifecycle::StageSpec,

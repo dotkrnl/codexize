@@ -202,8 +202,8 @@ impl AcpTextStream {
 }
 
 /// Append a `MessageKind::SummaryWarn` dashboard message for the active run
-/// through the existing session-state persistence path. Best-effort — if the
-/// run record is not yet available (e.g. the app thread hasn't saved it) the
+/// through the existing session-state persistence path. Best-effort: if the
+/// run record is unavailable (e.g. the app thread hasn't saved it), the
 /// message is silently dropped.
 pub(in crate::data::runner) fn persist_system_warning(launch: &ManagedAcpLaunch, text: &str) {
     let Some(session_id) = launch.session_id.as_deref() else {

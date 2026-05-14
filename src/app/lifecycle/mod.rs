@@ -431,18 +431,13 @@ impl App {
         clear_pending: bool,
         start_spec: Option<crate::lifecycle::StageSpec>,
     ) {
-        // The lane gate is the scheduler's job in 5c, but until then we keep
-        // the in-flight cutover safe by gating any rewind that would land on
-        // a Phase whose legacy projection sits inside the implementation
-        // lane. Skipping the launch leaves the FSM idle and the operator
-        // sees the "implementation lane is occupied" status push from
-        // `retry_allowed_by_project_lane`.
-        if let Some(target) = phase_change {
-            let legacy_target = crate::lifecycle::slim_to_old_phase(target, &self.state.current_phase);
-            if !self.retry_allowed_by_project_lane(legacy_target) {
-                return;
-            }
-        }
+        // 8a removed the in-line project-lane gate that the 5b/5c cutover
+        // ran here. The shell scheduler's per-tick lane-occupancy check
+        // (`AppShell::apply_implementation_decision`) is now the single
+        // throat for cross-session implementation-lane gating; the FSM
+        // applies the rewind locally and a subsequent scheduler tick
+        // returns `Blocked(ProjectLane)` if another session holds the
+        // lane.
         // Apply file-level cleanup first so the launcher sees the post-
         // rewind tree shape.
         Self::apply_cleanup_plan(&cleanup);
@@ -488,10 +483,12 @@ impl App {
         cleanup: crate::lifecycle::CleanupPlan,
         clear_pending: bool,
     ) {
-        let legacy_target = crate::lifecycle::slim_to_old_phase(target, &self.state.current_phase);
-        if !self.retry_allowed_by_project_lane(legacy_target) {
-            return;
-        }
+        // 8a removed the in-line lane gate that used to short-circuit the
+        // post-stop rewind apply. The shell scheduler's per-tick lane gate
+        // (`AppShell::apply_implementation_decision`) is authoritative for
+        // cross-session implementation-lane occupancy; the rewind lands
+        // here and a subsequent scheduler tick returns
+        // `Blocked(ProjectLane)` if another session holds the lane.
         Self::apply_cleanup_plan(&cleanup);
         self.apply_legacy_phase_change(Some(target));
         self.paused_at_phase = None;

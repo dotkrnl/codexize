@@ -305,6 +305,65 @@ impl App {
             .collect()
     }
 
+    /// Task ids visible to the slim lifecycle scheduler for `phase`.
+    ///
+    /// The legacy builder queue has two different task concepts:
+    /// - implementation launches pick from the current running task first
+    ///   (failed/retry path), then selectable pending/revise tasks;
+    /// - review launches operate on the current running task only.
+    ///
+    /// Keeping that projection here prevents each lifecycle call site from
+    /// guessing which slice to feed into [`crate::lifecycle::StageCtx`].
+    fn lifecycle_task_ids_for_phase(&self, phase: crate::lifecycle::Phase) -> Vec<u32> {
+        match phase {
+            crate::lifecycle::Phase::Implementation(_) => {
+                let mut task_ids = Vec::new();
+                if let Some(task_id) = self.state.builder.current_task_id() {
+                    task_ids.push(task_id);
+                }
+                for task_id in self.state.builder.pending_task_ids() {
+                    if !task_ids.contains(&task_id) {
+                        task_ids.push(task_id);
+                    }
+                }
+                task_ids
+            }
+            crate::lifecycle::Phase::Review(_) => {
+                self.state.builder.current_task_id().into_iter().collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    pub(crate) fn with_lifecycle_stage_ctx<R>(
+        &self,
+        phase: crate::lifecycle::Phase,
+        f: impl FnOnce(crate::lifecycle::StageCtx<'_>) -> R,
+    ) -> R {
+        let session_dir = self.session_dir();
+        let session_id = self.state.session_id.clone();
+        let prior_runs = self.slim_run_history();
+        let pending_task_ids = self.lifecycle_task_ids_for_phase(phase);
+        let stage_ctx = crate::lifecycle::StageCtx {
+            session_id: session_id.as_str(),
+            session_dir: session_dir.as_path(),
+            phase,
+            prior_runs: prior_runs.as_slice(),
+            pending_task_ids: pending_task_ids.as_slice(),
+            yolo: self.state.modes.yolo,
+            cheap: self.state.modes.cheap,
+            recovery_active: matches!(
+                self.state.current_phase,
+                Phase::BuilderRecovery(_)
+                    | Phase::BuilderRecoveryPlanReview(_)
+                    | Phase::BuilderRecoverySharding(_)
+            ),
+            simplification_requested: matches!(self.state.current_phase, Phase::Simplification(_)),
+            dreaming_accepted: matches!(self.state.current_phase, Phase::Dreaming(_)),
+        };
+        f(stage_ctx)
+    }
+
     /// Build an [`crate::lifecycle::OpsCtx`] in-place and hand it to `f`.
     ///
     /// OpsCtx borrows multiple App fields disjointly which is awkward to
@@ -313,18 +372,14 @@ impl App {
     /// [`crate::lifecycle::LifecycleOps`] members inline. Snapshots
     /// `prior_runs` to a `Vec` and `session_dir` to a `PathBuf` before the
     /// borrow because they thread through `StageCtx` as references.
-    ///
-    /// In 5a only `:stop` and `:restart` use this; both paths leave
-    /// `phase` unchanged, so we point `OpsCtx::phase` at a local mirror
-    /// of `self.slim_phase` rather than at the field directly. 5b's
-    /// rewind path will swap that for a real mutable borrow.
-    pub(crate) fn with_running_agent_ops_ctx<R>(
+    pub(crate) fn with_lifecycle_ops_ctx<R>(
         &mut self,
         f: impl FnOnce(&mut crate::lifecycle::OpsCtx<'_>) -> R,
     ) -> R {
         let session_dir = self.session_dir();
         let session_id = self.state.session_id.clone();
         let prior_runs = self.slim_run_history();
+        let pending_task_ids = self.lifecycle_task_ids_for_phase(self.slim_phase);
         let now = chrono::Utc::now();
         let yolo = self.state.modes.yolo;
         let cheap = self.state.modes.cheap;
@@ -334,12 +389,17 @@ impl App {
             session_dir: session_dir.as_path(),
             phase: phase_local,
             prior_runs: prior_runs.as_slice(),
-            pending_task_ids: &[],
+            pending_task_ids: pending_task_ids.as_slice(),
             yolo,
             cheap,
-            recovery_active: false,
-            simplification_requested: false,
-            dreaming_accepted: false,
+            recovery_active: matches!(
+                self.state.current_phase,
+                Phase::BuilderRecovery(_)
+                    | Phase::BuilderRecoveryPlanReview(_)
+                    | Phase::BuilderRecoverySharding(_)
+            ),
+            simplification_requested: matches!(self.state.current_phase, Phase::Simplification(_)),
+            dreaming_accepted: matches!(self.state.current_phase, Phase::Dreaming(_)),
         };
         let mut ctx = crate::lifecycle::OpsCtx {
             fsm: &mut self.fsm,
@@ -355,15 +415,6 @@ impl App {
 
     /// Apply the side effects of a [`crate::lifecycle::OpOutcome`] from any
     /// operator command (`:stop`, `:retry`, `:back`, tree-row rewind).
-    ///
-    /// 5a handled the [`crate::lifecycle::OpAction::PendingStop`] paths for
-    /// `AfterStop::GoIdle` and `AfterStop::Restart`. 5b extends the surface
-    /// to handle [`crate::lifecycle::OpAction::Immediate`] (for rewinds
-    /// while the FSM is idle) and `AfterStop::Rewind` (for rewinds while an
-    /// agent is live; the deferred cleanup/launch fires from
-    /// `finalize_run_record` via [`Self::apply_after_stop_rewind`]).
-    /// Cancel remains routed through the legacy `confirm_cancel_session`
-    /// path until 5c migrates it.
     pub(crate) fn apply_op_outcome(
         &mut self,
         outcome: crate::lifecycle::OpOutcome,
@@ -558,7 +609,7 @@ impl App {
         F: FnOnce(&mut crate::lifecycle::OpsCtx<'_>) -> crate::lifecycle::OpOutcome,
     {
         self.ensure_fsm_running_mirror();
-        let outcome = self.with_running_agent_ops_ctx(op);
+        let outcome = self.with_lifecycle_ops_ctx(op);
         self.apply_op_outcome(outcome, label);
     }
 
@@ -640,8 +691,8 @@ impl App {
     /// Sharding deferral) simply ignore the override; the slot is cleared
     /// unconditionally so a stale value can't bleed into the next launch.
     ///
-    /// 5d will make `launch_*` take the spec as a parameter; until then we
-    /// route by `stage_id`.
+    /// The legacy launchers still derive some details from `state.current_phase`;
+    /// `StageSpec` is the dispatch key while that bridge is in place.
     pub(crate) fn dispatch_start(&mut self, spec: &crate::lifecycle::StageSpec) {
         use crate::lifecycle::StageId as L;
         let override_model = self.next_run_model_override.take();
@@ -790,15 +841,15 @@ impl App {
     /// Synchronize the lifecycle FSM into [`AgentState::Running`] for the
     /// current legacy `Running` agent, if any.
     ///
-    /// 5a leaves the legacy launch path (start_run_tracking) authoritative,
-    /// so the FSM is still Idle from construction when an operator hits
-    /// `:stop` after a TUI restart (resume) or in tests that synthesize a
-    /// Running `RunRecord` without going through launch. This helper
+    /// The legacy launch path (`start_run_tracking`) is still authoritative,
+    /// so the FSM can be Idle when an operator hits `:stop` after a TUI
+    /// restart or in tests that synthesize a Running `RunRecord` without
+    /// going through launch. This helper
     /// reconciles by synthesizing a [`StageSpec`] / [`ActiveRun`] from the
     /// legacy `RunRecord` and pushing the FSM through `start` +
     /// `confirm_running`. Already-Running and Stopping states are no-ops.
     /// All FSM errors are absorbed: the mirroring shim is best-effort
-    /// until 5b/5c make it authoritative.
+    /// until the FSM owns launch persistence end to end.
     pub(crate) fn ensure_fsm_running_mirror(&mut self) {
         use crate::lifecycle::AgentState;
         if !matches!(self.fsm.view(), AgentState::Idle) {
@@ -1152,6 +1203,24 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::test_support::mk_app;
+    use crate::lifecycle::{AgentState, TickInput, TickOutcome};
+    use crate::state::{PipelineItem, PipelineItemStatus, SessionState};
+
+    fn item(task_id: u32, status: PipelineItemStatus) -> PipelineItem {
+        PipelineItem {
+            id: task_id,
+            stage: "coder".to_string(),
+            task_id: Some(task_id),
+            round: None,
+            status,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 1,
+        }
+    }
 
     #[test]
     fn cleanup_keeps_backup_when_restore_copy_fails() {
@@ -1166,5 +1235,85 @@ mod tests {
         });
 
         assert!(backup.exists(), "failed restore must not delete backup");
+    }
+
+    #[test]
+    fn lifecycle_task_projection_matches_phase_lane() {
+        let mut state = SessionState::new("tasks-for-phase".to_string());
+        state.builder.pipeline_items = vec![
+            item(10, PipelineItemStatus::Pending),
+            item(20, PipelineItemStatus::Running),
+        ];
+        let app = mk_app(state);
+
+        assert_eq!(
+            app.lifecycle_task_ids_for_phase(crate::lifecycle::Phase::Implementation(1)),
+            vec![20, 10],
+            "implementation retries the running task first, then pending work",
+        );
+        assert_eq!(
+            app.lifecycle_task_ids_for_phase(crate::lifecycle::Phase::Review(1)),
+            vec![20],
+            "review operates on the current running builder task",
+        );
+        assert!(
+            app.lifecycle_task_ids_for_phase(crate::lifecycle::Phase::Plan)
+                .is_empty(),
+            "non-task phases should not receive builder task ids",
+        );
+    }
+
+    #[test]
+    fn scheduler_sees_builder_tasks_for_coder_dispatch() {
+        let mut state = SessionState::new("coder-dispatch".to_string());
+        state.current_phase = Phase::ImplementationRound(1);
+        state.builder.pipeline_items = vec![item(10, PipelineItemStatus::Pending)];
+        let app = mk_app(state);
+
+        let outcome = app.with_lifecycle_stage_ctx(app.slim_phase, |ctx| {
+            app.scheduler.plan(TickInput {
+                agent: &AgentState::Idle,
+                phase: app.slim_phase,
+                paused_at_phase: app.paused_at_phase,
+                pending_decisions: &app.pending_decisions,
+                project_lane_allows: true,
+                ctx,
+            })
+        });
+
+        match outcome {
+            TickOutcome::Dispatch(spec) => {
+                assert_eq!(spec.stage_id, crate::lifecycle::StageId::Coder);
+                assert_eq!(spec.task_id, Some(10));
+            }
+            other => panic!("expected coder dispatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scheduler_sees_current_task_for_reviewer_dispatch() {
+        let mut state = SessionState::new("reviewer-dispatch".to_string());
+        state.current_phase = Phase::ReviewRound(1);
+        state.builder.pipeline_items = vec![item(20, PipelineItemStatus::Running)];
+        let app = mk_app(state);
+
+        let outcome = app.with_lifecycle_stage_ctx(app.slim_phase, |ctx| {
+            app.scheduler.plan(TickInput {
+                agent: &AgentState::Idle,
+                phase: app.slim_phase,
+                paused_at_phase: app.paused_at_phase,
+                pending_decisions: &app.pending_decisions,
+                project_lane_allows: true,
+                ctx,
+            })
+        });
+
+        match outcome {
+            TickOutcome::Dispatch(spec) => {
+                assert_eq!(spec.stage_id, crate::lifecycle::StageId::Reviewer);
+                assert_eq!(spec.task_id, Some(20));
+            }
+            other => panic!("expected reviewer dispatch, got {other:?}"),
+        }
     }
 }

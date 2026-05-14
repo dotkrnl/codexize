@@ -39,37 +39,14 @@ impl App {
         if matches!(self.state.current_phase, Phase::WaitingToImplement) {
             return;
         }
-        // DreamingPending is the operator-decision modal; the slim model
-        // routes this through `PendingDecisions::blocks` once 5c-B / 5c-C
-        // migrate the modal slots. Preserve the legacy no-op until then.
+        // DreamingPending is the operator-decision modal; preserve the
+        // legacy no-op until that modal is represented only by
+        // PendingDecisions.
         if matches!(self.state.current_phase, Phase::DreamingPending) {
             return;
         }
 
-        let spec = {
-            let session_dir = self.session_dir();
-            let session_id = self.state.session_id.clone();
-            let prior_runs = self.slim_run_history();
-            let stage_ctx = crate::lifecycle::StageCtx {
-                session_id: session_id.as_str(),
-                session_dir: session_dir.as_path(),
-                phase: self.slim_phase,
-                prior_runs: prior_runs.as_slice(),
-                pending_task_ids: &[],
-                yolo: self.state.modes.yolo,
-                cheap: self.state.modes.cheap,
-                recovery_active: matches!(
-                    self.state.current_phase,
-                    Phase::BuilderRecovery(_)
-                        | Phase::BuilderRecoveryPlanReview(_)
-                        | Phase::BuilderRecoverySharding(_)
-                ),
-                simplification_requested: matches!(
-                    self.state.current_phase,
-                    Phase::Simplification(_)
-                ),
-                dreaming_accepted: matches!(self.state.current_phase, Phase::Dreaming(_)),
-            };
+        let spec = self.with_lifecycle_stage_ctx(self.slim_phase, |stage_ctx| {
             let input = TickInput {
                 agent: self.fsm.view(),
                 phase: self.slim_phase,
@@ -82,7 +59,7 @@ impl App {
                 TickOutcome::Dispatch(spec) => Some(spec),
                 TickOutcome::Idle | TickOutcome::Blocked(_) => None,
             }
-        };
+        });
         if let Some(spec) = spec {
             self.dispatch_start(&spec);
         }

@@ -51,35 +51,12 @@ impl App {
     /// on the dreaming modal.
     pub(crate) fn retry_failed_stage(&mut self, view_stage_id: crate::app::StageId) {
         let stage_id = lifecycle_stage_id_from_view(view_stage_id);
-        let spec = {
-            let session_dir = self.session_dir();
-            let session_id = self.state.session_id.clone();
-            let prior_runs = self.slim_run_history();
-            let ctx = crate::lifecycle::StageCtx {
-                session_id: session_id.as_str(),
-                session_dir: session_dir.as_path(),
-                phase: self.slim_phase,
-                prior_runs: prior_runs.as_slice(),
-                pending_task_ids: &[],
-                yolo: self.state.modes.yolo,
-                cheap: self.state.modes.cheap,
-                recovery_active: matches!(
-                    self.state.current_phase,
-                    Phase::BuilderRecovery(_)
-                        | Phase::BuilderRecoveryPlanReview(_)
-                        | Phase::BuilderRecoverySharding(_)
-                ),
-                simplification_requested: matches!(
-                    self.state.current_phase,
-                    Phase::Simplification(_)
-                ),
-                dreaming_accepted: matches!(self.state.current_phase, Phase::Dreaming(_)),
-            };
+        let spec = self.with_lifecycle_stage_ctx(self.slim_phase, |ctx| {
             self.scheduler
                 .registry()
                 .get(stage_id)
                 .map(|stage| stage.build_spec(&ctx))
-        };
+        });
         // clear_agent_error so the maybe_auto_launch guard inside
         // start_run_tracking can release the run; without this the
         // dispatched launch would silently no-op.

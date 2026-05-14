@@ -4,7 +4,6 @@
 //! field is `Some(_)` when the lifecycle is waiting on the operator for that
 //! decision. The marker `*Data` structs are intentionally empty named-field
 //! structs (for TOML serialization).
-use super::phase::Phase;
 use serde::{Deserialize, Serialize};
 
 /// Operator decision payload for the git-guard modal (`HEAD` moved under

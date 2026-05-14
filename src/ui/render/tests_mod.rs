@@ -27,6 +27,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         .filter(|row| row.is_expandable())
         .map(|row| (row.key.clone(), super::super::ExpansionOverride::Expanded))
         .collect();
+    let initial_slim_phase = crate::lifecycle::slim_phase_for(&state.current_phase);
     let app = App {
         state,
         nodes,
@@ -75,6 +76,11 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         pending_app_exit: false,
         pending_shell_command: None,
         current_run_id: None,
+        fsm: crate::lifecycle::Fsm::new(),
+        slim_phase: initial_slim_phase,
+        paused_at_phase: None,
+        pending_decisions: crate::lifecycle::PendingDecisions::default(),
+        stage_registry: crate::lifecycle::default_registry(),
         failed_models: HashMap::new(),
         pending_yolo_toggle_gate: None,
         yolo_exit_issued: std::collections::HashSet::new(),

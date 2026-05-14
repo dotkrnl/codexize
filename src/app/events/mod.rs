@@ -3,13 +3,13 @@ mod input_focus;
 mod interactive;
 mod split;
 use super::status_line::Severity;
-use super::{App, ModalKind, PendingTermination, RetryLaunch, TerminationIntent};
+use super::{App, ModalKind, PendingTermination};
 use crate::app_runtime::{AppCommand, UiKey, UiKeyCode};
 use crate::state::RunStatus;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::time::Duration;
 impl App {
-    fn marker_already_logged(&self, marker: &str) -> bool {
+    pub(crate) fn marker_already_logged(&self, marker: &str) -> bool {
         let events_path = self.session_dir().join("events.toml");
         std::fs::read_to_string(&events_path).is_ok_and(|events| events.contains(marker))
     }
@@ -63,54 +63,22 @@ impl App {
         }
     }
     pub(crate) fn stop_running_agent(&mut self) {
-        let Some(run) = self
-            .running_run()
-            .or_else(|| {
-                self.state
-                    .agent_runs
-                    .iter()
-                    .find(|r| r.status == RunStatus::Running)
-            })
-            .cloned()
-        else {
-            return;
-        };
-        self.request_termination(
-            PendingTermination {
-                run_id: run.id,
-                intent: TerminationIntent::StopOnly,
-            },
-            run.window_name,
-        );
+        // Synchronize the FSM with the legacy state before invoking the
+        // op. The mirroring shim normally runs at run launch time
+        // (start_run_tracking) and run finalization, but resume-path
+        // sessions can hit `:stop` before any new run launches in this
+        // process, which means the FSM is still Idle from construction.
+        // Mid-cutover we treat a desync as best-effort: if the FSM
+        // refuses the synthetic confirm_running, ops just NoOps and the
+        // legacy pending_termination path remains untouched.
+        self.ensure_fsm_running_mirror();
+        let outcome = self.with_running_agent_ops_ctx(crate::lifecycle::LifecycleOps::stop);
+        self.apply_op_outcome(outcome, "stop");
     }
     fn retry_running_agent(&mut self) {
-        let Some(run) = self
-            .running_run()
-            .or_else(|| {
-                self.state
-                    .agent_runs
-                    .iter()
-                    .find(|candidate| candidate.status == RunStatus::Running)
-            })
-            .cloned()
-        else {
-            return;
-        };
-        let Some(retry_launch) = RetryLaunch::for_run(&run) else {
-            self.push_status(
-                "retry: current run is not retryable".to_string(),
-                Severity::Warn,
-                Duration::from_secs(3),
-            );
-            return;
-        };
-        self.request_termination(
-            PendingTermination {
-                run_id: run.id,
-                intent: TerminationIntent::StopAndRetry(retry_launch),
-            },
-            run.window_name,
-        );
+        self.ensure_fsm_running_mirror();
+        let outcome = self.with_running_agent_ops_ctx(crate::lifecycle::LifecycleOps::restart);
+        self.apply_op_outcome(outcome, "retry");
     }
     fn open_quit_running_agent_modal(&mut self) {
         let running = self

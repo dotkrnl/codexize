@@ -263,8 +263,322 @@ impl App {
             Duration::from_millis(DEFAULT_EVENT_POLL_MS)
         }
     }
+    /// Recompute `App::slim_phase` from `state.current_phase`.
+    ///
+    /// The slim phase is a derived projection — it never lives on disk and
+    /// must be refreshed every time the legacy phase mutates. This helper
+    /// is the single throat the cutover paths call so the cutover-era code
+    /// can't accidentally fall out of sync with the legacy enum.
+    pub(crate) fn refresh_slim_phase(&mut self) {
+        self.slim_phase = crate::lifecycle::slim_phase_for(&self.state.current_phase);
+    }
+
+    /// Project the App's agent-run history into the slim
+    /// [`crate::lifecycle::RunHistoryEntry`] shape `LifecycleOps` consumes.
+    /// Outcomes are best-effort approximations of the legacy `RunStatus`
+    /// values; the cutover paths in 5a only need this for restart's
+    /// `build_spec` lookup, which doesn't inspect the outcome variant.
+    pub(crate) fn slim_run_history(&self) -> Vec<crate::lifecycle::RunHistoryEntry> {
+        use crate::state::RunStatus;
+        self.state
+            .agent_runs
+            .iter()
+            .map(|run| {
+                let outcome = match run.status {
+                    RunStatus::Running => None,
+                    RunStatus::Done => Some(crate::lifecycle::Outcome::Done),
+                    RunStatus::Failed => Some(crate::lifecycle::Outcome::Failed(
+                        run.error.clone().unwrap_or_default(),
+                    )),
+                    RunStatus::FailedUnverified => Some(
+                        crate::lifecycle::Outcome::FailedUnverified(
+                            run.error.clone().unwrap_or_default(),
+                        ),
+                    ),
+                };
+                let stage_id = crate::lifecycle::stage_id_for_run(&run.stage, &run.window_name)
+                    .unwrap_or(crate::lifecycle::StageId::Coder);
+                crate::lifecycle::RunHistoryEntry {
+                    stage_id,
+                    task_id: run.task_id,
+                    round: run.round,
+                    attempt: run.attempt,
+                    outcome,
+                }
+            })
+            .collect()
+    }
+
+    /// Build an [`crate::lifecycle::OpsCtx`] in-place and hand it to `f`.
+    ///
+    /// OpsCtx borrows multiple App fields disjointly which is awkward to
+    /// express as a returned struct. The closure form keeps the borrow
+    /// scope tight and lets the caller invoke any of the four
+    /// [`crate::lifecycle::LifecycleOps`] members inline. Snapshots
+    /// `prior_runs` to a `Vec` and `session_dir` to a `PathBuf` before the
+    /// borrow because they thread through `StageCtx` as references.
+    ///
+    /// In 5a only `:stop` and `:restart` use this; both paths leave
+    /// `phase` unchanged, so we point `OpsCtx::phase` at a local mirror
+    /// of `self.slim_phase` rather than at the field directly. 5b's
+    /// rewind path will swap that for a real mutable borrow.
+    pub(crate) fn with_running_agent_ops_ctx<R>(
+        &mut self,
+        f: impl FnOnce(&mut crate::lifecycle::OpsCtx<'_>) -> R,
+    ) -> R {
+        let session_dir = self.session_dir();
+        let session_id = self.state.session_id.clone();
+        let prior_runs = self.slim_run_history();
+        let now = chrono::Utc::now();
+        let yolo = self.state.modes.yolo;
+        let cheap = self.state.modes.cheap;
+        let mut phase_local = self.slim_phase;
+        let stage_ctx = crate::lifecycle::StageCtx {
+            session_id: session_id.as_str(),
+            session_dir: session_dir.as_path(),
+            phase: phase_local,
+            prior_runs: prior_runs.as_slice(),
+            pending_task_ids: &[],
+            yolo,
+            cheap,
+            recovery_active: false,
+            simplification_requested: false,
+            dreaming_accepted: false,
+        };
+        let mut ctx = crate::lifecycle::OpsCtx {
+            fsm: &mut self.fsm,
+            phase: &mut phase_local,
+            paused_at_phase: &mut self.paused_at_phase,
+            pending_decisions: &mut self.pending_decisions,
+            registry: &self.stage_registry,
+            stage_ctx,
+            now,
+        };
+        f(&mut ctx)
+    }
+
+    /// Apply the side effects of a [`crate::lifecycle::OpOutcome`] from a
+    /// running-agent operator command (`:stop` or `:retry`).
+    ///
+    /// 5a only handles the [`crate::lifecycle::OpAction::PendingStop`] paths
+    /// for `AfterStop::GoIdle` and `AfterStop::Restart` — the two cases
+    /// `LifecycleOps::stop` and `LifecycleOps::restart` ever produce.
+    /// Rewind / Cancel still flow through the legacy `go_back` and
+    /// `confirm_cancel_session` paths until 5b/5c migrate them.
+    pub(crate) fn apply_op_outcome(
+        &mut self,
+        outcome: crate::lifecycle::OpOutcome,
+        label: &'static str,
+    ) {
+        use crate::lifecycle::{AfterStop, OpAction, OpOutcome};
+        match outcome {
+            OpOutcome::NoOp(reason) => {
+                self.push_status(reason, Severity::Info, Duration::from_secs(3));
+            }
+            OpOutcome::Staged(OpAction::Immediate { .. }) => {
+                tracing::warn!(
+                    "lifecycle op {label}: Immediate path is not handled in 5a; ignoring"
+                );
+            }
+            OpOutcome::Staged(OpAction::PendingStop { after, .. }) => match after {
+                AfterStop::GoIdle => self.apply_pending_stop_go_idle(label),
+                AfterStop::Restart { .. } => self.apply_pending_stop_restart(label),
+                AfterStop::Rewind { .. } | AfterStop::Cancel => {
+                    tracing::warn!(
+                        "lifecycle op {label}: AfterStop::{after:?} is not handled in 5a; \
+                         deferred to 5b/5c"
+                    );
+                }
+            },
+        }
+    }
+
+    fn apply_pending_stop_go_idle(&mut self, _label: &'static str) {
+        // The Fsm is already in Stopping; the legacy plumbing handles the
+        // actual run cancellation and the post-finalize transition. We
+        // mirror the legacy `request_termination` user-facing side effects
+        // so the operator sees the same status line and the runner
+        // supervisor still receives a `cancel_run`. `pending_termination`
+        // stays in sync with the FSM so the legacy `complete.rs` failure
+        // path observes the same StopOnly intent it always did.
+        let Some(run_id) = self.current_run_id else {
+            return;
+        };
+        let marker = format!("agent_stopped_by_user: run_id={run_id}");
+        if !self.marker_already_logged(&marker) {
+            let _ = self.state.log_event(marker);
+        }
+        self.pending_quit_confirmation_run_id = None;
+        self.pending_termination = Some(PendingTermination {
+            run_id,
+            intent: TerminationIntent::StopOnly,
+        });
+        self.runner_supervisor.cancel_run(run_id);
+        self.push_status(
+            "Stopping agent...".to_string(),
+            Severity::Warn,
+            Duration::from_secs(5),
+        );
+    }
+
+    fn apply_pending_stop_restart(&mut self, _label: &'static str) {
+        let Some(run_id) = self.current_run_id else {
+            return;
+        };
+        let Some(retry_launch) = self
+            .state
+            .agent_runs
+            .iter()
+            .find(|run| run.id == run_id)
+            .and_then(super::RetryLaunch::for_run)
+        else {
+            self.push_status(
+                "retry: current run is not retryable".to_string(),
+                Severity::Warn,
+                Duration::from_secs(3),
+            );
+            return;
+        };
+        let marker = format!("agent_retry_requested_by_user: run_id={run_id}");
+        if !self.marker_already_logged(&marker) {
+            let _ = self.state.log_event(marker);
+        }
+        self.pending_quit_confirmation_run_id = None;
+        self.pending_termination = Some(PendingTermination {
+            run_id,
+            intent: TerminationIntent::StopAndRetry(retry_launch),
+        });
+        self.runner_supervisor.cancel_run(run_id);
+        self.push_status(
+            "Stopping agent and queuing retry...".to_string(),
+            Severity::Warn,
+            Duration::from_secs(5),
+        );
+    }
+
+    /// Synchronize the lifecycle FSM into [`AgentState::Running`] for the
+    /// current legacy `Running` agent, if any.
+    ///
+    /// 5a leaves the legacy launch path (start_run_tracking) authoritative,
+    /// so the FSM is still Idle from construction when an operator hits
+    /// `:stop` after a TUI restart (resume) or in tests that synthesize a
+    /// Running `RunRecord` without going through launch. This helper
+    /// reconciles by synthesizing a [`StageSpec`] / [`ActiveRun`] from the
+    /// legacy `RunRecord` and pushing the FSM through `start` +
+    /// `confirm_running`. Already-Running and Stopping states are no-ops.
+    /// All FSM errors are absorbed: the mirroring shim is best-effort
+    /// until 5b/5c make it authoritative.
+    pub(crate) fn ensure_fsm_running_mirror(&mut self) {
+        use crate::lifecycle::AgentState;
+        if !matches!(self.fsm.view(), AgentState::Idle) {
+            return;
+        }
+        let Some(run) = self.running_run().cloned().or_else(|| {
+            self.state
+                .agent_runs
+                .iter()
+                .find(|r| r.status == RunStatus::Running)
+                .cloned()
+        }) else {
+            return;
+        };
+        let Some(stage_id) = crate::lifecycle::stage_id_for_run(&run.stage, &run.window_name)
+        else {
+            tracing::warn!(
+                "ensure_fsm_running_mirror: unknown stage '{}' / window '{}'",
+                run.stage,
+                run.window_name
+            );
+            return;
+        };
+        let spec = crate::lifecycle::StageSpec {
+            stage_id,
+            round: run.round,
+            task_id: run.task_id,
+            attempt: run.attempt,
+            window_name: run.window_name.clone(),
+        };
+        if self.fsm_start_mirroring(spec.clone()).is_err() {
+            return;
+        }
+        let active = crate::lifecycle::ActiveRun {
+            run_id: run.id,
+            spec,
+            started_at: run.started_at,
+        };
+        let _ = self.fsm_confirm_running_mirroring(active);
+    }
+
+    /// Mirror [`crate::lifecycle::Fsm::start`] into legacy fields.
+    ///
+    /// Does not yet set `current_run_id` — the run id isn't known until
+    /// `confirm_running`. Used by the launch-time mirroring shim
+    /// installed in `start_run_tracking`. Errors from the FSM are logged
+    /// and discarded; mid-cutover the legacy path is still authoritative,
+    /// so a misordered transition isn't fatal yet.
+    pub(crate) fn fsm_start_mirroring(
+        &mut self,
+        spec: crate::lifecycle::StageSpec,
+    ) -> Result<(), crate::lifecycle::FsmError> {
+        match self.fsm.start(spec) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                tracing::warn!(
+                    "fsm_start_mirroring: legal path desync, FSM rejected start ({err:?})"
+                );
+                Err(err)
+            }
+        }
+    }
+
+    /// Mirror [`crate::lifecycle::Fsm::confirm_running`] and sync the
+    /// legacy `current_run_id` field. Errors are logged and discarded
+    /// during the cutover window.
+    pub(crate) fn fsm_confirm_running_mirroring(
+        &mut self,
+        run: crate::lifecycle::ActiveRun,
+    ) -> Result<(), crate::lifecycle::FsmError> {
+        let run_id = run.run_id;
+        match self.fsm.confirm_running(run) {
+            Ok(()) => {
+                self.current_run_id = Some(run_id);
+                Ok(())
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "fsm_confirm_running_mirroring: legal path desync ({err:?}); \
+                     keeping legacy current_run_id"
+                );
+                Err(err)
+            }
+        }
+    }
+
+    /// Mirror [`crate::lifecycle::Fsm::confirm_dead`] and clear the legacy
+    /// `current_run_id` / `run_launched` fields.
+    pub(crate) fn fsm_confirm_dead_mirroring(
+        &mut self,
+        outcome: crate::lifecycle::Outcome,
+    ) -> Result<crate::lifecycle::StopResolution, crate::lifecycle::FsmError> {
+        match self.fsm.confirm_dead(outcome) {
+            Ok(resolution) => {
+                self.current_run_id = None;
+                self.run_launched = false;
+                Ok(resolution)
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "fsm_confirm_dead_mirroring: legal path desync ({err:?}); \
+                     leaving legacy current_run_id unchanged"
+                );
+                Err(err)
+            }
+        }
+    }
+
     pub(crate) fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
         session_state::execute_transition(&mut self.state, next_phase)?;
+        self.refresh_slim_phase();
         // Pin the round's review scope at round entry — including the
         // skip-to-impl path that has no reviewer stage and goal-gap re-runs
         // that create a fresh implementation round — so the simplifier can
@@ -441,6 +755,7 @@ impl App {
             other => anyhow::bail!("accept_guard_keep: unexpected stage '{other}'"),
         };
         session_state::restore_guard_originating_phase(&mut self.state, originating);
+        self.refresh_slim_phase();
         self.complete_run_finalization(&run, None)
     }
     pub(crate) fn editable_artifact(&self) -> Option<std::path::PathBuf> {

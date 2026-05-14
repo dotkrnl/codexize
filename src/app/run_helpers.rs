@@ -386,6 +386,30 @@ impl App {
         error: Option<String>,
     ) {
         self.watchdog.remove(run_id);
+        // Mirror the finalize into the lifecycle FSM. We capture the outcome
+        // first so the mirror call has a stable view of the legacy result;
+        // the actual `finish_run_record` call below mutates session state.
+        // Mirroring runs unconditionally — failures (Misordered, FSM still
+        // Idle) log a warning and continue.
+        let fsm_outcome = if success {
+            crate::lifecycle::Outcome::Done
+        } else if matches!(error.as_deref(), Some("Operator Killed" | "preempted by operator retry")) {
+            crate::lifecycle::Outcome::Cancelled {
+                by: crate::lifecycle::CancelledBy::Operator,
+                reason: error.clone().unwrap_or_default(),
+            }
+        } else {
+            crate::lifecycle::Outcome::Failed(error.clone().unwrap_or_default())
+        };
+        // Bridge: the FSM only accepts confirm_dead from Stopping. If we're
+        // mid-Running (most finalize paths), push it to Stopping with
+        // GoIdle so confirm_dead succeeds.
+        if matches!(self.fsm.view(), crate::lifecycle::AgentState::Running { .. }) {
+            let _ = self
+                .fsm
+                .request_stop(crate::lifecycle::AfterStop::GoIdle);
+        }
+        let _ = self.fsm_confirm_dead_mirroring(fsm_outcome);
         let Some(finished) =
             session_state::finish_run_record(&mut self.state, run_id, success, error)
         else {

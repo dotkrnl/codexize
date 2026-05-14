@@ -309,7 +309,7 @@ impl App {
             Some(self.live_summary_path_for_run(stage, task_id, round, attempt));
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
-        let _ = self.setup_watcher();
+        self.setup_watcher();
         if let Err(err) = self.state.save() {
             let _ = self
                 .state

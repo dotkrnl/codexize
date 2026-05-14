@@ -28,13 +28,13 @@ pub struct StatusMessage {
     pub text: Arc<str>,
     pub severity: StatusSeverity,
 }
-/// Pipeline stage identifier used by stage-scoped modals and commands.
+/// Operator-visible stage-error target used by stage-scoped modals and
+/// retry commands.
 ///
-/// Distinct from [`Phase`] because phases include intermediate states
-/// (`*Paused`, `*Running`, recovery sub-phases) that the UI does not need
-/// to disambiguate when surfacing a stage-error modal or routing a retry
-/// command. Mirrors the app-layer stage identifiers used by focus-local
-/// handlers.
+/// Distinct from [`Phase`] because phases mix modal state, pipeline position,
+/// and running-agent identity. This enum names the stage the operator sees
+/// in a stage-error modal, so retry can relaunch the exact lifecycle stage
+/// that failed even when several stages share one slim phase.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -43,9 +43,14 @@ pub enum StageId {
     SpecReview,
     Planning,
     PlanReview,
+    RepoStateUpdate,
     Sharding,
     Implementation,
+    Recovery,
+    RecoveryPlanReview,
+    RecoverySharding,
     Review,
+    Simplification,
     FinalValidation,
     Dreaming,
 }
@@ -141,4 +146,3 @@ impl AppView {
         }
     }
 }
-

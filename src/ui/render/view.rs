@@ -49,9 +49,16 @@ fn modal_from_runtime(modal: crate::app_runtime::ModalKind) -> ModalKind {
             crate::app_runtime::StageId::SpecReview => crate::app::StageId::SpecReview,
             crate::app_runtime::StageId::Planning => crate::app::StageId::Planning,
             crate::app_runtime::StageId::PlanReview => crate::app::StageId::PlanReview,
+            crate::app_runtime::StageId::RepoStateUpdate => crate::app::StageId::RepoStateUpdate,
             crate::app_runtime::StageId::Sharding => crate::app::StageId::Sharding,
             crate::app_runtime::StageId::Implementation => crate::app::StageId::Implementation,
+            crate::app_runtime::StageId::Recovery => crate::app::StageId::Recovery,
+            crate::app_runtime::StageId::RecoveryPlanReview => {
+                crate::app::StageId::RecoveryPlanReview
+            }
+            crate::app_runtime::StageId::RecoverySharding => crate::app::StageId::RecoverySharding,
             crate::app_runtime::StageId::Review => crate::app::StageId::Review,
+            crate::app_runtime::StageId::Simplification => crate::app::StageId::Simplification,
             crate::app_runtime::StageId::FinalValidation => crate::app::StageId::FinalValidation,
             crate::app_runtime::StageId::Dreaming => crate::app::StageId::Dreaming,
         }

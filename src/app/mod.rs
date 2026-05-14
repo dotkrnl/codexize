@@ -91,16 +91,25 @@ pub(crate) enum ExpansionOverride {
     Expanded,
     Collapsed,
 }
-/// Identifies a running stage for Family B error modals.
+/// Operator-visible stage-error target for modals and retry commands.
+///
+/// This is distinct from `crate::lifecycle::StageId`: it names the stage
+/// surface the operator interacts with, while lifecycle stages remain the
+/// scheduler's internal dispatch keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StageId {
     Brainstorm,
     SpecReview,
     Planning,
     PlanReview,
+    RepoStateUpdate,
     Sharding,
     Implementation,
+    Recovery,
+    RecoveryPlanReview,
+    RecoverySharding,
     Review,
+    Simplification,
     FinalValidation,
     Dreaming,
 }

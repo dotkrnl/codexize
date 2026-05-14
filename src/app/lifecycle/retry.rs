@@ -9,18 +9,11 @@ use crate::lifecycle::{
 use crate::state::{self as session_state, NodeKind, Phase};
 use std::time::Duration;
 
-/// Map the operator-visible [`crate::app::StageId`] (9 modal variants) to
+/// Map the operator-visible [`crate::app::StageId`] modal target to
 /// the lifecycle-internal [`crate::lifecycle::StageId`] used by the stage
-/// registry. The modal collapses sub-stages into one operator-facing
-/// concept (e.g. Implementation covers Coder + Recovery* under the hood);
-/// the modal "retry" button hands us the user-facing identifier and we
-/// pick the canonical lifecycle stage to relaunch.
-///
-/// `Implementation` and `Review` map to `Coder` / `Reviewer` respectively;
-/// the recovery sub-chain isn't reachable from a modal retry because the
-/// recovery flow is automatic, not operator-driven. `Sharding` lives under
-/// `Phase::Plan` in the slim model; the modal returns the per-stage
-/// retry intent rather than the broader plan-phase rewind.
+/// registry. These values are intentionally stage-error targets, not slim
+/// phases: multiple concrete lifecycle stages share a phase, but a retry
+/// from the modal must relaunch the stage that actually failed.
 fn lifecycle_stage_id_from_view(view: crate::app::StageId) -> crate::lifecycle::StageId {
     use crate::app::StageId as V;
     use crate::lifecycle::StageId as L;
@@ -29,9 +22,14 @@ fn lifecycle_stage_id_from_view(view: crate::app::StageId) -> crate::lifecycle::
         V::SpecReview => L::SpecReview,
         V::Planning => L::Planning,
         V::PlanReview => L::PlanReview,
+        V::RepoStateUpdate => L::RepoStateUpdate,
         V::Sharding => L::Sharding,
         V::Implementation => L::Coder,
+        V::Recovery => L::Recovery,
+        V::RecoveryPlanReview => L::RecoveryPlanReview,
+        V::RecoverySharding => L::RecoverySharding,
         V::Review => L::Reviewer,
+        V::Simplification => L::Simplification,
         V::FinalValidation => L::FinalValidation,
         V::Dreaming => L::Dreaming,
     }

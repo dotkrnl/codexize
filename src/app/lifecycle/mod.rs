@@ -91,6 +91,41 @@ fn retry_target_for_run(run: &crate::state::RunRecord) -> Option<RetryTarget> {
         crate::logic::rules::RetryTarget::Stage(stage) => RetryTarget::Stage(stage),
     })
 }
+
+/// Operator-visible stage-error target for a legacy running phase.
+///
+/// The persisted legacy phase is still the authority for "what just failed";
+/// this projection keeps the stage-error modal and its retry action from
+/// guessing across the slim lifecycle's broader phases.
+fn stage_error_target_for_phase(phase: Phase) -> Option<StageId> {
+    Some(match phase {
+        Phase::BrainstormRunning => StageId::Brainstorm,
+        Phase::SpecReviewRunning => StageId::SpecReview,
+        Phase::PlanningRunning => StageId::Planning,
+        Phase::PlanReviewRunning => StageId::PlanReview,
+        Phase::RepoStateUpdateRunning => StageId::RepoStateUpdate,
+        Phase::ShardingRunning => StageId::Sharding,
+        Phase::ImplementationRound(_) => StageId::Implementation,
+        Phase::BuilderRecovery(_) => StageId::Recovery,
+        Phase::BuilderRecoveryPlanReview(_) => StageId::RecoveryPlanReview,
+        Phase::BuilderRecoverySharding(_) => StageId::RecoverySharding,
+        Phase::ReviewRound(_) => StageId::Review,
+        Phase::Simplification(_) => StageId::Simplification,
+        Phase::FinalValidation(_) => StageId::FinalValidation,
+        Phase::Dreaming(_) => StageId::Dreaming,
+        Phase::IdeaInput
+        | Phase::SpecReviewPaused
+        | Phase::PlanReviewPaused
+        | Phase::WaitingToImplement
+        | Phase::SkipToImplPending
+        | Phase::GitGuardPending
+        | Phase::DreamingPending
+        | Phase::Done
+        | Phase::Cancelled
+        | Phase::BlockedNeedsUser => return None,
+    })
+}
+
 impl App {
     pub(crate) fn current_app_view(&self) -> crate::app_runtime::AppView {
         use crate::app_runtime::{
@@ -104,9 +139,14 @@ impl App {
                 StageId::SpecReview => RuntimeStageId::SpecReview,
                 StageId::Planning => RuntimeStageId::Planning,
                 StageId::PlanReview => RuntimeStageId::PlanReview,
+                StageId::RepoStateUpdate => RuntimeStageId::RepoStateUpdate,
                 StageId::Sharding => RuntimeStageId::Sharding,
                 StageId::Implementation => RuntimeStageId::Implementation,
+                StageId::Recovery => RuntimeStageId::Recovery,
+                StageId::RecoveryPlanReview => RuntimeStageId::RecoveryPlanReview,
+                StageId::RecoverySharding => RuntimeStageId::RecoverySharding,
                 StageId::Review => RuntimeStageId::Review,
+                StageId::Simplification => RuntimeStageId::Simplification,
                 StageId::FinalValidation => RuntimeStageId::FinalValidation,
                 StageId::Dreaming => RuntimeStageId::Dreaming,
             }
@@ -169,32 +209,8 @@ impl App {
             {
                 Some(ModalKind::DreamingDecision)
             }
-            Phase::BrainstormRunning if self.state.agent_error.is_some() => {
-                Some(ModalKind::StageError(StageId::Brainstorm))
-            }
-            Phase::SpecReviewRunning if self.state.agent_error.is_some() => {
-                Some(ModalKind::StageError(StageId::SpecReview))
-            }
-            Phase::PlanningRunning if self.state.agent_error.is_some() => {
-                Some(ModalKind::StageError(StageId::Planning))
-            }
-            Phase::PlanReviewRunning if self.state.agent_error.is_some() => {
-                Some(ModalKind::StageError(StageId::PlanReview))
-            }
-            Phase::ShardingRunning if self.state.agent_error.is_some() => {
-                Some(ModalKind::StageError(StageId::Sharding))
-            }
-            Phase::ImplementationRound(_) if self.state.agent_error.is_some() => {
-                Some(ModalKind::StageError(StageId::Implementation))
-            }
-            Phase::ReviewRound(_) if self.state.agent_error.is_some() => {
-                Some(ModalKind::StageError(StageId::Review))
-            }
-            Phase::FinalValidation(_) if self.state.agent_error.is_some() => {
-                Some(ModalKind::StageError(StageId::FinalValidation))
-            }
-            Phase::Dreaming(_) if self.state.agent_error.is_some() => {
-                Some(ModalKind::StageError(StageId::Dreaming))
+            phase if self.state.agent_error.is_some() => {
+                stage_error_target_for_phase(phase).map(ModalKind::StageError)
             }
             Phase::BlockedNeedsUser
                 if self.state.block_origin == Some(BlockOrigin::FinalValidation) =>
@@ -1342,6 +1358,39 @@ mod tests {
         assert!(!ctx.recovery_active);
         assert!(!ctx.simplification_requested);
         assert!(!ctx.dreaming_accepted);
+    }
+
+    #[test]
+    fn active_modal_preserves_agent_error_stage_identity_for_lifecycle_substages() {
+        for (phase, expected) in [
+            (
+                Phase::RepoStateUpdateRunning,
+                ModalKind::StageError(StageId::RepoStateUpdate),
+            ),
+            (
+                Phase::BuilderRecovery(2),
+                ModalKind::StageError(StageId::Recovery),
+            ),
+            (
+                Phase::BuilderRecoveryPlanReview(2),
+                ModalKind::StageError(StageId::RecoveryPlanReview),
+            ),
+            (
+                Phase::BuilderRecoverySharding(2),
+                ModalKind::StageError(StageId::RecoverySharding),
+            ),
+            (
+                Phase::Simplification(2),
+                ModalKind::StageError(StageId::Simplification),
+            ),
+        ] {
+            let mut state = SessionState::new(format!("stage-error-{phase:?}"));
+            state.current_phase = phase;
+            state.agent_error = Some("failed".to_string());
+            let app = mk_app(state);
+
+            assert_eq!(app.active_modal(), Some(expected));
+        }
     }
 
     #[test]

@@ -71,36 +71,6 @@ impl PendingDecisions {
             || self.dreaming.is_some()
     }
 
-    /// Clear any pending decision whose originating [`Phase`] is strictly
-    /// later than `target`. Used by `:rewind` so a decision raised at a
-    /// phase the operator is rolling away from doesn't linger.
-    ///
-    /// The originating-phase map below mirrors where each modal is raised
-    /// in the legacy code:
-    /// - `spec_approval` and `skip_to_impl` are raised at [`Phase::Spec`].
-    /// - `plan_approval` is raised at [`Phase::Plan`].
-    /// - `dreaming` is raised at [`Phase::Finalization`].
-    /// - `git_guard` is independent of pipeline phase (operator HEAD
-    ///   moved); rewind preserves it.
-    pub fn clear_after(&mut self, target: Phase) {
-        // A decision is "after target" when its originating phase is
-        // strictly greater than target. `Phase` ordering is partial — see
-        // `Phase::partial_cmp` — so a `None` comparison (e.g. against
-        // `Phase::Cancelled`) leaves the decision in place.
-        let strictly_after = |origin: Phase| -> bool {
-            matches!(origin.partial_cmp(&target), Some(std::cmp::Ordering::Greater))
-        };
-        if strictly_after(Phase::Spec) {
-            self.spec_approval = None;
-            self.skip_to_impl = None;
-        }
-        if strictly_after(Phase::Plan) {
-            self.plan_approval = None;
-        }
-        if strictly_after(Phase::Finalization) {
-            self.dreaming = None;
-        }
-    }
 }
 
 #[cfg(test)]
@@ -142,28 +112,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn clear_after_drops_only_decisions_originating_past_target() {
-        let mut pd = PendingDecisions {
-            git_guard: Some(GitGuardData {}),
-            spec_approval: Some(SpecApprovalData {}),
-            plan_approval: Some(PlanApprovalData {}),
-            skip_to_impl: Some(SkipToImplData {}),
-            dreaming: Some(DreamingData {}),
-        };
-        // Rewinding to Plan keeps Plan-or-earlier decisions but drops the
-        // later Finalization-origin dreaming modal.
-        pd.clear_after(Phase::Plan);
-        assert!(pd.git_guard.is_some());
-        assert!(pd.spec_approval.is_some());
-        assert!(pd.plan_approval.is_some());
-        assert!(pd.skip_to_impl.is_some());
-        assert!(pd.dreaming.is_none());
-        // Rewinding further back to Idea drops the Spec-origin decisions too.
-        pd.clear_after(Phase::Idea);
-        assert!(pd.git_guard.is_some());
-        assert!(pd.spec_approval.is_none());
-        assert!(pd.plan_approval.is_none());
-        assert!(pd.skip_to_impl.is_none());
-    }
 }

@@ -123,6 +123,7 @@ fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
 }
 
 fn git_available() -> bool {
+    let _guard = crate::state::test_fs_lock().lock();
     std::process::Command::new("git")
         .arg("--version")
         .stdout(std::process::Stdio::null())
@@ -133,6 +134,7 @@ fn git_available() -> bool {
 }
 
 fn run_git(dir: &Path, args: &[&str]) {
+    let _guard = crate::state::test_fs_lock().lock();
     let status = std::process::Command::new("git")
         .args(args)
         .current_dir(dir)

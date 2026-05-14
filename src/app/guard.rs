@@ -67,6 +67,8 @@ pub enum VerifyResult {
     },
 }
 fn git_stdout(args: &[&str]) -> Option<String> {
+    #[cfg(test)]
+    let _guard = crate::state::test_fs_lock().lock();
     let output = std::process::Command::new("git").args(args).output().ok()?;
     output
         .status
@@ -197,6 +199,8 @@ pub fn reset_hard_to(captured_head: &str) -> bool {
     if captured_head.is_empty() {
         return false;
     }
+    #[cfg(test)]
+    let _guard = crate::state::test_fs_lock().lock();
     std::process::Command::new("git")
         .args(["reset", "--hard", captured_head])
         .stdout(std::process::Stdio::null())

@@ -2,7 +2,7 @@
 //!
 //! Single-shot, single-round. Runs while the session sits on
 //! [`Phase::Idea`] and lands on [`Phase::Spec`] on success.
-use crate::lifecycle::fsm::Outcome;
+use super::{has_succeeded, next_attempt};
 use crate::lifecycle::phase::Phase;
 use crate::lifecycle::spec::StageSpec;
 use crate::lifecycle::stage::{Stage, StageCtx, SuccessOutcome, WorkUnit};
@@ -74,41 +74,10 @@ impl Stage for BrainstormStage {
     }
 }
 
-/// Highest `attempt + 1` seen for this `(stage, task, round)` in
-/// `ctx.prior_runs`, or `1` if none.
-pub(super) fn next_attempt(
-    ctx: &StageCtx<'_>,
-    stage: StageId,
-    task: Option<u32>,
-    round: u32,
-) -> u32 {
-    ctx.prior_runs
-        .iter()
-        .filter(|r| r.stage_id == stage && r.task_id == task && r.round == round)
-        .map(|r| r.attempt)
-        .max()
-        .map(|a| a.saturating_add(1))
-        .unwrap_or(1)
-}
-
-/// True when any prior run for this `(stage, task, round)` is `Outcome::Done`.
-pub(super) fn has_succeeded(
-    ctx: &StageCtx<'_>,
-    stage: StageId,
-    task: Option<u32>,
-    round: u32,
-) -> bool {
-    ctx.prior_runs.iter().any(|r| {
-        r.stage_id == stage
-            && r.task_id == task
-            && r.round == round
-            && r.outcome == Some(Outcome::Done)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lifecycle::fsm::Outcome;
     use crate::lifecycle::stage::RunHistoryEntry;
     use std::path::Path;
 

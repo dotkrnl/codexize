@@ -598,7 +598,7 @@ impl App {
         let Some(target) = target else {
             return;
         };
-        let legacy = crate::lifecycle::slim_to_old_phase(target, &self.state.current_phase);
+        let legacy = crate::lifecycle::slim_to_old_phase(target);
         let leaving_blocked = matches!(self.state.current_phase, Phase::BlockedNeedsUser)
             && !matches!(legacy, Phase::BlockedNeedsUser);
         session_state::set_phase_for_operator_retry(&mut self.state, legacy);

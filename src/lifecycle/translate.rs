@@ -110,11 +110,7 @@ pub fn slim_phase_for_stage_retry(stage: &str) -> SlimPhase {
 ///
 /// The slim → legacy map is many-to-one, so this picks the "running" phase
 /// for each slot so the legacy launch/auto-launch path can take over.
-/// `current_old` is currently ignored but kept in the signature so future
-/// callers can disambiguate without changing the type — e.g. preferring
-/// `PlanReviewRunning` over `PlanningRunning` when `plan.md` already exists.
-pub fn slim_to_old_phase(target: SlimPhase, current_old: &LegacyPhase) -> LegacyPhase {
-    let _ = current_old;
+pub fn slim_to_old_phase(target: SlimPhase) -> LegacyPhase {
     match target {
         SlimPhase::Idea => LegacyPhase::IdeaInput,
         SlimPhase::Spec => LegacyPhase::SpecReviewRunning,
@@ -310,34 +306,30 @@ mod tests {
 
     #[test]
     fn slim_to_old_phase_inverse_lands_on_running_variant() {
-        let cur = LegacyPhase::IdeaInput;
+        assert_eq!(slim_to_old_phase(SlimPhase::Idea), LegacyPhase::IdeaInput);
         assert_eq!(
-            slim_to_old_phase(SlimPhase::Idea, &cur),
-            LegacyPhase::IdeaInput
-        );
-        assert_eq!(
-            slim_to_old_phase(SlimPhase::Spec, &cur),
+            slim_to_old_phase(SlimPhase::Spec),
             LegacyPhase::SpecReviewRunning
         );
         assert_eq!(
-            slim_to_old_phase(SlimPhase::Plan, &cur),
+            slim_to_old_phase(SlimPhase::Plan),
             LegacyPhase::PlanningRunning
         );
         assert_eq!(
-            slim_to_old_phase(SlimPhase::Implementation(4), &cur),
+            slim_to_old_phase(SlimPhase::Implementation(4)),
             LegacyPhase::ImplementationRound(4)
         );
         assert_eq!(
-            slim_to_old_phase(SlimPhase::Review(2), &cur),
+            slim_to_old_phase(SlimPhase::Review(2)),
             LegacyPhase::ReviewRound(2)
         );
         assert_eq!(
-            slim_to_old_phase(SlimPhase::Finalization, &cur),
+            slim_to_old_phase(SlimPhase::Finalization),
             LegacyPhase::FinalValidation(1)
         );
-        assert_eq!(slim_to_old_phase(SlimPhase::Done, &cur), LegacyPhase::Done);
+        assert_eq!(slim_to_old_phase(SlimPhase::Done), LegacyPhase::Done);
         assert_eq!(
-            slim_to_old_phase(SlimPhase::Cancelled, &cur),
+            slim_to_old_phase(SlimPhase::Cancelled),
             LegacyPhase::Cancelled
         );
     }

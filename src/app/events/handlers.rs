@@ -433,7 +433,7 @@ impl App {
                 false
             }
             KeyCode::Char('e') if stage_id == StageId::Brainstorm => {
-                let _ = self.transition_to_phase(Phase::IdeaInput);
+                self.transition_to_phase_logged(Phase::IdeaInput);
                 false
             }
             KeyCode::Char('s') | KeyCode::Char('S') if stage_id == StageId::Dreaming => {
@@ -477,7 +477,7 @@ impl App {
                 // The runtime guard in data/persistence/transitions.rs verifies
                 // block_origin == FinalValidation; this transition stays a no-op
                 // for any other origin.
-                let _ = self.transition_to_phase(Phase::Done);
+                self.transition_to_phase_logged(Phase::Done);
                 false
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {

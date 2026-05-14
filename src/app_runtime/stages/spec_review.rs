@@ -181,11 +181,11 @@ impl App {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('y') | KeyCode::Enter => {
                 self.clear_agent_error();
-                let _ = self.transition_to_phase(Phase::PlanningRunning);
+                self.transition_to_phase_logged(Phase::PlanningRunning);
                 false
             }
             KeyCode::Char('n') => {
-                let _ = self.transition_to_phase(Phase::SpecReviewRunning);
+                self.transition_to_phase_logged(Phase::SpecReviewRunning);
                 self.launch_spec_review();
                 false
             }

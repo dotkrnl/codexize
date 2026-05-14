@@ -134,7 +134,7 @@ impl App {
         match launch_result {
             Ok(()) => {
                 session_state::record_brainstorm_launch(&mut self.state, idea, model.clone());
-                let _ = self.transition_to_phase(Phase::BrainstormRunning);
+                self.transition_to_phase_logged(Phase::BrainstormRunning);
                 self.start_run_tracking(
                     run_id,
                     "brainstorm",

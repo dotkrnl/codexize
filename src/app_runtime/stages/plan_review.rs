@@ -190,11 +190,11 @@ impl App {
                 // `WaitingToImplement` before sharding. The scheduler /
                 // repo-state-update dispatch out of `WaitingToImplement`
                 // owns the actual launch into `ShardingRunning`.
-                let _ = self.transition_to_phase(Phase::WaitingToImplement);
+                self.transition_to_phase_logged(Phase::WaitingToImplement);
                 false
             }
             KeyCode::Char('n') => {
-                let _ = self.transition_to_phase(Phase::PlanReviewRunning);
+                self.transition_to_phase_logged(Phase::PlanReviewRunning);
                 self.launch_plan_review();
                 false
             }

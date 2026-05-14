@@ -137,7 +137,7 @@ impl App {
             self.pending_yolo_toggle_gate = None;
         }
         self.clear_agent_error();
-        let _ = self.transition_to_phase(Phase::PlanningRunning);
+        self.transition_to_phase_logged(Phase::PlanningRunning);
     }
     pub(crate) fn auto_approve_plan_review_pause(&mut self, gate: &'static str) {
         self.log_yolo_auto_approved(gate);
@@ -152,7 +152,7 @@ impl App {
         // Spec §Data model line 96: yolo auto-approval lands in
         // `WaitingToImplement`; the queue scheduler then dispatches into
         // sharding (directly or via repo-state update).
-        let _ = self.transition_to_phase(Phase::WaitingToImplement);
+        self.transition_to_phase_logged(Phase::WaitingToImplement);
     }
     pub(crate) fn record_dirty_worktree_yolo_gate(&mut self, dirty: bool, modes: LaunchModes) {
         if dirty && modes.yolo {

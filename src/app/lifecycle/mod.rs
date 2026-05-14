@@ -941,6 +941,14 @@ impl App {
         self.live_summary_cached_mtime = None;
         Ok(())
     }
+    /// Like [`Self::transition_to_phase`], but logs failures instead of
+    /// returning them. Use at call sites where the transition is best-effort
+    /// and the show must go on (e.g., stage success/fallback paths).
+    pub(crate) fn transition_to_phase_logged(&mut self, next_phase: Phase) {
+        if let Err(e) = self.transition_to_phase(next_phase) {
+            tracing::warn!("failed to transition to {next_phase:?}: {e}");
+        }
+    }
     /// Set `block_origin` on the session and transition into
     /// `BlockedNeedsUser`. The single throat for entering a block from app
     /// code so the persisted provenance is always populated and the

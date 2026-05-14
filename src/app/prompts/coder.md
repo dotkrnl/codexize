@@ -69,8 +69,15 @@ Hard rules:
     OWN atomic commit separate from the task's main commits so the reviewer
     can read it independently.
   - Working tree must be clean on exit. `git status --porcelain` MUST be
-    empty when you stop — inherited dirt is your problem (revert it; don't
-    carry it forward). Dirty tree is a hard failure regardless of test state.
+    empty when you stop, and that is YOUR job — including uncommitted or
+    untracked changes you inherited from a prior attempt, a stray edit, or
+    work you did not author. For every leftover hunk make a call: if it is
+    useful, commit it as its own atomic conventional commit (even when you
+    did not write it — claim it); if it should not ship, drop it
+    (`git restore` / `git checkout --` / `git clean -fd`). Do not punt to a
+    retry — `failed_unverified` suppresses auto-retry, and the next attempt
+    inherits the same dirt and fails the same way. Dirty tree is a hard
+    failure regardless of test state.
   - No force-push, history rewrite, or branch deletes.
   - Never `git add -f`. `.gitignore`d paths stay out of the commit; if every
     relevant change is ignored, skip the commit entirely.

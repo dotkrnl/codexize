@@ -59,8 +59,14 @@ Workflow:
      must build on its own at that SHA.
 
 Workspace hygiene (same as the coder follows):
-  - Working tree must be clean on exit. Inherited dirt is your problem
-    (revert it; don't carry it forward).
+  - Working tree must be clean on exit, and that is YOUR job — including
+    uncommitted or untracked changes you inherited. For each leftover hunk
+    make a call: if it is useful AND behavior-preserving, commit it as its
+    own atomic `refactor:`/`style:`/`chore:` commit (even when you did not
+    author it); if it should not ship, or if it changes behavior (your
+    contract forbids that), drop it (`git restore` / `git clean -fd`). Do
+    not punt — `failed_unverified` suppresses auto-retry, so the next
+    attempt inherits the same dirt and fails the same way.
   - No `Co-Authored-By:` trailers or co-author attribution.
   - No force-push, history rewrite, or branch deletes.
   - Never `git add -f`. `.gitignore`d paths stay out of the commit; if

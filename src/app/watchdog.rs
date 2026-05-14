@@ -133,16 +133,8 @@ pub(crate) struct WatchdogRegistry {
     states: HashMap<RunId, WatchdogState>,
 }
 impl WatchdogRegistry {
-    /// Construct an unscaled registry. Used by test scaffolding that does
-    /// not exercise clock compression; production callers go through
-    /// `from_env` so the env var is honored.
     #[cfg(test)]
     pub(crate) fn new() -> Self {
-        Self::default()
-    }
-    /// Build the production registry. Tests use Tokio's paused clock instead
-    /// of compressing thresholds through environment state.
-    pub(crate) fn from_env() -> Self {
         Self::default()
     }
     pub(crate) fn warn_threshold(&self, effort: EffortLevel) -> Duration {

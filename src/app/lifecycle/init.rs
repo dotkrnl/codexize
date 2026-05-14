@@ -166,7 +166,7 @@ impl App {
             pending_yolo_toggle_gate: None,
             yolo_exit_issued: HashSet::new(),
             yolo_exit_observations: HashMap::new(),
-            watchdog: super::watchdog::WatchdogRegistry::from_env(),
+            watchdog: super::watchdog::WatchdogRegistry::default(),
             notification_runtime: crate::data::notifications::NotificationRuntime::new(ntfy_params),
             interactive_wait_marker: None,
             config,

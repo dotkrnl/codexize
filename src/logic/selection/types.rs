@@ -124,10 +124,6 @@ impl Candidate {
         None
     }
 
-    /// Tiebreak helper: unknown/None becomes 0 per spec §selection.
-    pub fn effective_quota_for_tiebreak(&self) -> u8 {
-        self.effective_quota().unwrap_or(0)
-    }
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelRow {

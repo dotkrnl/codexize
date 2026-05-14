@@ -285,11 +285,10 @@ fn weighted_sample_uses_weights_for_random() {
 #[test]
 fn pool_pick_sampler_dominates_for_free_row_over_lower_fetched_quota() {
     // Spec §"Selection algorithm" (operator decision, 2026-05-09): the
-    // sampler's quota input is the row's max
-    // `effective_quota_for_tiebreak` across enabled providers. With
-    // dashboard scores tied at 80.0, the free row's effective quota of
-    // 100 vastly outweighs the fetched row's 40 — the sampler should
-    // pick the free row in nearly every seed.
+    // sampler's quota input is the row's effective quota across enabled
+    // providers. With dashboard scores tied at 80.0, the free row's
+    // effective quota of 100 vastly outweighs the fetched row's 40 — the
+    // sampler should pick the free row in nearly every seed.
     let mut free_row = sample_model_with_score(SubscriptionKind::OpencodeGo, "free-row", 0, 80.0);
     free_row.candidates[0].free = true;
     free_row.candidates[0].official = false;

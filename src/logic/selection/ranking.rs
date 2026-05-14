@@ -21,10 +21,10 @@ pub fn phase_rank_score(model: &CachedModel, phase: SelectionPhase) -> Option<f6
 ///
 /// Per spec §"Selection algorithm" (operator decision, 2026-05-09): the
 /// sampler weights combine the dashboard ipbr phase score with the row's
-/// *max `effective_quota_for_tiebreak` across enabled providers*. Free /
-/// quota_disabled providers therefore push the row to 100% headroom in the
-/// sampler even when no fetched quota exists, while a row with only fetched
-/// providers carries their actual remaining quota.
+/// effective quota across enabled providers. Free / quota_disabled providers
+/// therefore push the row to 100% headroom in the sampler even when no
+/// fetched quota exists, while a row with only fetched providers carries
+/// their actual remaining quota.
 pub fn candidate_pool_weights(candidates: &[CandidateRef<'_>], phase: SelectionPhase) -> Vec<f64> {
     // Keep output parallel to the input slice; ineligible candidates are "dropped" as zero weights.
     let mut weights = vec![0.0; candidates.len()];
@@ -63,13 +63,12 @@ pub fn candidate_pool_weights(candidates: &[CandidateRef<'_>], phase: SelectionP
     weights
 }
 /// Row-level effective quota that drives the sampler. Returns:
-/// - `None` when the row is explicitly exhausted (every enabled
-///   provider's `effective_quota_for_tiebreak` is `0`, *and* no
-///   provider is unknown), so the sampler drops the row;
-/// - `Some(value)` otherwise, where `value` is the spec's
-///   "max over enabled providers of `effective_quota_for_tiebreak`,
-///   unknown → 0". Free and `quota_disabled` providers pin this to 100;
-///   subscriptions that failed their quota fetch contribute 50.
+/// - `None` when every enabled provider has known zero quota and no provider
+///   quota is unknown, so the sampler drops the row;
+/// - `Some(value)` otherwise, using the best known enabled-provider quota.
+///   Free and `quota_disabled` providers pin this to 100; subscriptions that
+///   failed their quota fetch contribute 50; rows with only unknown quota use
+///   a conservative default.
 pub fn effective_row_quota(model: &CachedModel) -> Option<u8> {
     if model.candidates.is_empty() {
         return None;

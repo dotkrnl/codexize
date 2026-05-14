@@ -59,7 +59,6 @@ fn sample_candidate() -> Candidate {
 fn effective_quota_returns_raw_when_quota_known() {
     let candidate = sample_candidate();
     assert_eq!(candidate.effective_quota(), Some(60));
-    assert_eq!(candidate.effective_quota_for_tiebreak(), 60);
 }
 
 #[test]
@@ -99,13 +98,4 @@ fn effective_quota_prefers_known_quota_over_failure_assumption() {
     candidate.quota_percent = Some(72);
     candidate.quota_failed = true;
     assert_eq!(candidate.effective_quota(), Some(72));
-}
-
-#[test]
-fn effective_quota_for_tiebreak_collapses_unknown_to_zero() {
-    let mut candidate = sample_candidate();
-    candidate.quota_percent = None;
-    candidate.quota_failed = false;
-    assert_eq!(candidate.effective_quota(), None);
-    assert_eq!(candidate.effective_quota_for_tiebreak(), 0);
 }

@@ -102,40 +102,6 @@ impl SessionState {
             .with_context(|| format!("failed to write messages to {}", path.display()))?;
         Ok(())
     }
-    /// Create a new RunRecord, push it to agent_runs, and return its id.
-    #[allow(clippy::too_many_arguments)]
-    pub fn create_run_record(
-        &mut self,
-        stage: String,
-        task_id: Option<u32>,
-        round: u32,
-        attempt: u32,
-        model: String,
-        subscription_label: String,
-        window_name: String,
-        effort: EffortLevel,
-        effort_mapping: crate::data::config::schema::EffortMapping,
-        effort_eligible: bool,
-        modes: LaunchModes,
-        section_path: Option<Vec<SectionPart>>,
-    ) -> u64 {
-        let id = self.next_agent_run_id();
-        self.create_run_record_with_id(
-            id,
-            stage,
-            task_id,
-            round,
-            attempt,
-            model,
-            subscription_label,
-            window_name,
-            effort,
-            effort_mapping,
-            effort_eligible,
-            modes,
-            section_path,
-        )
-    }
     /// Create a RunRecord with an id already reserved by the launch path.
     #[allow(clippy::too_many_arguments)]
     pub fn create_run_record_with_id(
@@ -271,7 +237,7 @@ impl SessionState {
 #[cfg(test)]
 impl SessionState {
     /// Capture current hostname for same-host resume validation. Exposed for
-    /// tests; runtime callers should rely on [`SessionState::create_run_record`].
+    /// tests.
     pub(crate) fn capture_hostname() -> Option<String> {
         capture_hostname()
     }

@@ -50,7 +50,7 @@ fn production_prefix(contents: &str) -> &str {
 #[test]
 fn runtime_state_mutations_go_through_state_mutators() {
     let forbidden_mutator_patterns = [
-        ".state.create_run_record(",
+        ".state.create_run_record_with_id(",
         ".state.transition_to(",
         ".state.pending_guard_decision.take(",
         ".state.builder.ensure_task_for_round(",

@@ -196,7 +196,7 @@ impl LifecycleOps {
             AgentState::Running { .. } | AgentState::Stopping { .. } => {
                 let after = AfterStop::Rewind {
                     target,
-                    spec: start_spec.clone(),
+                    spec: start_spec,
                     cleanup: cleanup.clone(),
                     clear_pending: true,
                 };

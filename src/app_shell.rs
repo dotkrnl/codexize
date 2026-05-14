@@ -350,7 +350,7 @@ impl AppShell {
         let initial_supervisor =
             SessionSupervisor::new(initial_state, startup_origin, config.clone());
         supervisors.insert(focused_session_id.clone(), initial_supervisor);
-        let mut session_index = SessionIndex::new(sessions_root.clone());
+        let mut session_index = SessionIndex::new(sessions_root);
         session_index.refresh()?;
         let mut shell = Self {
             _app_lock_guard: app_lock_guard,

@@ -91,7 +91,7 @@ impl App {
             .clone()
             .unwrap_or_default();
         let (current_baseline, newly_completed) = self.compute_repo_state_update_inputs();
-        let current_baseline_str = current_baseline.clone().unwrap_or_default();
+        let current_baseline_str = current_baseline.unwrap_or_default();
         // Convention used elsewhere in the runtime (e.g. `write_review_scope_artifact`):
         // production paths read the live git HEAD; tests pin a deterministic
         // placeholder so the prompt snapshot is stable.

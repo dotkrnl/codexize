@@ -56,17 +56,18 @@ pub struct BakedProvider {
 pub const ADDITION_DISPLAY_ORDER: u16 = u16::MAX;
 
 /// Static baked-defaults table — 30 hand-curated provider entries
-/// mirroring the ipbr scoreboard: 17 direct-subscription routes
-/// (Claude opus/sonnet, Codex gpt-5.x, Gemini variants, Kimi k2.6 via
-/// the Moonshot route) plus 12 paid `opencode-go/...` routes
-/// (deepseek, glm, kimi-k2.5, kimi-k2.6, mimo, minimax, qwen) sharing
-/// the `"opencode-shared"` quota pool, plus one free
-/// `opencode/minimax-m2.5-free` entry with `free=true` and no quota
-/// key. kimi-k2.6 stacks both the direct Moonshot route and an
-/// opencode-go alternate. Models that the live `opencode` CLI does
-/// not advertise (verified via `opencode models`) are not baked here
-/// even if they appear on the IPBR scoreboard, since launching them
-/// errors with `ProviderModelNotFoundError`.
+/// across 28 model rows. 17 direct-subscription routes (Claude
+/// opus/sonnet, Codex gpt-5.x, Gemini variants, Kimi k2.6 via the
+/// Moonshot route) plus 12 paid `opencode-go/...` routes (deepseek,
+/// glm, kimi-k2.5, kimi-k2.6, mimo, minimax, qwen) sharing the
+/// `"opencode-shared"` quota pool, plus two free `opencode/...`
+/// providers (minimax-m2.5-free and deepseek-v4-flash-free) stacked as
+/// alternate providers on their parent model rows with `free=true` and
+/// no quota key. kimi-k2.6 stacks both the direct Moonshot route and an
+/// opencode-go alternate. Models that the live `opencode` CLI does not
+/// advertise (verified via `opencode models`) are not baked here even
+/// if they appear on the IPBR scoreboard, since launching them errors
+/// with `ProviderModelNotFoundError`.
 pub const BAKED_TABLE: &[BakedRow] = &[
     // --- Claude opus (4 rows): cheap_eligible=false,
     // effort_tough="max"; 4.1 is kept out of tough rotation.
@@ -403,20 +404,36 @@ pub const BAKED_TABLE: &[BakedRow] = &[
     // --- Opencode-go (11 rows): qualified launch_name, quota_lookup_key="opencode-shared" ---
     BakedRow {
         model: "deepseek-v4-flash",
-        providers: &[BakedProvider {
-            cli: CliKind::Opencode,
-            launch_name: "opencode-go/deepseek-v4-flash",
-            subscription: SubscriptionKind::OpencodeGo,
-            free: false,
-            official: false,
-            cheap_eligible: false,
-            tough_eligible: false,
-            effort_eligible: false,
-            effort_cheap: "low",
-            effort_normal: "medium",
-            effort_tough: "high",
-            quota_lookup_key: Some("opencode-shared"),
-        }],
+        providers: &[
+            BakedProvider {
+                cli: CliKind::Opencode,
+                launch_name: "opencode-go/deepseek-v4-flash",
+                subscription: SubscriptionKind::OpencodeGo,
+                free: false,
+                official: false,
+                cheap_eligible: false,
+                tough_eligible: false,
+                effort_eligible: false,
+                effort_cheap: "low",
+                effort_normal: "medium",
+                effort_tough: "high",
+                quota_lookup_key: Some("opencode-shared"),
+            },
+            BakedProvider {
+                cli: CliKind::Opencode,
+                launch_name: "opencode/deepseek-v4-flash-free",
+                subscription: SubscriptionKind::OpencodeGo,
+                free: true,
+                official: false,
+                cheap_eligible: true,
+                tough_eligible: false,
+                effort_eligible: false,
+                effort_cheap: "low",
+                effort_normal: "medium",
+                effort_tough: "high",
+                quota_lookup_key: None,
+            },
+        ],
     },
     BakedRow {
         // `opencode models --verbose` exposes reasoningEffort
@@ -441,42 +458,36 @@ pub const BAKED_TABLE: &[BakedRow] = &[
     },
     BakedRow {
         model: "minimax-m2.5",
-        providers: &[BakedProvider {
-            cli: CliKind::Opencode,
-            launch_name: "opencode-go/minimax-m2.5",
-            subscription: SubscriptionKind::OpencodeGo,
-            free: false,
-            official: false,
-            cheap_eligible: false,
-            tough_eligible: false,
-            effort_eligible: false,
-            effort_cheap: "low",
-            effort_normal: "medium",
-            effort_tough: "high",
-            quota_lookup_key: Some("opencode-shared"),
-        }],
-    },
-    // opencode advertises a free tier under the bare `opencode/` prefix
-    // (separate from the paid `opencode-go/` pool). The same Opencode CLI
-    // binary launches both, so we reuse SubscriptionKind::OpencodeGo and
-    // let `free=true` handle the billing distinction (Candidate's
-    // effective_quota short-circuits to 100% on free entries).
-    BakedRow {
-        model: "minimax-m2.5-free",
-        providers: &[BakedProvider {
-            cli: CliKind::Opencode,
-            launch_name: "opencode/minimax-m2.5-free",
-            subscription: SubscriptionKind::OpencodeGo,
-            free: true,
-            official: false,
-            cheap_eligible: true,
-            tough_eligible: false,
-            effort_eligible: false,
-            effort_cheap: "low",
-            effort_normal: "medium",
-            effort_tough: "high",
-            quota_lookup_key: None,
-        }],
+        providers: &[
+            BakedProvider {
+                cli: CliKind::Opencode,
+                launch_name: "opencode-go/minimax-m2.5",
+                subscription: SubscriptionKind::OpencodeGo,
+                free: false,
+                official: false,
+                cheap_eligible: false,
+                tough_eligible: false,
+                effort_eligible: false,
+                effort_cheap: "low",
+                effort_normal: "medium",
+                effort_tough: "high",
+                quota_lookup_key: Some("opencode-shared"),
+            },
+            BakedProvider {
+                cli: CliKind::Opencode,
+                launch_name: "opencode/minimax-m2.5-free",
+                subscription: SubscriptionKind::OpencodeGo,
+                free: true,
+                official: false,
+                cheap_eligible: true,
+                tough_eligible: false,
+                effort_eligible: false,
+                effort_cheap: "low",
+                effort_normal: "medium",
+                effort_tough: "high",
+                quota_lookup_key: None,
+            },
+        ],
     },
     BakedRow {
         model: "minimax-m2.7",
@@ -768,20 +779,20 @@ mod tests {
     #[test]
     fn baked_table_has_thirty_provider_entries() {
         // 16 direct-route entries (Claude/GPT/Gemini) + 1 direct kimi-k2.6
-        // via Moonshot + 12 opencode entries (11 paid `opencode-go/...`
-        // routes + 1 free `opencode/minimax-m2.5-free`) + 1 alt opencode-go
-        // route stacked on kimi-k2.6 = 30 total. Verified against
-        // `opencode models` 2026-05.
+        // via Moonshot + 12 opencode-go paid routes + 2 free opencode routes
+        // (minimax-m2.5-free, deepseek-v4-flash-free) stacked on parent rows
+        // + 1 alt opencode-go route stacked on kimi-k2.6 = 31 total.
+        // Verified against `opencode models` 2026-05.
         assert_eq!(
             BAKED_TABLE.iter().map(|r| r.providers.len()).sum::<usize>(),
-            30
+            31
         );
     }
 
     #[test]
     fn baked_table_seeds_minimax_free_via_opencode_with_free_flag() {
         let entry = baked_for(
-            "minimax-m2.5-free",
+            "minimax-m2.5",
             CliKind::Opencode,
             "opencode/minimax-m2.5-free",
         )

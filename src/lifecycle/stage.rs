@@ -60,6 +60,23 @@ pub struct StageCtx<'a> {
     /// (the FSM does) but they expose this to the spec via `build_spec` so
     /// the FSM's model picker has the same context the stage saw.
     pub cheap: bool,
+    /// True when the Recovery / RecoveryPlanReview / RecoverySharding chain
+    /// has been activated for the current implementation round (i.e. a
+    /// reviewer failure escalated the round into recovery). Defaults to
+    /// false; Step 5 populates this from session state. Used by
+    /// [`StageRegistry::next_stage_for_phase`] to gate recovery stages so
+    /// they aren't auto-scheduled in a healthy round.
+    pub recovery_active: bool,
+    /// True when the reviewer's approval verdict for the current round
+    /// requested a simplification pass. Defaults to false; Step 5 populates
+    /// it. Used by [`StageRegistry::next_stage_for_phase`] to gate
+    /// [`StageId::Simplification`] on the `Phase::Review(r)` candidate list.
+    pub simplification_requested: bool,
+    /// True when the operator accepted the dreaming-decision modal after
+    /// final validation. Defaults to false; Step 5 populates it. Used by
+    /// [`StageRegistry::next_stage_for_phase`] to gate
+    /// [`StageId::Dreaming`] on the `Phase::Finalization` candidate list.
+    pub dreaming_accepted: bool,
 }
 
 /// Pointer to the next unit of work a stage wants to schedule.
@@ -170,38 +187,173 @@ impl StageRegistry {
         self.stages.get(&id).map(|s| s.as_ref())
     }
 
-    /// Resolve the next stage to launch given the current session [`Phase`].
+    /// Resolve the next stage to launch given the current session [`Phase`]
+    /// and a read-only [`StageCtx`] projection.
     ///
-    /// Returns `None` in Step 1; the real implementation lands once the Stage
-    /// impls exist.
-    // TODO: Step 3 — implement using the registered stages' phase_when_running
-    // and next_phase_on_success.
-    pub fn next_stage_for_phase(&self, phase: Phase) -> Option<StageId> {
-        let _ = phase;
+    /// The function walks a per-phase ordered list of candidate
+    /// [`StageId`]s and returns the first whose
+    /// [`Stage::next_pending_work`] surfaces work. Recovery and
+    /// simplification candidates are gated on
+    /// [`StageCtx::recovery_active`] / [`StageCtx::simplification_requested`]
+    /// (and dreaming on [`StageCtx::dreaming_accepted`]) so they never
+    /// auto-schedule in healthy rounds — the FSM populates those flags from
+    /// pending-decision and reviewer-verdict state.
+    ///
+    /// Returns `None` when:
+    /// - the phase has no candidates ([`Phase::Done`], [`Phase::Cancelled`]),
+    /// - every candidate at this phase reports "no pending work" (the phase
+    ///   should advance — the scheduler reaches this state transiently
+    ///   between a successful run and the FSM bumping the phase), or
+    /// - the candidate stage isn't registered (callers should treat that as
+    ///   a configuration error, but `None` keeps the API total).
+    pub fn next_stage_for_phase(&self, phase: Phase, ctx: &StageCtx<'_>) -> Option<StageId> {
+        // Hardcoded per-phase candidate order. The ordering is the canonical
+        // pipeline sequence within each phase — first candidate "with pending
+        // work" wins. Stage impls' `phase_when_running()` confirms the
+        // mappings here.
+        let candidates: &[(StageId, GateFn)] = match phase {
+            Phase::Idea => &[(StageId::Brainstorm, gate_always)],
+            Phase::Spec => &[(StageId::SpecReview, gate_always)],
+            Phase::Plan => &[
+                (StageId::Planning, gate_always),
+                (StageId::PlanReview, gate_always),
+                (StageId::RepoStateUpdate, gate_always),
+                (StageId::Sharding, gate_always),
+            ],
+            Phase::Implementation(_) => &[
+                (StageId::Coder, gate_always),
+                (StageId::Recovery, gate_recovery_active),
+                (StageId::RecoveryPlanReview, gate_recovery_active),
+                (StageId::RecoverySharding, gate_recovery_active),
+            ],
+            Phase::Review(_) => &[
+                (StageId::Reviewer, gate_always),
+                (StageId::Simplification, gate_simplification_requested),
+            ],
+            Phase::Finalization => &[
+                (StageId::FinalValidation, gate_always),
+                (StageId::Dreaming, gate_dreaming_accepted),
+            ],
+            Phase::Done | Phase::Cancelled => &[],
+        };
+
+        for (id, gate) in candidates {
+            if !gate(ctx) {
+                continue;
+            }
+            let stage = self.stages.get(id)?;
+            if stage.next_pending_work(ctx).is_some() {
+                return Some(*id);
+            }
+        }
         None
     }
 
     /// Stages whose `phase_when_running` is strictly later than `phase` —
     /// used by `:rewind` to know which artifacts and prompts to clean up.
     ///
-    /// Returns an empty vector in Step 1.
-    // TODO: Step 3 — implement once Stage impls register their
-    // `phase_when_running` values.
+    /// Compares each registered stage's [`Stage::phase_when_running`]
+    /// (a canonical phase key — `Implementation(1)` and `Review(1)` stand in
+    /// for every round of their respective lanes) against `phase` using
+    /// [`Phase`]'s [`PartialOrd`]. Returns stages with strictly-greater
+    /// phases, sorted by phase descending (later phases first) so callers
+    /// can iterate latest-stage-first while cleaning up artifacts.
+    /// [`Phase::Cancelled`] is incomparable with every other phase; this
+    /// function returns an empty vector when called with it.
     pub fn stages_after(&self, phase: Phase) -> Vec<StageId> {
-        let _ = phase;
-        Vec::new()
+        let mut hits: Vec<(StageId, Phase)> = self
+            .stages
+            .iter()
+            .filter_map(|(id, stage)| {
+                let s_phase = stage.phase_when_running();
+                match s_phase.partial_cmp(&phase) {
+                    Some(std::cmp::Ordering::Greater) => Some((*id, s_phase)),
+                    _ => None,
+                }
+            })
+            .collect();
+        // Sort by phase descending; ties broken by StageId discriminant so
+        // the result is deterministic across runs. The tie-break order is
+        // intentionally not part of the public contract.
+        hits.sort_by(|a, b| {
+            match b.1.partial_cmp(&a.1) {
+                Some(ord) => ord,
+                None => std::cmp::Ordering::Equal,
+            }
+            .then_with(|| (a.0 as u32).cmp(&(b.0 as u32)))
+        });
+        hits.into_iter().map(|(id, _)| id).collect()
     }
+}
+
+type GateFn = fn(&StageCtx<'_>) -> bool;
+
+fn gate_always(_ctx: &StageCtx<'_>) -> bool {
+    true
+}
+
+fn gate_recovery_active(ctx: &StageCtx<'_>) -> bool {
+    ctx.recovery_active
+}
+
+fn gate_simplification_requested(ctx: &StageCtx<'_>) -> bool {
+    ctx.simplification_requested
+}
+
+fn gate_dreaming_accepted(ctx: &StageCtx<'_>) -> bool {
+    ctx.dreaming_accepted
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn empty_ctx<'a>(phase: Phase) -> StageCtx<'a> {
+        StageCtx {
+            session_id: "s",
+            session_dir: Path::new("/tmp"),
+            phase,
+            prior_runs: &[],
+            pending_task_ids: &[],
+            yolo: false,
+            cheap: false,
+            recovery_active: false,
+            simplification_requested: false,
+            dreaming_accepted: false,
+        }
+    }
+
     #[test]
     fn empty_registry_returns_none_and_empty() {
         let reg = StageRegistry::new();
         assert!(reg.get(StageId::Brainstorm).is_none());
-        assert_eq!(reg.next_stage_for_phase(Phase::Idea), None);
+        assert_eq!(
+            reg.next_stage_for_phase(Phase::Idea, &empty_ctx(Phase::Idea)),
+            None
+        );
         assert!(reg.stages_after(Phase::Idea).is_empty());
+    }
+
+    #[test]
+    fn empty_registry_returns_none_for_every_phase() {
+        let reg = StageRegistry::new();
+        for phase in [
+            Phase::Idea,
+            Phase::Spec,
+            Phase::Plan,
+            Phase::Implementation(1),
+            Phase::Implementation(5),
+            Phase::Review(1),
+            Phase::Review(5),
+            Phase::Finalization,
+            Phase::Done,
+            Phase::Cancelled,
+        ] {
+            assert_eq!(
+                reg.next_stage_for_phase(phase, &empty_ctx(phase)),
+                None,
+                "empty registry must return None for {phase:?}"
+            );
+        }
     }
 }

@@ -95,6 +95,9 @@ mod tests {
             pending_task_ids: &[],
             yolo: false,
             cheap: false,
+            recovery_active: false,
+            simplification_requested: false,
+            dreaming_accepted: false,
         }
     }
 

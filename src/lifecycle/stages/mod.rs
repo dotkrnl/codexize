@@ -7,6 +7,7 @@
 //! contract is exercised before the FSM scheduler turns them on.
 pub mod brainstorm;
 pub mod coder;
+pub mod dreaming;
 pub mod final_validation;
 pub mod plan_review;
 pub mod planning;
@@ -20,6 +21,7 @@ pub mod spec_review;
 
 pub use brainstorm::BrainstormStage;
 pub use coder::CoderStage;
+pub use dreaming::DreamingStage;
 pub use final_validation::FinalValidationStage;
 pub use plan_review::PlanReviewStage;
 pub use planning::PlanningStage;

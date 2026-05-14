@@ -3,7 +3,7 @@ mod input_focus;
 mod interactive;
 mod split;
 use super::status_line::Severity;
-use super::{App, ModalKind, PendingTermination};
+use super::{App, ModalKind};
 use crate::app_runtime::{AppCommand, UiKey, UiKeyCode};
 use crate::state::RunStatus;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -12,42 +12,6 @@ impl App {
     pub(crate) fn marker_already_logged(&self, marker: &str) -> bool {
         let events_path = self.session_dir().join("events.toml");
         std::fs::read_to_string(&events_path).is_ok_and(|events| events.contains(marker))
-    }
-    // Step 5c-C removes this function entirely; the cancel path now flows
-    // through `LifecycleOps::cancel` and the stop / retry mirror that still
-    // writes `pending_termination` does so inline in `apply_op_outcome`.
-    #[allow(dead_code)]
-    fn request_termination(&mut self, pending: PendingTermination, _window_name: String) {
-        if let Some(existing) = self.pending_termination.as_ref()
-            && existing.run_id == pending.run_id
-        {
-            if existing.intent == pending.intent {
-                return;
-            }
-            // Once cancellation has started, keep the first requested outcome so
-            // repeated stop/retry/quit input cannot race contradictory follow-up work.
-            self.push_status(
-                format!(
-                    "Termination already pending: keeping {}.",
-                    existing.intent.summary()
-                ),
-                Severity::Warn,
-                Duration::from_secs(5),
-            );
-            return;
-        }
-        let marker = format!("{}: run_id={}", pending.marker(), pending.run_id);
-        if !self.marker_already_logged(&marker) {
-            let _ = self.state.log_event(marker);
-        }
-        self.pending_quit_confirmation_run_id = None;
-        self.pending_termination = Some(pending.clone());
-        self.runner_supervisor.cancel_run(pending.run_id);
-        self.push_status(
-            pending.intent.in_progress_status().to_string(),
-            Severity::Warn,
-            Duration::from_secs(5),
-        );
     }
     /// Push a transient status-line message from a non-render call site.
     ///
@@ -72,9 +36,9 @@ impl App {
         // (start_run_tracking) and run finalization, but resume-path
         // sessions can hit `:stop` before any new run launches in this
         // process, which means the FSM is still Idle from construction.
-        // Mid-cutover we treat a desync as best-effort: if the FSM
-        // refuses the synthetic confirm_running, ops just NoOps and the
-        // legacy pending_termination path remains untouched.
+        // A desync surfaces as `OpOutcome::NoOp("no agent running")` —
+        // the operator sees the same status-line warning they'd see on a
+        // genuinely idle session.
         self.ensure_fsm_running_mirror();
         let outcome = self.with_running_agent_ops_ctx(crate::lifecycle::LifecycleOps::stop);
         self.apply_op_outcome(outcome, "stop");

@@ -1,5 +1,5 @@
 use crate::app::test_support::mk_app;
-use crate::app::{ModalKind, TerminationIntent};
+use crate::app::ModalKind;
 use crate::state::{
     BlockOrigin, LaunchModes, Message, MessageKind, MessageSender, Phase, RunRecord, RunStatus,
     SessionState,
@@ -55,12 +55,14 @@ fn app_with_phase(phase: Phase) -> crate::app::App {
 }
 
 #[test]
-fn exit_interactive_run_marks_pending_termination_stop_only() {
+fn exit_interactive_run_pushes_fsm_into_stopping_go_idle() {
     // Operator pressing /exit during interactive recovery should mark the run
     // as user-stopped so the post-finalisation failure path skips auto-retry.
     // Without this, an empty/invalid recovery.toml at /exit time triggers
     // `maybe_auto_retry`, silently relaunching the agent — exactly the
     // "recovery with finish does not stop" symptom the operator reported.
+    // 5c-C reads the stop intent from the FSM rather than the legacy
+    // pending_termination mirror; assert on the FSM transition.
     let mut state = SessionState::new("interactive-test".to_string());
     state.current_phase = crate::state::Phase::BuilderRecovery(1);
     state.agent_runs.push(running_recovery_run(7));
@@ -69,12 +71,17 @@ fn exit_interactive_run_marks_pending_termination_stop_only() {
 
     app.exit_interactive_run_locally();
 
-    let pending = app
-        .pending_termination
-        .as_ref()
-        .expect("/exit must mark pending termination");
-    assert_eq!(pending.run_id, 7);
-    assert_eq!(pending.intent, TerminationIntent::StopOnly);
+    assert!(
+        matches!(
+            app.fsm.view(),
+            crate::lifecycle::AgentState::Stopping {
+                after: crate::lifecycle::AfterStop::GoIdle,
+                ..
+            }
+        ),
+        "/exit must push the FSM into Stopping(GoIdle); got {:?}",
+        app.fsm.view()
+    );
 }
 
 #[test]
@@ -84,20 +91,26 @@ fn exit_interactive_run_without_active_run_is_a_noop() {
 
     app.exit_interactive_run_locally();
 
-    assert!(app.pending_termination.is_none());
+    assert!(matches!(
+        app.fsm.view(),
+        crate::lifecycle::AgentState::Idle
+    ));
 }
 
 #[test]
 fn exit_interactive_run_skips_when_run_not_in_session() {
     // current_run_id points at an id with no matching RunRecord — exit should
-    // bail out before queueing pending_termination.
+    // bail out before transitioning the FSM.
     let state = SessionState::new("interactive-test".to_string());
     let mut app = mk_app(state);
     app.current_run_id = Some(99);
 
     app.exit_interactive_run_locally();
 
-    assert!(app.pending_termination.is_none());
+    assert!(matches!(
+        app.fsm.view(),
+        crate::lifecycle::AgentState::Idle
+    ));
 }
 
 #[test]

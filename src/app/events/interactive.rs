@@ -1,6 +1,5 @@
 use super::super::App;
 use super::super::status_line::Severity;
-use super::super::{PendingTermination, TerminationIntent};
 use crate::state::{Message, MessageKind, MessageSender, RunStatus};
 use std::time::Duration;
 impl App {
@@ -28,18 +27,17 @@ impl App {
             return;
         };
         if self.state.agent_runs.iter().any(|run| run.id == run_id) {
-            // Mark the run as operator-completed before signalling the runner.
-            // If the artifact validation that gates a graceful Complete fails
-            // (e.g., the operator typed `/exit` during human-blocked recovery
-            // before recovery.toml was written), the run finalises with
-            // exit_code=1 — without this marker, `handle_run_finalization_failure`
-            // routes through `maybe_auto_retry`, which silently relaunches a
-            // new agent instead of stopping. `StopOnly` short-circuits the
-            // retry path so the operator's stop sticks.
-            self.pending_termination = Some(PendingTermination {
-                run_id,
-                intent: TerminationIntent::StopOnly,
-            });
+            // Push the FSM into `Stopping(GoIdle)` so
+            // `handle_run_finalization_failure` recognizes the stop intent
+            // and short-circuits the auto-retry path. Without this, an
+            // exit_code=1 from `/exit` during human-blocked recovery (e.g.
+            // before recovery.toml was written) would route through
+            // `maybe_auto_retry` and silently relaunch a new agent instead
+            // of stopping.
+            self.ensure_fsm_running_mirror();
+            let _ = self
+                .fsm
+                .request_stop(crate::lifecycle::AfterStop::GoIdle);
             // `/exit` is a local codexize control for interactive ACP runs,
             // not agent prompt text, so the runner completes this run by id.
             self.runner_supervisor.request_run_exit(run_id);

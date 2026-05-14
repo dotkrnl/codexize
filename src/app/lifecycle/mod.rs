@@ -509,9 +509,10 @@ impl App {
     }
 
     /// Issue the runner cancel and stash the rewind plan as a
-    /// `PendingTermination` so the deferred apply runs once the dead-run
-    /// signal lands. Keeps the legacy `pending_termination` mirror in sync
-    /// for any path that still observes it (e.g. tests, finalize_run_record).
+    /// `PendingRewindApply` so the deferred apply runs once the dead-run
+    /// signal lands. The FSM carries the operator's intent inside
+    /// `AfterStop::Rewind`; `finalize_run_record` reads it back via the
+    /// `confirm_dead` resolution and merges into the parked apply.
     fn apply_pending_stop_rewind(
         &mut self,
         _label: &'static str,
@@ -540,12 +541,8 @@ impl App {
             clear_pending,
         });
         // The FSM holds the operator's spec inside AfterStop::Rewind. When
-        // confirm_dead resolves, we read the spec back out of the resolution
-        // and merge it into the parked apply.
-        self.pending_termination = Some(PendingTermination {
-            run_id,
-            intent: TerminationIntent::StopOnly,
-        });
+        // confirm_dead resolves, finalize_run_record reads the spec back out
+        // of the resolution and merges it into the parked apply.
         self.runner_supervisor.cancel_run(run_id);
         self.push_status(
             "Rewinding session...".to_string(),
@@ -700,13 +697,10 @@ impl App {
     }
 
     fn apply_pending_stop_go_idle(&mut self, _label: &'static str) {
-        // The Fsm is already in Stopping; the legacy plumbing handles the
-        // actual run cancellation and the post-finalize transition. We
-        // mirror the legacy `request_termination` user-facing side effects
-        // so the operator sees the same status line and the runner
-        // supervisor still receives a `cancel_run`. `pending_termination`
-        // stays in sync with the FSM so the legacy `complete.rs` failure
-        // path observes the same StopOnly intent it always did.
+        // The FSM is already in `Stopping(GoIdle)`; the runner needs an
+        // explicit cancel so the agent process dies, and the failure-path
+        // in `handle_run_finalization_failure` reads the FSM state to
+        // decide what to do after the run finalizes.
         let Some(run_id) = self.current_run_id else {
             return;
         };
@@ -715,10 +709,6 @@ impl App {
             let _ = self.state.log_event(marker);
         }
         self.pending_quit_confirmation_run_id = None;
-        self.pending_termination = Some(PendingTermination {
-            run_id,
-            intent: TerminationIntent::StopOnly,
-        });
         self.runner_supervisor.cancel_run(run_id);
         self.push_status(
             "Stopping agent...".to_string(),
@@ -731,29 +721,29 @@ impl App {
         let Some(run_id) = self.current_run_id else {
             return;
         };
-        let Some(retry_launch) = self
+        // Validate that the run is retryable before issuing the cancel; the
+        // post-finalize handler reads the FSM state to know to relaunch but
+        // can't tell the operator their stage is unretryable from there.
+        if self
             .state
             .agent_runs
             .iter()
             .find(|run| run.id == run_id)
             .and_then(super::RetryLaunch::for_run)
-        else {
+            .is_none()
+        {
             self.push_status(
                 "retry: current run is not retryable".to_string(),
                 Severity::Warn,
                 Duration::from_secs(3),
             );
             return;
-        };
+        }
         let marker = format!("agent_retry_requested_by_user: run_id={run_id}");
         if !self.marker_already_logged(&marker) {
             let _ = self.state.log_event(marker);
         }
         self.pending_quit_confirmation_run_id = None;
-        self.pending_termination = Some(PendingTermination {
-            run_id,
-            intent: TerminationIntent::StopAndRetry(retry_launch),
-        });
         self.runner_supervisor.cancel_run(run_id);
         self.push_status(
             "Stopping agent and queuing retry...".to_string(),

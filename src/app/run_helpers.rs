@@ -434,10 +434,6 @@ impl App {
             // from the resolution so a fresh request_stop that replaced an
             // earlier rewind is honored.
             let _ = pending; // keep the slot drained; spec/target/cleanup taken from FSM.
-            // The legacy pending_termination mirror is cleared so the
-            // finalization::complete path doesn't double-dispatch a stop
-            // intent against the same run.
-            self.pending_termination = None;
             self.apply_after_stop_rewind(*target, spec.clone(), cleanup.clone(), *clear_pending);
         }
         // FSM-driven Cancel runs through `complete_run_finalization`, which

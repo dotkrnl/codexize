@@ -158,50 +158,6 @@ impl RetryLaunch {
         }
     }
 }
-#[allow(clippy::enum_variant_names)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum TerminationIntent {
-    StopOnly,
-    StopAndRetry(RetryLaunch),
-    // Step 5c-B routed the quit-while-running modal through
-    // `LifecycleOps::cancel` + `pending_app_exit`, so nothing constructs
-    // this variant any more. Tagged so the unmigrated `complete.rs` match
-    // arm keeps compiling under -D warnings; the whole enum disappears in
-    // Step 5c-C.
-    #[allow(dead_code)]
-    StopAndQuit,
-    CancelSession,
-}
-impl TerminationIntent {
-    // Step 5c-C removes this type entirely; the inherent methods are dead
-    // once `request_termination` is gone but they still pair with the enum
-    // for any caller still holding a `PendingTermination` (the rewind /
-    // stop mirror in apply_op_outcome). Tagged dead_code so this commit
-    // compiles cleanly under -D warnings.
-    #[allow(dead_code)]
-    fn summary(&self) -> &'static str {
-        match self {
-            Self::StopOnly => "stop without retry",
-            Self::StopAndRetry(_) => "stop and retry",
-            Self::StopAndQuit => "stop and quit",
-            Self::CancelSession => "cancel session",
-        }
-    }
-    #[allow(dead_code)]
-    fn in_progress_status(&self) -> &'static str {
-        match self {
-            Self::StopOnly => "Stopping agent...",
-            Self::StopAndRetry(_) => "Stopping agent and queuing retry...",
-            Self::StopAndQuit => "Stopping agent and quitting...",
-            Self::CancelSession => "Cancelling session...",
-        }
-    }
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PendingTermination {
-    run_id: u64,
-    intent: TerminationIntent,
-}
 /// Side effects parked on the App when an operator rewind lands while an
 /// agent is still alive. The runner is asked to cancel synchronously; the
 /// FSM stays in `Stopping` carrying [`crate::lifecycle::AfterStop::Rewind`]
@@ -217,19 +173,6 @@ pub(crate) struct PendingRewindApply {
     pub(crate) spec: Option<crate::lifecycle::StageSpec>,
     pub(crate) cleanup: crate::lifecycle::CleanupPlan,
     pub(crate) clear_pending: bool,
-}
-impl PendingTermination {
-    // See `TerminationIntent` — this method is dead once `request_termination`
-    // is removed in Step 5c-C. Preserved here for one commit so the stop /
-    // retry mirror still type-checks without further churn.
-    #[allow(dead_code)]
-    fn marker(&self) -> &'static str {
-        match self.intent {
-            TerminationIntent::StopOnly | TerminationIntent::StopAndQuit => "agent_stopped_by_user",
-            TerminationIntent::StopAndRetry(_) => "agent_retry_requested_by_user",
-            TerminationIntent::CancelSession => "session_cancel_requested_by_user",
-        }
-    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommandReturnTarget {
@@ -368,7 +311,6 @@ pub struct App {
     /// the App is constructed without a watcher (tests).
     pub(crate) cache_watcher: Option<crate::data::cache::CacheWatcher>,
     pub(crate) pending_drain_deadline: Option<Instant>,
-    pub(crate) pending_termination: Option<PendingTermination>,
     /// Rewind side effects waiting on the runner-confirmed-dead signal.
     /// Set by [`crate::app::App::apply_op_outcome`] when a rewind lands
     /// while an agent is live; consumed by `finalize_run_record` once the
@@ -380,12 +322,10 @@ pub struct App {
     pub(crate) pending_app_exit: bool,
     pub(crate) pending_shell_command: Option<String>,
     pub(crate) current_run_id: Option<u64>,
-    /// New lifecycle FSM, runs alongside the legacy `current_run_id` /
-    /// `run_launched` / `pending_termination` triplet during the Step 5
-    /// cutover. Today only [`crate::app::App::stop_running_agent`] and
-    /// [`crate::app::App::retry_running_agent`] route through it; everything
-    /// else still drives the legacy path. Step 5b–5d remove that legacy
-    /// path one consumer at a time.
+    /// New lifecycle FSM. As of Step 5c the operator stop / restart /
+    /// rewind / cancel paths are all routed through it; the legacy
+    /// `current_run_id` / `run_launched` pair remains alongside as a
+    /// mirror until 5d collapses them into a single FSM-owned slot.
     pub(crate) fsm: crate::lifecycle::Fsm,
     /// Slim, round-aware lifecycle [`crate::lifecycle::Phase`] derived from
     /// `state.current_phase` via [`crate::lifecycle::slim_phase_for`].

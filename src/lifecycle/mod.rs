@@ -18,6 +18,7 @@
 //! - [`persist`] — V2 persistence shapes (added alongside the existing
 //!   `SessionState`/`RunRecord` types, not replacing them yet).
 pub mod fsm;
+pub mod ops;
 pub mod pending;
 pub mod persist;
 pub mod phase;
@@ -31,6 +32,7 @@ pub use fsm::{
     AfterStop, AgentState, CancelledBy, CleanupPlan, FinalizedRun, Fsm, FsmError, Outcome,
     StopResolution,
 };
+pub use ops::{LifecycleOps, OpAction, OpOutcome, OpsCtx, resolution_to_action};
 pub use pending::{
     DreamingData, GitGuardData, PendingDecisions, PlanApprovalData, SkipToImplData,
     SpecApprovalData,

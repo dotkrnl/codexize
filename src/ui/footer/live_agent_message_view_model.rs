@@ -32,14 +32,14 @@ pub(super) fn interpolate_rgb(
         interpolate_channel(from.2, to.2),
     )
 }
-pub(super) fn gradient_spans(text: &str, phase: usize) -> Vec<Span<'static>> {
+pub(super) fn gradient_spans(text: &str, stage: usize) -> Vec<Span<'static>> {
     if text.is_empty() {
         return Vec::new();
     }
     let cycle = GRADIENT_STOPS.len() * GRADIENT_STEP;
     let mut spans = Vec::with_capacity(text.chars().count());
     for (index, ch) in text.chars().enumerate() {
-        let offset = (phase + index) % cycle;
+        let offset = (stage + index) % cycle;
         let start_index = offset / GRADIENT_STEP;
         let step = offset % GRADIENT_STEP;
         let end_index = (start_index + 1) % GRADIENT_STOPS.len();
@@ -60,4 +60,3 @@ pub fn extract_short_title(text: &str) -> String {
         text.trim().to_string()
     }
 }
-

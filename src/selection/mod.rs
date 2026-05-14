@@ -7,7 +7,7 @@
 //! server-mode binary import everything selection-shaped from one root
 //! path; new logic/data callers should still prefer the layered names.
 pub use crate::logic::selection::{
-    CachedModel, Candidate, CliKind, IpbrPhaseScores, ModelRow, QuotaError, ScoreSource,
+    CachedModel, Candidate, CliKind, IpbrStageScores, ModelRow, QuotaError, ScoreSource,
     SubscriptionKind,
 };
 pub use crate::logic::selection::{config, display, ranking, subscription, types};
@@ -16,29 +16,29 @@ pub use config::*;
 pub mod selection {
     use crate::adapters::EffortLevel;
     use crate::logic::selection::types::{CachedModel, SubscriptionKind};
-    use crate::logic::selection::{SelectionPhase, selection as pure};
+    use crate::logic::selection::{SelectionStage, selection as pure};
     fn sample_seed() -> u64 {
         let mut buf = [0u8; 8];
         getrandom::fill(&mut buf).expect("getrandom failed");
         u64::from_ne_bytes(buf)
     }
-    pub fn pick_for_phase(
+    pub fn pick_for_stage(
         models: &[CachedModel],
-        phase: SelectionPhase,
+        stage: SelectionStage,
         vendor_filter: Option<SubscriptionKind>,
     ) -> Option<&CachedModel> {
-        pure::pick_for_phase_with_seed(models, phase, vendor_filter, sample_seed())
+        pure::pick_for_stage_with_seed(models, stage, vendor_filter, sample_seed())
     }
-    pub fn pick_for_phase_with_effort<'a>(
+    pub fn pick_for_stage_with_effort<'a>(
         models: &'a [CachedModel],
-        phase: SelectionPhase,
+        stage: SelectionStage,
         vendor_filter: Option<SubscriptionKind>,
         effort: EffortLevel,
         cheap: bool,
     ) -> Option<pure::SelectionOutcome<'a>> {
-        pure::pick_for_phase_with_effort_and_seed(
+        pure::pick_for_stage_with_effort_and_seed(
             models,
-            phase,
+            stage,
             vendor_filter,
             effort,
             cheap,
@@ -72,11 +72,11 @@ pub mod selection {
     }
     pub fn select_excluding<'a>(
         models: &'a [CachedModel],
-        phase: SelectionPhase,
+        stage: SelectionStage,
         excluded: &[(SubscriptionKind, String)],
         last_failed_vendor: Option<SubscriptionKind>,
     ) -> Option<&'a CachedModel> {
-        pure::select_excluding_with_seed(models, phase, excluded, last_failed_vendor, sample_seed())
+        pure::select_excluding_with_seed(models, stage, excluded, last_failed_vendor, sample_seed())
     }
     pub use pure::{SelectionOutcome, SelectionWarning};
 }

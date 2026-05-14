@@ -241,7 +241,7 @@ impl Default for MetaSection {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NtfyEvents {
-    pub phase_wait: Override<bool>,
+    pub stage_wait: Override<bool>,
     pub interactive_wait: Override<bool>,
     pub pipeline_done: Override<bool>,
 }
@@ -249,7 +249,7 @@ pub struct NtfyEvents {
 impl Default for NtfyEvents {
     fn default() -> Self {
         Self {
-            phase_wait: Override::baked(true),
+            stage_wait: Override::baked(true),
             interactive_wait: Override::baked(true),
             pipeline_done: Override::baked(true),
         }

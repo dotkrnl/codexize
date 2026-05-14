@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::state::Phase;
+use crate::state::Stage;
 use anyhow::Result;
 impl App {
     pub(crate) fn complete_run_finalization(
@@ -10,7 +10,7 @@ impl App {
         // The operator's pending command (`:cancel`) leaves the FSM in
         // `Stopping { after: Cancel }` until `confirm_dead` lands inside
         // `finalize_run_record`. Read it here so cancel terminates to
-        // `Phase::Cancelled` exactly like the legacy `pending_termination`
+        // `Stage::Cancelled` exactly like the persisted `pending_termination`
         // mirror used to.
         let fsm_cancellation = matches!(
             self.fsm.view(),
@@ -22,41 +22,41 @@ impl App {
         if fsm_cancellation {
             self.clear_agent_error();
             self.finalize_run_record(run.id, failure_reason.is_none(), failure_reason);
-            self.transition_to_phase(Phase::Cancelled)?;
+            self.transition_to_stage(Stage::Cancelled)?;
             return Ok(());
         }
         if let Some(error) = failure_reason {
             return self.handle_run_finalization_failure(run, error);
         }
-        match self.state.current_phase {
-            Phase::BrainstormRunning => self.finalize_brainstorm_success(run)?,
-            Phase::SpecReviewRunning => self.finalize_spec_review_success(run)?,
-            Phase::PlanningRunning => self.finalize_planning_success(run)?,
-            Phase::PlanReviewRunning => self.finalize_plan_review_success(run)?,
-            Phase::RepoStateUpdateRunning => self.finalize_repo_state_update_success(run)?,
-            Phase::ShardingRunning => self.finalize_sharding_success(run)?,
-            Phase::ImplementationRound(round) => self.finalize_coder_success(run, round)?,
-            Phase::ReviewRound(round) => self.finalize_reviewer_success(run, round)?,
-            Phase::BuilderRecovery(round) => self.finalize_recovery_success(run, round)?,
-            Phase::BuilderRecoveryPlanReview(round) => {
+        match self.state.current_stage {
+            Stage::BrainstormRunning => self.finalize_brainstorm_success(run)?,
+            Stage::SpecReviewRunning => self.finalize_spec_review_success(run)?,
+            Stage::PlanningRunning => self.finalize_planning_success(run)?,
+            Stage::PlanReviewRunning => self.finalize_plan_review_success(run)?,
+            Stage::RepoStateUpdateRunning => self.finalize_repo_state_update_success(run)?,
+            Stage::ShardingRunning => self.finalize_sharding_success(run)?,
+            Stage::ImplementationRound(round) => self.finalize_coder_success(run, round)?,
+            Stage::ReviewRound(round) => self.finalize_reviewer_success(run, round)?,
+            Stage::BuilderRecovery(round) => self.finalize_recovery_success(run, round)?,
+            Stage::BuilderRecoveryPlanReview(round) => {
                 self.handle_recovery_plan_review_completed(run, round)?
             }
-            Phase::BuilderRecoverySharding(round) => {
+            Stage::BuilderRecoverySharding(round) => {
                 self.handle_recovery_sharding_completed(run, round)?
             }
-            Phase::FinalValidation(round) => self.finalize_final_validation_success(run, round)?,
-            Phase::Simplification(round) => self.finalize_simplification_success(run, round)?,
-            Phase::Dreaming(round) => self.finalize_dreaming_success(run, round)?,
-            Phase::IdeaInput
-            | Phase::SpecReviewPaused
-            | Phase::PlanReviewPaused
-            | Phase::WaitingToImplement
-            | Phase::BlockedNeedsUser
-            | Phase::SkipToImplPending
-            | Phase::GitGuardPending
-            | Phase::DreamingPending
-            | Phase::Done
-            | Phase::Cancelled => {}
+            Stage::FinalValidation(round) => self.finalize_final_validation_success(run, round)?,
+            Stage::Simplification(round) => self.finalize_simplification_success(run, round)?,
+            Stage::Dreaming(round) => self.finalize_dreaming_success(run, round)?,
+            Stage::IdeaInput
+            | Stage::SpecReviewPaused
+            | Stage::PlanReviewPaused
+            | Stage::WaitingToImplement
+            | Stage::BlockedNeedsUser
+            | Stage::SkipToImplPending
+            | Stage::GitGuardPending
+            | Stage::DreamingPending
+            | Stage::Done
+            | Stage::Cancelled => {}
         }
         Ok(())
     }
@@ -78,7 +78,7 @@ impl App {
             }
             Some(PendingAfterStop::Restart) => {
                 // Operator-initiated `:retry`/restart after a `:stop`. The
-                // failure-finalize path normally leaves `current_phase` on
+                // failure-finalize path normally leaves `current_stage` on
                 // the failed stage's running variant, which the scheduler
                 // tick already routes back to the same stage. Clear the
                 // error so the auto-launch guard doesn't short-circuit and
@@ -90,7 +90,7 @@ impl App {
             }
             Some(PendingAfterStop::Cancel) => {
                 self.clear_agent_error();
-                self.transition_to_phase(Phase::Cancelled)?;
+                self.transition_to_stage(Stage::Cancelled)?;
                 return Ok(());
             }
             None => {}

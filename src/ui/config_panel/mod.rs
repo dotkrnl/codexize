@@ -160,10 +160,10 @@ const FIELDS: &[FieldMeta] = &[
     },
     FieldMeta {
         section: "notifications",
-        key: "ntfy.events.phase_wait",
-        label: "Phase-wait alerts",
+        key: "ntfy.events.stage_wait",
+        label: "Stage-wait alerts",
         kind: FieldKind::Bool,
-        description: "Alert when a pipeline phase pauses for the operator.",
+        description: "Alert when a pipeline stage pauses for the operator.",
         secret: false,
     },
     FieldMeta {
@@ -1676,7 +1676,7 @@ impl ConfigPanelState {
                 .value()
                 .map(|ts| ts.to_rfc3339())
                 .unwrap_or_default(),
-            "ntfy.events.phase_wait" => value_bool(&self.config.ntfy.events.phase_wait),
+            "ntfy.events.stage_wait" => value_bool(&self.config.ntfy.events.stage_wait),
             "ntfy.events.interactive_wait" => value_bool(&self.config.ntfy.events.interactive_wait),
             "ntfy.events.pipeline_done" => value_bool(&self.config.ntfy.events.pipeline_done),
             "acp.policy.shell_policy" => self
@@ -1749,7 +1749,7 @@ impl ConfigPanelState {
             "ntfy.excerpt_max_chars" => source_override(&self.config.ntfy.excerpt_max_chars),
             "ntfy.created_at" => source_override(&self.config.ntfy.created_at),
             "ntfy.updated_at" => source_override(&self.config.ntfy.updated_at),
-            "ntfy.events.phase_wait" => source_override(&self.config.ntfy.events.phase_wait),
+            "ntfy.events.stage_wait" => source_override(&self.config.ntfy.events.stage_wait),
             "ntfy.events.interactive_wait" => {
                 source_override(&self.config.ntfy.events.interactive_wait)
             }
@@ -2185,10 +2185,8 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
     }
     let cursor = *cursor;
     let lines = providers::get_lines(&state.config, &state.folded_vendors);
-    let Some(providers::ProvidersLine::Provider {
-        entry,
-        is_baked,
-    }) = lines.get(state.providers_cursor)
+    let Some(providers::ProvidersLine::Provider { entry, is_baked }) =
+        lines.get(state.providers_cursor)
     else {
         return;
     };

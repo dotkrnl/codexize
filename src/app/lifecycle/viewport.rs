@@ -3,7 +3,7 @@ use crate::app::tree::{
     flatten_visible_rows, node_at_path, node_key_at_path,
 };
 use crate::app::{App, ExpansionOverride, effective_expansion, split::SplitTarget};
-use crate::state::{Node, NodeStatus, Phase, RunStatus};
+use crate::state::{Node, NodeStatus, RunStatus, Stage};
 use std::collections::BTreeSet;
 impl App {
     pub(crate) fn current_node(&self) -> usize {
@@ -87,7 +87,7 @@ impl App {
             self.clamp_split_scroll(self.current_split_content_height());
             return;
         }
-        if self.state.current_phase == Phase::IdeaInput {
+        if self.state.current_stage == Stage::IdeaInput {
             let target = SplitTarget::Idea;
             if self.split_target != Some(target) {
                 self.open_split_target(target);
@@ -148,7 +148,7 @@ impl App {
     /// a refocus event fired in that window would land on the just-aborted
     /// row instead of the new active stage. Returns `None` only when the
     /// pipeline has no live stage (everything `Done`/`Skipped`), which lets
-    /// callers leave `selected_key` alone on terminal phases.
+    /// callers leave `selected_key` alone on terminal stages.
     pub(crate) fn progress_focus_key(&self) -> Option<NodeKey> {
         if let Some(run_id) = self.current_run_id
             && self
@@ -185,7 +185,7 @@ impl App {
         self.restore_selection(Some(target), previous_selected);
     }
     /// Re-enable progress-follow focus and immediately refocus. Called from
-    /// the phase-transition and run-launch boundaries the spec treats as
+    /// the stage-transition and run-launch boundaries the spec treats as
     /// natural reset points after manual navigation.
     pub(crate) fn enable_progress_follow_and_refocus(&mut self) {
         self.progress_follow_active = true;
@@ -193,7 +193,7 @@ impl App {
     }
     pub(crate) fn can_focus_input(&self) -> bool {
         self.is_expanded(self.selected)
-            && self.state.current_phase == Phase::IdeaInput
+            && self.state.current_stage == Stage::IdeaInput
             && self
                 .node_for_row(self.selected)
                 .is_some_and(|node| node.label == "Idea")
@@ -201,7 +201,7 @@ impl App {
     pub(crate) fn split_owns_input(&self) -> bool {
         self.is_split_open()
             && (matches!(self.split_target, Some(SplitTarget::Idea))
-                && self.state.current_phase == Phase::IdeaInput
+                && self.state.current_stage == Stage::IdeaInput
                 || self.interactive_run_waiting_for_input())
     }
     pub(crate) fn split_viewport_height(&self) -> usize {
@@ -328,7 +328,7 @@ impl App {
     /// Pin every row that's currently effectively expanded as an explicit
     /// Expanded override. Called once per render so that whatever the user
     /// is currently looking at stays expanded across later state changes
-    /// (e.g., the active stage rolling over to Done before a phase advance,
+    /// (e.g., the active stage rolling over to Done before a stage advance,
     /// which would otherwise drop it off the auto-expand active path).
     pub(crate) fn latch_visible_expansions(&mut self) {
         let to_pin: Vec<NodeKey> = (0..self.visible_rows.len())

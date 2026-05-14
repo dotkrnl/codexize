@@ -181,7 +181,7 @@ pub(super) fn enforce_readonly_workspace_policy(
 }
 /// Validate that all required TOML artifacts exist and are parseable.
 /// Missing or malformed artifacts signal an incomplete agent turn; the
-/// orchestrator should retry the agent execution phase.
+/// orchestrator should retry the agent execution stage.
 pub fn validate_toml_artifacts(paths: &[&Path]) -> Result<()> {
     let mut errors = Vec::new();
     for path in paths {

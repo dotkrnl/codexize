@@ -2,7 +2,7 @@ use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::planning_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, Phase};
+use crate::state::{self as session_state, Stage};
 use anyhow::Result;
 impl App {
     pub(crate) fn launch_planning_with_model(
@@ -19,10 +19,10 @@ impl App {
         let spec_path = session_dir.join("artifacts").join("spec.md");
         let plan_path = session_dir.join("artifacts").join("plan.md");
         let modes = self.state.launch_modes();
-        let phase = Self::phase_for_stage("planning");
-        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let stage = Self::selection_stage_for_stage("planning");
+        let effort = modes.effort_for(EffortLevel::Normal, stage);
         let Some(chosen) =
-            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+            self.choose_primary_model(override_model.as_ref(), stage, effort, modes.cheap)
         else {
             self.record_agent_error("no model available with quota".to_string());
             self.save_state();
@@ -138,7 +138,7 @@ impl App {
             }
         }
     }
-    /// Co-located success-finalization for `Phase::PlanningRunning`.
+    /// Co-located success-finalization for `Stage::PlanningRunning`.
     ///
     /// Spec line 46 conjoins yolo plan-review skip with `artifacts/plan.md`
     /// existing. The successful-finalization context already implies the
@@ -158,9 +158,9 @@ impl App {
             .join("plan.md");
         if run.modes.yolo && Self::artifact_present(&plan_path) {
             self.log_yolo_auto_approved("plan_review_skipped");
-            self.transition_to_phase(Phase::WaitingToImplement)?;
+            self.transition_to_stage(Stage::WaitingToImplement)?;
         } else {
-            self.transition_to_phase(Phase::PlanReviewRunning)?;
+            self.transition_to_stage(Stage::PlanReviewRunning)?;
         }
         Ok(())
     }
@@ -169,7 +169,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use crate::app::test_support::{mk_app, with_temp_root};
-    use crate::state::{LaunchModes, Phase, RunRecord, RunStatus, SessionState, session_dir};
+    use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState, Stage, session_dir};
 
     fn planning_run(yolo: bool) -> RunRecord {
         RunRecord {
@@ -205,7 +205,7 @@ mod tests {
         with_temp_root(|| {
             let session_id = "20260511-091000-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::PlanningRunning;
+            state.current_stage = Stage::PlanningRunning;
             let run = planning_run(true);
             state.agent_runs.push(run.clone());
             state.save().unwrap();
@@ -214,7 +214,7 @@ mod tests {
             std::fs::write(artifacts.join("plan.md"), "# plan\n").unwrap();
             let mut app = mk_app(state);
             app.finalize_planning_success(&run).unwrap();
-            assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+            assert_eq!(app.state.current_stage, Stage::WaitingToImplement);
         });
     }
 
@@ -225,7 +225,7 @@ mod tests {
         with_temp_root(|| {
             let session_id = "20260511-091000-000000002";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::PlanningRunning;
+            state.current_stage = Stage::PlanningRunning;
             let run = planning_run(false);
             state.agent_runs.push(run.clone());
             state.save().unwrap();
@@ -234,7 +234,7 @@ mod tests {
             std::fs::write(artifacts.join("plan.md"), "# plan\n").unwrap();
             let mut app = mk_app(state);
             app.finalize_planning_success(&run).unwrap();
-            assert_eq!(app.state.current_phase, Phase::PlanReviewRunning);
+            assert_eq!(app.state.current_stage, Stage::PlanReviewRunning);
         });
     }
 }

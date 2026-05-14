@@ -244,11 +244,11 @@ fn decode_ntfy(item: &Item, out: &mut NtfySection, parent: &str) -> Result<(), L
 
 fn decode_ntfy_events(item: &Item, out: &mut NtfyEvents, parent: &str) -> Result<(), LoadError> {
     let table = require_table(item, parent)?;
-    let known: &[&str] = &["phase_wait", "interactive_wait", "pipeline_done"];
+    let known: &[&str] = &["stage_wait", "interactive_wait", "pipeline_done"];
     for (k, v) in table.iter() {
         let path = dotted(parent, k);
         match k {
-            "phase_wait" => out.phase_wait = Override::explicit(require_bool(v, &path)?),
+            "stage_wait" => out.stage_wait = Override::explicit(require_bool(v, &path)?),
             "interactive_wait" => {
                 out.interactive_wait = Override::explicit(require_bool(v, &path)?)
             }
@@ -940,9 +940,9 @@ pub fn render_sparse(config: &Config) -> String {
     let mut events_block = String::new();
     push_explicit_bool(
         &mut events_block,
-        "phase_wait",
-        &config.ntfy.events.phase_wait,
-        &baked.ntfy.events.phase_wait,
+        "stage_wait",
+        &config.ntfy.events.stage_wait,
+        &baked.ntfy.events.stage_wait,
     );
     push_explicit_bool(
         &mut events_block,

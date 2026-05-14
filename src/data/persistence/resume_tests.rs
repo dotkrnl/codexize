@@ -3,8 +3,7 @@ use crate::artifacts::SkipProposalStatus;
 use std::fs;
 
 fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
 
@@ -27,7 +26,7 @@ fn resume_skip_to_impl_pending_with_overlength_proposal_keeps_modal() {
     with_temp_root(|| {
         let session_id = "resume-skip-overlength";
         let mut state = SessionState::new(session_id.to_string());
-        state.current_phase = Phase::SkipToImplPending;
+        state.current_stage = Stage::SkipToImplPending;
         state.save().unwrap();
 
         let session_dir = session_dir(session_id);
@@ -44,7 +43,7 @@ fn resume_skip_to_impl_pending_with_overlength_proposal_keeps_modal() {
 
         resume_session(&mut state).expect("resume should succeed");
 
-        assert_eq!(state.current_phase, Phase::SkipToImplPending);
+        assert_eq!(state.current_stage, Stage::SkipToImplPending);
         assert_eq!(
             state.skip_to_impl_kind,
             Some(SkipProposalStatus::NothingToDo)
@@ -55,8 +54,11 @@ fn resume_skip_to_impl_pending_with_overlength_proposal_keeps_modal() {
         assert_eq!(stored_rationale.chars().count(), 500);
 
         let loaded = SessionState::load(session_id).expect("resume state should be saved");
-        assert_eq!(loaded.current_phase, Phase::SkipToImplPending);
-        assert_eq!(loaded.skip_to_impl_kind, Some(SkipProposalStatus::NothingToDo));
+        assert_eq!(loaded.current_stage, Stage::SkipToImplPending);
+        assert_eq!(
+            loaded.skip_to_impl_kind,
+            Some(SkipProposalStatus::NothingToDo)
+        );
         assert_eq!(
             loaded
                 .skip_to_impl_rationale
@@ -72,12 +74,12 @@ fn resume_skip_to_impl_pending_with_overlength_proposal_keeps_modal() {
 fn resume_waiting_to_implement_leaves_idle() {
     with_temp_root(|| {
         let mut state = SessionState::new("resume-waiting".to_string());
-        state.current_phase = Phase::WaitingToImplement;
+        state.current_stage = Stage::WaitingToImplement;
         state.save().unwrap();
 
         resume_session(&mut state).expect("resume should succeed");
 
-        assert_eq!(state.current_phase, Phase::WaitingToImplement);
+        assert_eq!(state.current_stage, Stage::WaitingToImplement);
     });
 }
 
@@ -85,15 +87,15 @@ fn resume_waiting_to_implement_leaves_idle() {
 fn resume_repo_state_update_running_reverts_to_waiting() {
     with_temp_root(|| {
         let mut state = SessionState::new("resume-repo-update".to_string());
-        state.current_phase = Phase::RepoStateUpdateRunning;
+        state.current_stage = Stage::RepoStateUpdateRunning;
         state.save().unwrap();
 
         resume_session(&mut state).expect("resume should succeed");
 
-        assert_eq!(state.current_phase, Phase::WaitingToImplement);
+        assert_eq!(state.current_stage, Stage::WaitingToImplement);
         // The reverted state should also be persisted.
         let loaded = SessionState::load("resume-repo-update").unwrap();
-        assert_eq!(loaded.current_phase, Phase::WaitingToImplement);
+        assert_eq!(loaded.current_stage, Stage::WaitingToImplement);
     });
 }
 
@@ -101,7 +103,7 @@ fn resume_repo_state_update_running_reverts_to_waiting() {
 fn resume_cancelled_is_rejected() {
     with_temp_root(|| {
         let mut state = SessionState::new("resume-cancelled".to_string());
-        state.current_phase = Phase::Cancelled;
+        state.current_stage = Stage::Cancelled;
 
         let result = resume_session(&mut state);
         assert!(

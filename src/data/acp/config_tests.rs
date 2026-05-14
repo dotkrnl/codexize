@@ -455,8 +455,7 @@ fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
 
 #[test]
 fn claude_acp_local_program_lives_under_home_codexize_acp() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let prev_home = std::env::var_os("HOME");
     let home = tempfile::TempDir::new().expect("temp home");
     unsafe {
@@ -485,8 +484,7 @@ fn claude_acp_local_program_lives_under_home_codexize_acp() {
 
 #[test]
 fn claude_acp_install_prompt_requires_claude_cli_and_missing_acp() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let home = tempfile::TempDir::new().expect("temp home");
     let fake_bin = tempfile::TempDir::new().expect("fake bin");
     let prev_home = std::env::var_os("HOME");
@@ -521,8 +519,7 @@ fn claude_acp_install_prompt_requires_claude_cli_and_missing_acp() {
 
 #[test]
 fn codex_acp_install_prompt_requires_codex_cli_and_missing_acp() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let fake_bin = tempfile::TempDir::new().expect("fake bin");
     let prev_path = std::env::var_os("PATH");
 

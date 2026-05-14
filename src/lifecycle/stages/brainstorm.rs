@@ -1,11 +1,11 @@
 //! Brainstorm stage: produces `artifacts/spec.md` from the operator's idea.
 //!
 //! Single-shot, single-round. Runs while the session sits on
-//! [`Phase::Idea`] and lands on [`Phase::Spec`] on success.
+//! [`Stage::Idea`] and lands on [`Stage::Spec`] on success.
 use super::{has_succeeded, next_attempt};
-use crate::lifecycle::phase::Phase;
+use crate::lifecycle::Stage;
 use crate::lifecycle::spec::StageSpec;
-use crate::lifecycle::stage::{Stage, StageCtx, SuccessOutcome, WorkUnit};
+use crate::lifecycle::stage::{StageCtx, StageDriver, SuccessOutcome, WorkUnit};
 use crate::lifecycle::stage_id::StageId;
 use std::path::PathBuf;
 
@@ -13,7 +13,7 @@ use std::path::PathBuf;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct BrainstormStage;
 
-impl Stage for BrainstormStage {
+impl StageDriver for BrainstormStage {
     fn id(&self) -> StageId {
         StageId::Brainstorm
     }
@@ -49,16 +49,16 @@ impl Stage for BrainstormStage {
         }
     }
 
-    fn phase_when_running(&self) -> Phase {
-        Phase::Idea
+    fn stage_when_running(&self) -> Stage {
+        Stage::Idea
     }
 
-    fn next_phase_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Phase {
+    fn next_stage_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Stage {
         // SkipToImpl / SpecApproval are modeled via PendingDecisions, not
-        // by overloading the phase enum. The brainstorm stage simply moves
+        // by overloading the stage enum. The brainstorm stage simply moves
         // the lifecycle to Spec; the FSM consults pending decisions to
         // route into spec review or jump to implementation.
-        Phase::Spec
+        Stage::Spec
     }
 
     fn artifact_paths(&self, _round: u32) -> Vec<PathBuf> {
@@ -85,7 +85,7 @@ mod tests {
         StageCtx {
             session_id: "s",
             session_dir: Path::new("/tmp"),
-            phase: Phase::Idea,
+            stage: Stage::Idea,
             prior_runs: prior,
             pending_task_ids: pending,
             yolo: false,
@@ -97,18 +97,21 @@ mod tests {
     }
 
     #[test]
-    fn identity_and_label_match_legacy_launch() {
+    fn identity_and_label_match_persisted_launch() {
         let s = BrainstormStage;
         assert_eq!(s.id(), StageId::Brainstorm);
         assert_eq!(s.label(), "Brainstorm");
         assert_eq!(s.window_name(1, None), "[Brainstorm]");
-        assert_eq!(s.phase_when_running(), Phase::Idea);
+        assert_eq!(s.stage_when_running(), Stage::Idea);
     }
 
     #[test]
     fn artifact_and_prompt_paths_match_go_back_cleanup() {
         let s = BrainstormStage;
-        assert_eq!(s.artifact_paths(1), vec![PathBuf::from("artifacts/spec.md")]);
+        assert_eq!(
+            s.artifact_paths(1),
+            vec![PathBuf::from("artifacts/spec.md")]
+        );
         assert_eq!(
             s.prompt_paths(1),
             vec![PathBuf::from("prompts/brainstorm.md")]

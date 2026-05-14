@@ -66,7 +66,7 @@ fn runtime_state_mutations_go_through_state_mutators() {
         ".state.resume_running_runs(",
     ];
     let forbidden_assignment_patterns = [
-        ".state.current_phase =",
+        ".state.current_stage =",
         ".state.agent_error =",
         ".state.archived =",
         ".state.idea_text =",

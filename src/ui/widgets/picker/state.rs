@@ -1,7 +1,7 @@
 use super::helpers as picker_view_model;
 use crate::app::palette::{self, PaletteCommand, PaletteState};
 use crate::app::{Capability, KeyBinding, Severity, StatusLine, bottom_sheet, render_keymap_line};
-use crate::state::{self as session_state, Modes, Phase, SessionState};
+use crate::state::{self as session_state, Modes, SessionState, Stage};
 use crate::tui::{AppTerminal, wrap_text};
 use crate::ui::chrome::{
     bottom_rule,
@@ -25,7 +25,7 @@ mod view;
 pub struct SessionEntry {
     pub session_id: String,
     pub idea_summary: String,
-    pub current_phase: Phase,
+    pub current_stage: Stage,
     pub modes: Modes,
     pub last_modified: SystemTime,
     pub archived: bool,
@@ -528,7 +528,7 @@ pub fn sessions_root_for(config: &crate::data::config::Config) -> PathBuf {
 ///
 /// `idea` is stored verbatim — the caller is responsible for trimming and
 /// rejecting empty input. Both the interactive picker and the direct-CLI
-/// `--yolo -m` route share this helper so creation semantics (id, phase,
+/// `--yolo -m` route share this helper so creation semantics (id, stage,
 /// mode logging) cannot drift.
 pub fn create_session(
     idea: &str,
@@ -572,7 +572,12 @@ pub fn generate_session_id() -> String {
     // Include nanosecond precision plus a monotonic process counter so
     // two sessions created in rapid succession cannot collide.
     let counter = SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("{}-{:09}-{:04}", now.format("%Y%m%d-%H%M%S"), now.timestamp_subsec_nanos(), counter)
+    format!(
+        "{}-{:09}-{:04}",
+        now.format("%Y%m%d-%H%M%S"),
+        now.timestamp_subsec_nanos(),
+        counter
+    )
 }
 #[cfg(test)]
 fn truncate_idea(idea: &Option<String>) -> String {
@@ -597,34 +602,34 @@ pub(super) fn format_relative_time(time: SystemTime, now: SystemTime) -> String 
         format!("{}d ago", secs / 86400)
     }
 }
-pub(super) fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
-    match phase {
-        Phase::IdeaInput => ("idea".to_string(), Color::DarkGray, "○"),
-        Phase::BrainstormRunning => ("brainstorm".to_string(), Color::Cyan, "●"),
-        Phase::SpecReviewRunning => ("spec review".to_string(), Color::Cyan, "●"),
-        Phase::SpecReviewPaused => ("spec review".to_string(), Color::Cyan, "○"),
-        Phase::PlanningRunning => ("planning".to_string(), Color::Cyan, "●"),
-        Phase::PlanReviewRunning => ("plan review".to_string(), Color::Cyan, "●"),
-        Phase::PlanReviewPaused => ("plan review".to_string(), Color::Cyan, "○"),
-        Phase::WaitingToImplement => ("waiting".to_string(), Color::Yellow, "○"),
-        Phase::RepoStateUpdateRunning => ("updating plan".to_string(), Color::Cyan, "●"),
-        Phase::ShardingRunning => ("sharding".to_string(), Color::Cyan, "●"),
-        Phase::ImplementationRound(n) => (format!("coding r{}", n), Color::Cyan, "●"),
-        Phase::ReviewRound(n) => (format!("review r{}", n), Color::Cyan, "●"),
-        Phase::BuilderRecovery(_) => ("builder recovery".to_string(), Color::Cyan, "●"),
-        Phase::BuilderRecoveryPlanReview(_) => {
+pub(super) fn stage_badge(stage: Stage) -> (String, Color, &'static str) {
+    match stage {
+        Stage::IdeaInput => ("idea".to_string(), Color::DarkGray, "○"),
+        Stage::BrainstormRunning => ("brainstorm".to_string(), Color::Cyan, "●"),
+        Stage::SpecReviewRunning => ("spec review".to_string(), Color::Cyan, "●"),
+        Stage::SpecReviewPaused => ("spec review".to_string(), Color::Cyan, "○"),
+        Stage::PlanningRunning => ("planning".to_string(), Color::Cyan, "●"),
+        Stage::PlanReviewRunning => ("plan review".to_string(), Color::Cyan, "●"),
+        Stage::PlanReviewPaused => ("plan review".to_string(), Color::Cyan, "○"),
+        Stage::WaitingToImplement => ("waiting".to_string(), Color::Yellow, "○"),
+        Stage::RepoStateUpdateRunning => ("updating plan".to_string(), Color::Cyan, "●"),
+        Stage::ShardingRunning => ("sharding".to_string(), Color::Cyan, "●"),
+        Stage::ImplementationRound(n) => (format!("coding r{}", n), Color::Cyan, "●"),
+        Stage::ReviewRound(n) => (format!("review r{}", n), Color::Cyan, "●"),
+        Stage::BuilderRecovery(_) => ("builder recovery".to_string(), Color::Cyan, "●"),
+        Stage::BuilderRecoveryPlanReview(_) => {
             ("recovery plan review".to_string(), Color::Cyan, "●")
         }
-        Phase::BuilderRecoverySharding(_) => ("recovery sharding".to_string(), Color::Cyan, "●"),
-        Phase::BlockedNeedsUser => ("blocked".to_string(), Color::Red, "○"),
-        Phase::Done => ("done".to_string(), Color::Green, "✓"),
-        Phase::Cancelled => ("cancelled".to_string(), Color::DarkGray, "✗"),
-        Phase::SkipToImplPending => ("skip confirm".to_string(), Color::Yellow, "!"),
-        Phase::GitGuardPending => ("guard decision".to_string(), Color::Yellow, "!"),
-        Phase::FinalValidation(n) => (format!("final validation r{}", n), Color::Cyan, "●"),
-        Phase::DreamingPending => ("dreaming decision".to_string(), Color::Yellow, "!"),
-        Phase::Dreaming(n) => (format!("dreaming r{}", n), Color::Cyan, "●"),
-        Phase::Simplification(n) => (format!("simplification r{}", n), Color::Cyan, "●"),
+        Stage::BuilderRecoverySharding(_) => ("recovery sharding".to_string(), Color::Cyan, "●"),
+        Stage::BlockedNeedsUser => ("blocked".to_string(), Color::Red, "○"),
+        Stage::Done => ("done".to_string(), Color::Green, "✓"),
+        Stage::Cancelled => ("cancelled".to_string(), Color::DarkGray, "✗"),
+        Stage::SkipToImplPending => ("skip confirm".to_string(), Color::Yellow, "!"),
+        Stage::GitGuardPending => ("guard decision".to_string(), Color::Yellow, "!"),
+        Stage::FinalValidation(n) => (format!("final validation r{}", n), Color::Cyan, "●"),
+        Stage::DreamingPending => ("dreaming decision".to_string(), Color::Yellow, "!"),
+        Stage::Dreaming(n) => (format!("dreaming r{}", n), Color::Cyan, "●"),
+        Stage::Simplification(n) => (format!("simplification r{}", n), Color::Cyan, "●"),
     }
 }
 pub(super) fn mode_badge_labels(modes: Modes) -> Vec<&'static str> {

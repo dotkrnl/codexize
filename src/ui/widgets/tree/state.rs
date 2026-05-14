@@ -1,5 +1,5 @@
 use crate::state::{
-    Node, NodeKind, NodeStatus, Phase, PipelineItemStatus, RunRecord, RunStatus, SessionState,
+    Node, NodeKind, NodeStatus, PipelineItemStatus, RunRecord, RunStatus, SessionState, Stage,
 };
 #[path = "stages.rs"]
 mod stages;
@@ -451,68 +451,68 @@ fn stage_status_from_runs(
     if runs.iter().any(|r| r.status == RunStatus::Running) {
         return NodeStatus::Running;
     }
-    let phase_matches = matches!(
-        (stage_key, state.current_phase),
-        ("brainstorm", Phase::BrainstormRunning)
-            | ("spec-review", Phase::SpecReviewRunning)
-            | ("spec-review", Phase::SpecReviewPaused)
-            | ("planning", Phase::PlanningRunning)
-            | ("plan-review", Phase::PlanReviewRunning)
-            | ("plan-review", Phase::PlanReviewPaused)
-            | ("sharding", Phase::ShardingRunning)
-            | ("coder", Phase::ImplementationRound(_))
-            | ("reviewer", Phase::ReviewRound(_))
-            | ("simplifier", Phase::Simplification(_))
-            | ("final-validation", Phase::FinalValidation(_))
+    let stage_matches = matches!(
+        (stage_key, state.current_stage),
+        ("brainstorm", Stage::BrainstormRunning)
+            | ("spec-review", Stage::SpecReviewRunning)
+            | ("spec-review", Stage::SpecReviewPaused)
+            | ("planning", Stage::PlanningRunning)
+            | ("plan-review", Stage::PlanReviewRunning)
+            | ("plan-review", Stage::PlanReviewPaused)
+            | ("sharding", Stage::ShardingRunning)
+            | ("coder", Stage::ImplementationRound(_))
+            | ("reviewer", Stage::ReviewRound(_))
+            | ("simplifier", Stage::Simplification(_))
+            | ("final-validation", Stage::FinalValidation(_))
     );
-    if phase_matches && state.agent_error.is_some() {
+    if stage_matches && state.agent_error.is_some() {
         return NodeStatus::Failed;
     }
-    if phase_matches && !runs.is_empty() && runs.iter().all(|r| r.status == RunStatus::Done) {
+    if stage_matches && !runs.is_empty() && runs.iter().all(|r| r.status == RunStatus::Done) {
         return NodeStatus::WaitingUser;
     }
-    if phase_matches {
+    if stage_matches {
         if runs.is_empty() {
             return NodeStatus::Pending;
         }
         return NodeStatus::Running;
     }
     if runs.is_empty() {
-        let is_pending = match (stage_key, state.current_phase) {
-            ("brainstorm", Phase::IdeaInput) => true,
-            ("spec-review", p) => matches!(p, Phase::IdeaInput | Phase::BrainstormRunning),
+        let is_pending = match (stage_key, state.current_stage) {
+            ("brainstorm", Stage::IdeaInput) => true,
+            ("spec-review", p) => matches!(p, Stage::IdeaInput | Stage::BrainstormRunning),
             ("planning", p) => matches!(
                 p,
-                Phase::IdeaInput
-                    | Phase::BrainstormRunning
-                    | Phase::SpecReviewRunning
-                    | Phase::SpecReviewPaused
+                Stage::IdeaInput
+                    | Stage::BrainstormRunning
+                    | Stage::SpecReviewRunning
+                    | Stage::SpecReviewPaused
             ),
             ("plan-review", p) => matches!(
                 p,
-                Phase::IdeaInput
-                    | Phase::BrainstormRunning
-                    | Phase::SpecReviewRunning
-                    | Phase::SpecReviewPaused
-                    | Phase::PlanningRunning
+                Stage::IdeaInput
+                    | Stage::BrainstormRunning
+                    | Stage::SpecReviewRunning
+                    | Stage::SpecReviewPaused
+                    | Stage::PlanningRunning
             ),
             ("sharding", p) => matches!(
                 p,
-                Phase::IdeaInput
-                    | Phase::BrainstormRunning
-                    | Phase::SpecReviewRunning
-                    | Phase::SpecReviewPaused
-                    | Phase::PlanningRunning
-                    | Phase::PlanReviewRunning
-                    | Phase::PlanReviewPaused
+                Stage::IdeaInput
+                    | Stage::BrainstormRunning
+                    | Stage::SpecReviewRunning
+                    | Stage::SpecReviewPaused
+                    | Stage::PlanningRunning
+                    | Stage::PlanReviewRunning
+                    | Stage::PlanReviewPaused
             ),
-            // Simplification is pending across every pre-simplification phase.
+            // Simplification is pending across every pre-simplification stage.
             // Done/BlockedNeedsUser without runs falls through to the
             // skip/Done resolution below (yolo or nothing-to-do bypass).
-            ("simplifier", p) => !matches!(p, Phase::Done | Phase::BlockedNeedsUser),
-            // Final validation is pending across every pre-validation phase
+            ("simplifier", p) => !matches!(p, Stage::Done | Stage::BlockedNeedsUser),
+            // Final validation is pending across every pre-validation stage
             // (including simplification, which now precedes it).
-            ("final-validation", p) => !matches!(p, Phase::Done | Phase::BlockedNeedsUser),
+            ("final-validation", p) => !matches!(p, Stage::Done | Stage::BlockedNeedsUser),
             _ => false,
         };
         if is_pending {
@@ -531,7 +531,7 @@ fn stage_status_from_runs(
         }
         // Yolo and nothing-to-do skip final validation. Simplification is
         // skipped under the same bypasses (yolo / nothing-to-do never enters
-        // the simplifier phase). Surface those bypasses explicitly so the
+        // the simplifier stage). Surface those bypasses explicitly so the
         // operator distinguishes "ran → done" from "bypassed → done".
         if matches!(stage_key, "simplifier" | "final-validation")
             && (state.modes.yolo || state.skip_to_impl_kind.is_some())
@@ -582,28 +582,28 @@ fn builder_status(
     {
         return NodeStatus::Running;
     }
-    match state.current_phase {
-        Phase::ImplementationRound(_)
-        | Phase::ReviewRound(_)
-        | Phase::BuilderRecovery(_)
-        | Phase::BuilderRecoveryPlanReview(_)
-        | Phase::BuilderRecoverySharding(_) => {
+    match state.current_stage {
+        Stage::ImplementationRound(_)
+        | Stage::ReviewRound(_)
+        | Stage::BuilderRecovery(_)
+        | Stage::BuilderRecoveryPlanReview(_)
+        | Stage::BuilderRecoverySharding(_) => {
             if state.agent_error.is_some() {
                 NodeStatus::Failed
             } else {
                 NodeStatus::Running
             }
         }
-        Phase::BlockedNeedsUser => NodeStatus::WaitingUser,
+        Stage::BlockedNeedsUser => NodeStatus::WaitingUser,
         // Once we move past the loop into simplification or final validation,
         // the open iteration's builder work is complete. Mark it Done so the
         // row is expandable (NodeStatus::Pending blocks expansion in
         // `is_expandable`, which would hide the loop's prior messages).
-        Phase::Simplification(_)
-        | Phase::FinalValidation(_)
-        | Phase::DreamingPending
-        | Phase::Dreaming(_)
-        | Phase::Done => NodeStatus::Done,
+        Stage::Simplification(_)
+        | Stage::FinalValidation(_)
+        | Stage::DreamingPending
+        | Stage::Dreaming(_)
+        | Stage::Done => NodeStatus::Done,
         _ => NodeStatus::Pending,
     }
 }
@@ -631,17 +631,17 @@ fn recovery_rounds_for_stage(state: &SessionState, stage: &str) -> BTreeSet<u32>
 }
 fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String {
     if matches!(
-        state.current_phase,
-        Phase::BuilderRecovery(_)
-            | Phase::BuilderRecoveryPlanReview(_)
-            | Phase::BuilderRecoverySharding(_)
+        state.current_stage,
+        Stage::BuilderRecovery(_)
+            | Stage::BuilderRecoveryPlanReview(_)
+            | Stage::BuilderRecoverySharding(_)
     ) {
         return "builder recovery in progress".to_string();
     }
     if !recovery_runs.is_empty()
         && matches!(
-            state.current_phase,
-            Phase::ImplementationRound(_) | Phase::ReviewRound(_)
+            state.current_stage,
+            Stage::ImplementationRound(_) | Stage::ReviewRound(_)
         )
     {
         return "builder resumed after recovery".to_string();

@@ -1,7 +1,7 @@
 use super::*;
 use crate::app::chat_widget::ChatWidget;
 use crate::app::split::SplitTarget;
-use crate::state::Phase;
+use crate::state::Stage;
 use crate::tui::wrap_text;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -55,7 +55,7 @@ impl SplitWidget<'_> {
     }
     fn render_idea_split(&self, area: Rect, buf: &mut Buffer) {
         // Split target owns Idea content; selection may still point at a run row after force-open sync.
-        if self.app.state.current_phase == Phase::IdeaInput {
+        if self.app.state.current_stage == Stage::IdeaInput {
             self.render_idea_input(area, buf);
         } else if let Some(idea) = self.app.state.idea_text.as_deref() {
             self.render_idea_captured(idea, area, buf);

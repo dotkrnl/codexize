@@ -49,7 +49,7 @@ Review:
           Boundaries are advisory: surface drift, do not block on soft
           over/under-shoots — the verdict (`refine` vs `revise`) handles that.
        c. Enumerate forgotten items in `## Dependencies and Sequence`:
-          milestones / phases no round has touched. Cite each by plan label.
+          milestones / stages no round has touched. Cite each by plan label.
 {review_scope_text}{terminal_review_block}
 
 Write `{review}` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.

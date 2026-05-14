@@ -2,7 +2,7 @@ use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::sharding_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, Phase};
+use crate::state::{self as session_state, Stage};
 use crate::tasks;
 use anyhow::{Context, Result};
 impl App {
@@ -20,10 +20,10 @@ impl App {
         let plan_path = session_dir.join("artifacts").join("plan.md");
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
         let modes = self.state.launch_modes();
-        let phase = Self::phase_for_stage("sharding");
-        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let stage = Self::selection_stage_for_stage("sharding");
+        let effort = modes.effort_for(EffortLevel::Normal, stage);
         let Some(chosen) =
-            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+            self.choose_primary_model(override_model.as_ref(), stage, effort, modes.cheap)
         else {
             self.record_agent_error("no model available with quota".to_string());
             self.save_state();
@@ -113,7 +113,7 @@ impl App {
             }
         }
     }
-    /// Co-located success-finalization for `Phase::ShardingRunning`.
+    /// Co-located success-finalization for `Stage::ShardingRunning`.
     pub(crate) fn finalize_sharding_success(
         &mut self,
         run: &crate::state::RunRecord,
@@ -131,7 +131,7 @@ impl App {
         );
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
-        self.transition_to_phase(Phase::ImplementationRound(1))?;
+        self.transition_to_stage(Stage::ImplementationRound(1))?;
         Ok(())
     }
 }

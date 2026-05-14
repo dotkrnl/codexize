@@ -1,5 +1,5 @@
 use crate::app_shell::{ShellFocus, SidebarRow, SidebarView};
-use crate::state::Phase;
+use crate::state::Stage;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -128,12 +128,12 @@ fn row_line(
 }
 
 fn row_style(row: &SidebarRow) -> Style {
-    let fg = match row.phase {
-        Phase::Done => Color::Green,
-        Phase::BlockedNeedsUser => Color::Red,
-        Phase::WaitingToImplement => Color::Yellow,
-        Phase::Cancelled => Color::DarkGray,
-        Phase::IdeaInput | Phase::SpecReviewPaused | Phase::PlanReviewPaused => Color::Blue,
+    let fg = match row.stage {
+        Stage::Done => Color::Green,
+        Stage::BlockedNeedsUser => Color::Red,
+        Stage::WaitingToImplement => Color::Yellow,
+        Stage::Cancelled => Color::DarkGray,
+        Stage::IdeaInput | Stage::SpecReviewPaused | Stage::PlanReviewPaused => Color::Blue,
         _ => Color::White,
     };
     let mut style = Style::default().fg(fg);

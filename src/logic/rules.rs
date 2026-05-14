@@ -1,20 +1,20 @@
-use crate::logic::pipeline::Phase;
+use crate::logic::pipeline::Stage;
 use crate::state::RunRecord;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetryTarget {
     Task(u32),
     Stage(&'static str),
 }
-pub fn retry_phase_for_stage(stage: &str) -> Option<Phase> {
+pub fn retry_stage_for_stage(stage: &str) -> Option<Stage> {
     match stage {
-        "brainstorm" => Some(Phase::BrainstormRunning),
-        "spec-review" => Some(Phase::SpecReviewRunning),
-        "planning" => Some(Phase::PlanningRunning),
-        "plan-review" => Some(Phase::PlanReviewRunning),
+        "brainstorm" => Some(Stage::BrainstormRunning),
+        "spec-review" => Some(Stage::SpecReviewRunning),
+        "planning" => Some(Stage::PlanningRunning),
+        "plan-review" => Some(Stage::PlanReviewRunning),
         // Spec §Data model line 96: manual retry of sharding must pause in
         // WaitingToImplement so the scheduler re-verifies baseline state.
-        "sharding" => Some(Phase::WaitingToImplement),
-        "repo-state-update" => Some(Phase::RepoStateUpdateRunning),
+        "sharding" => Some(Stage::WaitingToImplement),
+        "repo-state-update" => Some(Stage::RepoStateUpdateRunning),
         _ => None,
     }
 }

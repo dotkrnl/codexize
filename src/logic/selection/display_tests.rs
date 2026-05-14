@@ -22,7 +22,7 @@ fn ipbr_model(vendor: SubscriptionKind, name: &str, score: f64, quota: Option<u8
     CachedModel {
         subscription: vendor,
         name: name.to_string(),
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+        ipbr_stage_scores: crate::selection::IpbrStageScores {
             idea: Some(score),
             planning: Some(score),
             build: Some(score),
@@ -58,7 +58,7 @@ fn unscored_model(vendor: SubscriptionKind, name: &str, display_order: usize) ->
     CachedModel {
         subscription: vendor,
         name: name.to_string(),
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+        ipbr_stage_scores: crate::selection::IpbrStageScores::default(),
         score_source: crate::selection::ScoreSource::None,
         candidates: vec![candidate],
         selected_candidate: Some(0),
@@ -70,7 +70,7 @@ fn unscored_model(vendor: SubscriptionKind, name: &str, display_order: usize) ->
 
 #[test]
 fn visible_models_keeps_models_above_pool_weight_threshold() {
-    // Three Claude models with bunched phase scores share the pool roughly
+    // Three Claude models with bunched stage scores share the pool roughly
     // evenly (each weight ≫ 10%), while a much lower-scored peer's weight
     // collapses below the visibility threshold. The per-vendor floor still
     // admits one Claude row, but it picks the strongest, not the bottom.
@@ -100,7 +100,7 @@ fn visible_models_backfills_missing_vendors_by_build_rank() {
         // Two Kimi models — the per-vendor floor must pick the higher
         // ipbr Build score, not the lower `display_order`.
         CachedModel {
-            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+            ipbr_stage_scores: crate::selection::IpbrStageScores {
                 idea: Some(40.0),
                 planning: Some(40.0),
                 build: Some(40.0),
@@ -110,7 +110,7 @@ fn visible_models_backfills_missing_vendors_by_build_rank() {
             ..ipbr_model(SubscriptionKind::Kimi, "kimi-weak", 40.0, Some(80))
         },
         CachedModel {
-            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+            ipbr_stage_scores: crate::selection::IpbrStageScores {
                 idea: Some(60.0),
                 planning: Some(60.0),
                 build: Some(60.0),
@@ -148,31 +148,31 @@ fn visible_models_unscored_provider_model_remains_via_vendor_backfill() {
 }
 
 #[test]
-fn phase_rank_orders_by_ipbr_phase_score_descending() {
+fn stage_rank_orders_by_ipbr_stage_score_descending() {
     let models = vec![
         CachedModel {
-            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+            ipbr_stage_scores: crate::selection::IpbrStageScores {
                 build: Some(95.0),
-                ..crate::selection::IpbrPhaseScores::default()
+                ..crate::selection::IpbrStageScores::default()
             },
             ..ipbr_model(SubscriptionKind::Claude, "top", 95.0, Some(80))
         },
         CachedModel {
-            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+            ipbr_stage_scores: crate::selection::IpbrStageScores {
                 build: Some(50.0),
-                ..crate::selection::IpbrPhaseScores::default()
+                ..crate::selection::IpbrStageScores::default()
             },
             ..ipbr_model(SubscriptionKind::Codex, "mid", 50.0, Some(80))
         },
         CachedModel {
-            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+            ipbr_stage_scores: crate::selection::IpbrStageScores {
                 build: Some(10.0),
-                ..crate::selection::IpbrPhaseScores::default()
+                ..crate::selection::IpbrStageScores::default()
             },
             ..ipbr_model(SubscriptionKind::Gemini, "low", 10.0, Some(80))
         },
     ];
-    let ranks = phase_rank(&models, SelectionPhase::Build);
+    let ranks = stage_rank(&models, SelectionStage::Build);
 
     assert_eq!(ranks.len(), 3);
     assert_eq!(ranks["top"], 1);
@@ -181,14 +181,14 @@ fn phase_rank_orders_by_ipbr_phase_score_descending() {
 }
 
 #[test]
-fn phase_rank_omits_unscored_models() {
+fn stage_rank_omits_unscored_models() {
     // Unscored models render as unranked: they must not appear in the
-    // rank map at all (callers treat absence as "no rank for this phase").
+    // rank map at all (callers treat absence as "no rank for this stage").
     let models = vec![
         ipbr_model(SubscriptionKind::Codex, "ranked", 80.0, Some(80)),
         unscored_model(SubscriptionKind::Gemini, "gemini-2.5-pro", 0),
     ];
-    let ranks = phase_rank(&models, SelectionPhase::Build);
+    let ranks = stage_rank(&models, SelectionStage::Build);
 
     assert_eq!(ranks.len(), 1);
     assert_eq!(ranks["ranked"], 1);
@@ -196,31 +196,31 @@ fn phase_rank_omits_unscored_models() {
 }
 
 #[test]
-fn phase_rank_dense_after_tie() {
+fn stage_rank_dense_after_tie() {
     let models = vec![
         CachedModel {
-            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+            ipbr_stage_scores: crate::selection::IpbrStageScores {
                 build: Some(90.0),
-                ..crate::selection::IpbrPhaseScores::default()
+                ..crate::selection::IpbrStageScores::default()
             },
             ..ipbr_model(SubscriptionKind::Claude, "tie-a", 90.0, Some(80))
         },
         CachedModel {
-            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+            ipbr_stage_scores: crate::selection::IpbrStageScores {
                 build: Some(90.0),
-                ..crate::selection::IpbrPhaseScores::default()
+                ..crate::selection::IpbrStageScores::default()
             },
             ..ipbr_model(SubscriptionKind::Codex, "tie-b", 90.0, Some(80))
         },
         CachedModel {
-            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+            ipbr_stage_scores: crate::selection::IpbrStageScores {
                 build: Some(50.0),
-                ..crate::selection::IpbrPhaseScores::default()
+                ..crate::selection::IpbrStageScores::default()
             },
             ..ipbr_model(SubscriptionKind::Gemini, "lower", 50.0, Some(80))
         },
     ];
-    let ranks = phase_rank(&models, SelectionPhase::Build);
+    let ranks = stage_rank(&models, SelectionStage::Build);
 
     assert_eq!(ranks["tie-a"], 1);
     assert_eq!(ranks["tie-b"], 1);
@@ -228,10 +228,9 @@ fn phase_rank_dense_after_tie() {
 }
 
 #[test]
-fn phase_rank_empty_when_no_models_or_no_scores() {
-    assert!(phase_rank(&[], SelectionPhase::Build).is_empty());
+fn stage_rank_empty_when_no_models_or_no_scores() {
+    assert!(stage_rank(&[], SelectionStage::Build).is_empty());
 
     let unscored = vec![unscored_model(SubscriptionKind::Claude, "a", 0)];
-    assert!(phase_rank(&unscored, SelectionPhase::Build).is_empty());
+    assert!(stage_rank(&unscored, SelectionStage::Build).is_empty());
 }
-

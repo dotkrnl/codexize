@@ -1,7 +1,7 @@
 use super::super::App;
 use super::super::CommandReturnTarget;
 use super::super::split::SplitTarget;
-use crate::state::Phase;
+use crate::state::Stage;
 use crossterm::event::{KeyCode, KeyEvent};
 impl App {
     /// Resolve the currently selected visible row to a split target, if any.
@@ -42,7 +42,7 @@ impl App {
         self.split_target.is_some()
     }
     pub(super) fn command_return_target_for_input_surface(&self) -> Option<CommandReturnTarget> {
-        if self.state.current_phase == Phase::IdeaInput {
+        if self.state.current_stage == Stage::IdeaInput {
             return Some(CommandReturnTarget::Idea);
         }
         if self.interactive_run_waiting_for_input() {
@@ -80,7 +80,7 @@ impl App {
         };
         match target {
             CommandReturnTarget::Idea => {
-                if self.state.current_phase == Phase::IdeaInput {
+                if self.state.current_stage == Stage::IdeaInput {
                     self.input_mode = true;
                 }
             }

@@ -8,7 +8,7 @@ use crate::review;
 use crate::runner::select_full_alignment;
 use crate::selection::CachedModel;
 use crate::state::{
-    self as session_state, Message, MessageKind, MessageSender, Phase, PipelineItemStatus,
+    self as session_state, Message, MessageKind, MessageSender, PipelineItemStatus, Stage,
 };
 use anyhow::Result;
 use std::path::Path;
@@ -41,7 +41,7 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Phase::ReviewRound(r) = self.state.current_phase else {
+        let Stage::ReviewRound(r) = self.state.current_stage else {
             return false;
         };
         let Some(task_id) = self.state.builder.current_task_id() else {
@@ -69,7 +69,10 @@ impl App {
             .collect::<Vec<_>>();
         let modes = self.state.launch_modes();
         let requested_effort = self.task_effort_for_round(&session_dir, task_id, r);
-        let effort = modes.effort_for(requested_effort, Self::phase_for_stage("reviewer"));
+        let effort = modes.effort_for(
+            requested_effort,
+            Self::selection_stage_for_stage("reviewer"),
+        );
         // Override-model bypass: explicit operator pick beats the effort filter.
         let (used_vendors, used_models) = Self::used_review_pairs(&excluded);
         let Some(chosen) = self.choose_review_model(
@@ -115,7 +118,7 @@ impl App {
         // ReviewRound dispatch: cadence-driven full-alignment audit when the
         // round number is a non-zero multiple of `full_review_interval`.
         // `interval == 0` and `r == 0` keep the regular reviewer; recovery
-        // rounds run on a separate phase so they cannot land here.
+        // rounds run on a separate stage so they cannot land here.
         let prompt = if select_full_alignment(r, self.runner_config.full_review_interval) {
             reviewer_full_alignment_prompt(prompt_inputs)
         } else {
@@ -194,7 +197,7 @@ impl App {
             }
         }
     }
-    /// Co-located success-finalization for `Phase::ReviewRound(round)`.
+    /// Co-located success-finalization for `Stage::ReviewRound(round)`.
     pub(crate) fn finalize_reviewer_success(
         &mut self,
         run: &crate::state::RunRecord,
@@ -323,7 +326,7 @@ impl App {
                         );
                     }
                 }
-                self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+                self.transition_to_stage(Stage::ImplementationRound(round + 1))?;
             }
             review::ReviewStatus::HumanBlocked | review::ReviewStatus::AgentPivot => {
                 let (verdict_status, trigger_str) =
@@ -363,7 +366,7 @@ impl App {
             );
         }
         if self.state.builder.has_unfinished_tasks() {
-            self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+            self.transition_to_stage(Stage::ImplementationRound(round + 1))?;
         } else {
             self.enter_simplification_or_done(round, yolo)?;
         }
@@ -380,10 +383,10 @@ mod tests {
     use crate::app::test_support::{mk_app, with_temp_root};
     use crate::runner::{RunnerConfig, select_full_alignment};
     use crate::selection::{
-        CachedModel, Candidate, CliKind, IpbrPhaseScores, ScoreSource, SubscriptionKind,
+        CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind,
     };
     use crate::state::{
-        self as session_state, BuilderState, Phase, PipelineItem, PipelineItemStatus, SessionState,
+        self as session_state, BuilderState, PipelineItem, PipelineItemStatus, SessionState, Stage,
     };
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
@@ -454,7 +457,7 @@ mod tests {
     fn select_full_alignment_matrix() {
         // Mirrors the spec's selection rule:
         //   `interval > 0 && round > 0 && round % interval == 0`.
-        // Recovery rounds run on a separate phase and therefore never land
+        // Recovery rounds run on a separate stage and therefore never land
         // here, so the table only models `ReviewRound(N)` cadence.
         for (round, interval, expected) in [
             (0u32, 5u32, false),
@@ -493,9 +496,9 @@ mod tests {
         CachedModel {
             subscription: SubscriptionKind::Codex,
             name: "review-model".to_string(),
-            ipbr_phase_scores: IpbrPhaseScores {
+            ipbr_stage_scores: IpbrStageScores {
                 review: Some(1.0),
-                ..IpbrPhaseScores::default()
+                ..IpbrStageScores::default()
             },
             score_source: ScoreSource::Ipbr,
             candidates: vec![candidate],
@@ -590,7 +593,7 @@ feedback = []
             std::fs::create_dir_all(&session_dir).unwrap();
 
             let mut state = SessionState::new(session_id);
-            state.current_phase = Phase::ReviewRound(5);
+            state.current_stage = Stage::ReviewRound(5);
             state.builder = builder_with_running_task(1);
             write_round_artifacts(&session_dir, 5, 1);
 
@@ -638,7 +641,7 @@ feedback = []
             std::fs::create_dir_all(&session_dir).unwrap();
 
             let mut state = SessionState::new(session_id);
-            state.current_phase = Phase::ReviewRound(3);
+            state.current_stage = Stage::ReviewRound(3);
             state.builder = builder_with_running_task(1);
             write_round_artifacts(&session_dir, 3, 1);
 
@@ -678,7 +681,7 @@ feedback = []
             std::fs::create_dir_all(&session_dir).unwrap();
 
             let mut state = SessionState::new(session_id);
-            state.current_phase = Phase::ReviewRound(10);
+            state.current_stage = Stage::ReviewRound(10);
             state.builder = builder_with_running_task(1);
             write_round_artifacts(&session_dir, 10, 1);
 

@@ -341,7 +341,7 @@ fn gradient_spans_round_trip_ascii_text() {
 }
 
 #[test]
-fn gradient_spans_phase_shift_changes_at_least_one_pigment() {
+fn gradient_spans_stage_shift_changes_at_least_one_pigment() {
     let a = gradient_spans("gradient", 0);
     let b = gradient_spans("gradient", 4);
     assert_eq!(a.len(), b.len());
@@ -349,7 +349,7 @@ fn gradient_spans_phase_shift_changes_at_least_one_pigment() {
         a.iter()
             .zip(b.iter())
             .any(|(left, right)| left.style.fg != right.style.fg),
-        "phase shift should change at least one foreground color"
+        "stage shift should change at least one foreground color"
     );
 }
 

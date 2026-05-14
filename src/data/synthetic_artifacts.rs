@@ -13,7 +13,7 @@ pub fn generate_synthetic_artifacts(session_dir: &Path, spec: &Spec) -> Result<(
     let plan_content = format!(
         "# Synthetic Plan for Direct Implementation\n\n\
 This plan was generated automatically because the brainstorm agent judged the task \
-simple enough to skip the usual planning and sharding phases.\n\n\
+simple enough to skip the usual planning and sharding stages.\n\n\
 ## Task 1: Implement according to Spec\n\n\
 - Refer to the spec: {spec_filename}\n",
         spec_filename = ArtifactKind::Spec.filename()

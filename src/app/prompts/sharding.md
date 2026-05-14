@@ -13,7 +13,7 @@ tasks.
 
 Sizing:
   - Target ~100k tokens per task (one coding session without compaction).
-    Decompose only along natural seams (subsystem / layer / phase); a
+    Decompose only along natural seams (subsystem / layer / stage); a
     single-task tasks.toml is fine when the plan fits one session.
   - Each task self-contained: must build on its own (compile / link /
     type-check). Independent testability NOT required — scaffolding tasks

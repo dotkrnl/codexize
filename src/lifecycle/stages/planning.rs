@@ -1,19 +1,19 @@
 //! Planning stage: produces `artifacts/plan.md` from the approved spec.
 //!
 //! Single-shot, single-round. Runs while the session sits on
-//! [`Phase::Plan`]; stays in [`Phase::Plan`] on success so plan-review
-//! (also a Phase::Plan stage) can pick up next.
+//! [`Stage::Plan`]; stays in [`Stage::Plan`] on success so plan-review
+//! (also a Stage::Plan stage) can pick up next.
 use super::{has_succeeded, next_attempt};
-use crate::lifecycle::phase::Phase;
+use crate::lifecycle::Stage;
 use crate::lifecycle::spec::StageSpec;
-use crate::lifecycle::stage::{Stage, StageCtx, SuccessOutcome, WorkUnit};
+use crate::lifecycle::stage::{StageCtx, StageDriver, SuccessOutcome, WorkUnit};
 use crate::lifecycle::stage_id::StageId;
 use std::path::PathBuf;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PlanningStage;
 
-impl Stage for PlanningStage {
+impl StageDriver for PlanningStage {
     fn id(&self) -> StageId {
         StageId::Planning
     }
@@ -49,15 +49,15 @@ impl Stage for PlanningStage {
         }
     }
 
-    fn phase_when_running(&self) -> Phase {
-        Phase::Plan
+    fn stage_when_running(&self) -> Stage {
+        Stage::Plan
     }
 
-    fn next_phase_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Phase {
-        // Stays on Phase::Plan; plan-review (also Phase::Plan) picks up the
-        // baton. The legacy code's WaitingToImplement YOLO shortcut and
+    fn next_stage_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Stage {
+        // Stays on Stage::Plan; plan-review (also Stage::Plan) picks up the
+        // baton. The persisted code's WaitingToImplement YOLO shortcut and
         // PlanApproval modal both live in PendingDecisions now.
-        Phase::Plan
+        Stage::Plan
     }
 
     fn artifact_paths(&self, _round: u32) -> Vec<PathBuf> {
@@ -84,7 +84,7 @@ mod tests {
         StageCtx {
             session_id: "s",
             session_dir: Path::new("/tmp"),
-            phase: Phase::Plan,
+            stage: Stage::Plan,
             prior_runs: prior,
             pending_task_ids: &[],
             yolo: false,
@@ -96,19 +96,25 @@ mod tests {
     }
 
     #[test]
-    fn identity_and_window_match_legacy_launch() {
+    fn identity_and_window_match_persisted_launch() {
         let s = PlanningStage;
         assert_eq!(s.id(), StageId::Planning);
         assert_eq!(s.label(), "Planning");
         assert_eq!(s.window_name(1, None), "[Planning]");
-        assert_eq!(s.phase_when_running(), Phase::Plan);
+        assert_eq!(s.stage_when_running(), Stage::Plan);
     }
 
     #[test]
     fn paths_match_go_back_cleanup() {
         let s = PlanningStage;
-        assert_eq!(s.artifact_paths(1), vec![PathBuf::from("artifacts/plan.md")]);
-        assert_eq!(s.prompt_paths(1), vec![PathBuf::from("prompts/planning.md")]);
+        assert_eq!(
+            s.artifact_paths(1),
+            vec![PathBuf::from("artifacts/plan.md")]
+        );
+        assert_eq!(
+            s.prompt_paths(1),
+            vec![PathBuf::from("prompts/planning.md")]
+        );
         assert!(s.restore_backups(1).is_empty());
     }
 

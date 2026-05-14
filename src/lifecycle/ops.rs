@@ -6,14 +6,14 @@
 //! shape mutations should be, builds a [`CleanupPlan`] of file deletes and
 //! backup restores, and emits an [`OpOutcome`] the caller drives.
 //!
-//! Two-phase model:
+//! Two-stage model:
 //! - When the FSM is idle, the operator command resolves *immediately*:
-//!   the returned [`OpAction::Immediate`] carries the phase change,
+//!   the returned [`OpAction::Immediate`] carries the stage change,
 //!   cleanup, pending-decision pruning, and start-spec the caller applies
 //!   synchronously.
 //! - When the FSM is active, the operator command calls
 //!   [`Fsm::request_stop`] inside ops with an [`AfterStop`] variant that
-//!   already carries the cleanup and phase change. The caller observes a
+//!   already carries the cleanup and stage change. The caller observes a
 //!   [`OpAction::PendingStop`] return value, then later — once the agent
 //!   is dead — runs [`Fsm::confirm_dead`] and applies the same plan from
 //!   the resolved `next` variant.
@@ -23,22 +23,22 @@
 //! finalizes.
 use super::fsm::{AfterStop, AgentState, CleanupPlan, Fsm, StopResolution};
 use super::pending::PendingDecisions;
-use super::phase::Phase;
 use super::spec::StageSpec;
 use super::stage::{StageCtx, StageRegistry};
+use super::stage_state::Stage;
 use std::path::PathBuf;
 
 /// Context bundle the operator commands mutate or read.
 ///
-/// `fsm` / `phase` / `paused_at_phase` / `pending_decisions` are the
+/// `fsm` / `stage` / `paused_at_stage` / `pending_decisions` are the
 /// session-shape fields the ops touch synchronously. `registry` and
 /// `stage_ctx` are read-only — the registry to look stages up, the
 /// `StageCtx` to feed [`super::Stage::build_spec`] / `next_pending_work`
 /// when computing follow-on specs.
 pub struct OpsCtx<'a> {
     pub fsm: &'a mut Fsm,
-    pub phase: &'a mut Phase,
-    pub paused_at_phase: &'a mut Option<Phase>,
+    pub stage: &'a mut Stage,
+    pub paused_at_stage: &'a mut Option<Stage>,
     pub pending_decisions: &'a mut PendingDecisions,
     pub registry: &'a StageRegistry,
     pub stage_ctx: StageCtx<'a>,
@@ -60,10 +60,10 @@ pub enum OpOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpAction {
     /// Synchronous: no agent was running, so the caller can apply
-    /// `phase_change` / `cleanup` / pending-decision pruning immediately
+    /// `stage_change` / `cleanup` / pending-decision pruning immediately
     /// and (if non-`None`) issue `fsm.start(start_spec)`.
     Immediate {
-        phase_change: Option<Phase>,
+        stage_change: Option<Stage>,
         cleanup: CleanupPlan,
         clear_paused: bool,
         clear_pending: bool,
@@ -79,7 +79,7 @@ pub enum OpAction {
     PendingStop {
         after: AfterStop,
         cleanup: CleanupPlan,
-        phase_change: Option<Phase>,
+        stage_change: Option<Stage>,
         clear_paused: bool,
         clear_pending: bool,
     },
@@ -90,7 +90,7 @@ pub struct LifecycleOps;
 
 impl LifecycleOps {
     /// `:stop` — request the active agent stop with no follow-on. Sets
-    /// `paused_at_phase = Some(phase)` so the scheduler doesn't immediately
+    /// `paused_at_stage = Some(stage)` so the scheduler doesn't immediately
     /// relaunch the same stage; `:restart` and `:rewind` clear this slot.
     ///
     /// Idle FSM → [`OpOutcome::NoOp`]. The "re-request from Stopping"
@@ -111,11 +111,11 @@ impl LifecycleOps {
                 ctx.fsm
                     .request_stop(AfterStop::GoIdle)
                     .expect("running/stopping FSM accepts request_stop");
-                *ctx.paused_at_phase = Some(*ctx.phase);
+                *ctx.paused_at_stage = Some(*ctx.stage);
                 OpOutcome::Staged(OpAction::PendingStop {
                     after: AfterStop::GoIdle,
                     cleanup: CleanupPlan::empty(),
-                    phase_change: None,
+                    stage_change: None,
                     clear_paused: false,
                     clear_pending: false,
                 })
@@ -154,31 +154,31 @@ impl LifecycleOps {
                 spec: next_spec.clone(),
             })
             .expect("active FSM accepts request_stop");
-        *ctx.paused_at_phase = None;
+        *ctx.paused_at_stage = None;
         OpOutcome::Staged(OpAction::PendingStop {
             after: AfterStop::Restart { spec: next_spec },
             cleanup: CleanupPlan::empty(),
-            phase_change: None,
+            stage_change: None,
             clear_paused: true,
             clear_pending: false,
         })
     }
 
-    /// `:rewind <target>` — roll the session [`Phase`] back to `target`,
+    /// `:rewind <target>` — roll the session [`Stage`] back to `target`,
     /// clean up artifacts for every stage strictly past `target`, restore
     /// the target stage's backups, and auto-launch the next stage at
     /// `target` (if any).
-    pub fn rewind(ctx: &mut OpsCtx<'_>, target: Phase) -> OpOutcome {
-        // Refuse rewinds that don't go backwards. `Phase`'s `partial_cmp`
-        // returns None for `Phase::Cancelled`, which we treat as a no-op
+    pub fn rewind(ctx: &mut OpsCtx<'_>, target: Stage) -> OpOutcome {
+        // Refuse rewinds that don't go backwards. `Stage`'s `partial_cmp`
+        // returns None for `Stage::Cancelled`, which we treat as a no-op
         // since "rewinding past cancelled" is meaningless.
-        match target.partial_cmp(ctx.phase) {
+        match target.partial_cmp(ctx.stage) {
             Some(std::cmp::Ordering::Less) => {}
             _ => return OpOutcome::NoOp("nothing to rewind".to_string()),
         }
 
         let cleanup = build_rewind_cleanup(ctx, target);
-        let start_spec = build_start_spec_for_phase(ctx, target);
+        let start_spec = build_start_spec_for_stage(ctx, target);
 
         match ctx.fsm.view() {
             AgentState::Idle | AgentState::Starting { .. } => {
@@ -186,7 +186,7 @@ impl LifecycleOps {
                 // drive; lump it in with Idle and apply the rewind
                 // synchronously.
                 OpOutcome::Staged(OpAction::Immediate {
-                    phase_change: Some(target),
+                    stage_change: Some(target),
                     cleanup,
                     clear_paused: true,
                     clear_pending: true,
@@ -203,11 +203,11 @@ impl LifecycleOps {
                 ctx.fsm
                     .request_stop(after.clone())
                     .expect("active FSM accepts request_stop");
-                *ctx.paused_at_phase = None;
+                *ctx.paused_at_stage = None;
                 OpOutcome::Staged(OpAction::PendingStop {
                     after,
                     cleanup,
-                    phase_change: Some(target),
+                    stage_change: Some(target),
                     clear_paused: true,
                     clear_pending: true,
                 })
@@ -216,14 +216,14 @@ impl LifecycleOps {
     }
 
     /// `:cancel` — end the session. Stops any active agent and marks the
-    /// [`Phase`] as [`Phase::Cancelled`].
+    /// [`Stage`] as [`Stage::Cancelled`].
     pub fn cancel(ctx: &mut OpsCtx<'_>) -> OpOutcome {
         match ctx.fsm.view() {
             AgentState::Idle | AgentState::Starting { .. } => {
                 // Starting has no live run for `Fsm::request_stop` to
                 // drive; apply cancellation immediately.
                 OpOutcome::Staged(OpAction::Immediate {
-                    phase_change: Some(Phase::Cancelled),
+                    stage_change: Some(Stage::Cancelled),
                     cleanup: CleanupPlan::empty(),
                     clear_paused: false,
                     clear_pending: true,
@@ -237,7 +237,7 @@ impl LifecycleOps {
                 OpOutcome::Staged(OpAction::PendingStop {
                     after: AfterStop::Cancel,
                     cleanup: CleanupPlan::empty(),
-                    phase_change: Some(Phase::Cancelled),
+                    stage_change: Some(Stage::Cancelled),
                     clear_paused: false,
                     clear_pending: true,
                 })
@@ -253,14 +253,14 @@ impl LifecycleOps {
 pub fn resolution_to_action(resolution: StopResolution) -> OpAction {
     match resolution.next {
         AfterStop::GoIdle => OpAction::Immediate {
-            phase_change: None,
+            stage_change: None,
             cleanup: CleanupPlan::empty(),
             clear_paused: false,
             clear_pending: false,
             start_spec: None,
         },
         AfterStop::Restart { spec } => OpAction::Immediate {
-            phase_change: None,
+            stage_change: None,
             cleanup: CleanupPlan::empty(),
             clear_paused: true,
             clear_pending: false,
@@ -272,14 +272,14 @@ pub fn resolution_to_action(resolution: StopResolution) -> OpAction {
             cleanup,
             clear_pending,
         } => OpAction::Immediate {
-            phase_change: Some(target),
+            stage_change: Some(target),
             cleanup,
             clear_paused: true,
             clear_pending,
             start_spec: spec,
         },
         AfterStop::Cancel => OpAction::Immediate {
-            phase_change: Some(Phase::Cancelled),
+            stage_change: Some(Stage::Cancelled),
             cleanup: CleanupPlan::empty(),
             clear_paused: false,
             clear_pending: true,
@@ -290,18 +290,18 @@ pub fn resolution_to_action(resolution: StopResolution) -> OpAction {
 
 /// Compute the [`CleanupPlan`] for a rewind to `target`.
 ///
-/// Iterates every registered stage whose `phase_when_running` is strictly
+/// Iterates every registered stage whose `stage_when_running` is strictly
 /// later than `target` and collects its `artifact_paths` and
 /// `prompt_paths` for every round from 1 up to the current round (so a
 /// multi-shot stage's per-round directory tree is fully cleaned). The
 /// target stage's own `restore_backups` are added so the operator's
 /// working tree (e.g. `plan.md` from `plan.pre-review-1.md`) is restored.
 /// All paths are joined to [`StageCtx::session_dir`] to become absolute.
-fn build_rewind_cleanup(ctx: &OpsCtx<'_>, target: Phase) -> CleanupPlan {
+fn build_rewind_cleanup(ctx: &OpsCtx<'_>, target: Stage) -> CleanupPlan {
     let mut delete: Vec<PathBuf> = Vec::new();
     let mut restore_backups: Vec<(PathBuf, PathBuf)> = Vec::new();
 
-    let current_round = round_for_phase(*ctx.phase);
+    let current_round = round_for_stage(*ctx.stage);
     for id in ctx.registry.stages_after(target) {
         let Some(stage) = ctx.registry.get(id) else {
             continue;
@@ -319,11 +319,11 @@ fn build_rewind_cleanup(ctx: &OpsCtx<'_>, target: Phase) -> CleanupPlan {
     // The target stage itself isn't in `stages_after`, but its
     // restore_backups are how the operator's working tree gets reset.
     // The "target stage" for restore purposes is the stage whose
-    // `next_phase_on_success` *leaves* the lifecycle on `target` — for
-    // Phase::Plan that's PlanReview (the plan.pre-review-1.md backup is
+    // `next_stage_on_success` *leaves* the lifecycle on `target` — for
+    // Stage::Plan that's PlanReview (the plan.pre-review-1.md backup is
     // the canonical example). The simplest mapping is to query every
-    // registered stage and pick those whose phase_when_running == target.
-    for id in ctx.registry.stages_at_phase(target) {
+    // registered stage and pick those whose stage_when_running == target.
+    for id in ctx.registry.stages_at_stage(target) {
         let Some(stage) = ctx.registry.get(id) else {
             continue;
         };
@@ -342,20 +342,20 @@ fn build_rewind_cleanup(ctx: &OpsCtx<'_>, target: Phase) -> CleanupPlan {
 }
 
 /// Build the `start_spec` to fire on rewind to `target`. Walks the
-/// per-phase candidate list (matching the canonical pipeline order)
+/// per-stage candidate list (matching the canonical pipeline order)
 /// and returns the first stage with [`super::Stage::next_pending_work`].
-fn build_start_spec_for_phase(ctx: &OpsCtx<'_>, target: Phase) -> Option<StageSpec> {
-    let id = ctx.registry.next_stage_for_phase(target, &ctx.stage_ctx)?;
+fn build_start_spec_for_stage(ctx: &OpsCtx<'_>, target: Stage) -> Option<StageSpec> {
+    let id = ctx.registry.next_stage_for_stage(target, &ctx.stage_ctx)?;
     let stage = ctx.registry.get(id)?;
     Some(stage.build_spec(&ctx.stage_ctx))
 }
 
-/// Round number for the lifecycle's current phase. Used by
+/// Round number for the lifecycle's current stage. Used by
 /// [`build_rewind_cleanup`] to bound the per-round path enumeration so a
 /// rewind in round 3 cleans up `rounds/001..rounds/003`.
-fn round_for_phase(phase: Phase) -> u32 {
-    match phase {
-        Phase::Implementation(r) | Phase::Review(r) => r,
+fn round_for_stage(stage: Stage) -> u32 {
+    match stage {
+        Stage::Implementation(r) | Stage::Review(r) => r,
         _ => 1,
     }
 }

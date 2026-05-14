@@ -1,17 +1,17 @@
 //! Sharding stage: converts `plan.md` into `tasks.toml`. Single-shot,
-//! single-round (round = 1). Runs on [`Phase::Plan`] and moves the
-//! lifecycle to [`Phase::Implementation(1)`] on success.
+//! single-round (round = 1). Runs on [`Stage::Plan`] and moves the
+//! lifecycle to [`Stage::Implementation(1)`] on success.
 use super::{has_succeeded, next_attempt};
-use crate::lifecycle::phase::Phase;
+use crate::lifecycle::Stage;
 use crate::lifecycle::spec::StageSpec;
-use crate::lifecycle::stage::{Stage, StageCtx, SuccessOutcome, WorkUnit};
+use crate::lifecycle::stage::{StageCtx, StageDriver, SuccessOutcome, WorkUnit};
 use crate::lifecycle::stage_id::StageId;
 use std::path::PathBuf;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ShardingStage;
 
-impl Stage for ShardingStage {
+impl StageDriver for ShardingStage {
     fn id(&self) -> StageId {
         StageId::Sharding
     }
@@ -47,12 +47,12 @@ impl Stage for ShardingStage {
         }
     }
 
-    fn phase_when_running(&self) -> Phase {
-        Phase::Plan
+    fn stage_when_running(&self) -> Stage {
+        Stage::Plan
     }
 
-    fn next_phase_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Phase {
-        Phase::Implementation(1)
+    fn next_stage_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Stage {
+        Stage::Implementation(1)
     }
 
     fn artifact_paths(&self, _round: u32) -> Vec<PathBuf> {
@@ -72,8 +72,8 @@ impl Stage for ShardingStage {
 mod tests {
     use super::*;
     use crate::lifecycle::fsm::Outcome;
-    use crate::lifecycle::stage::{RunHistoryEntry, SuccessOutcome};
     use crate::lifecycle::spec::ActiveRun;
+    use crate::lifecycle::stage::{RunHistoryEntry, SuccessOutcome};
     use chrono::Utc;
     use std::path::Path;
 
@@ -81,7 +81,7 @@ mod tests {
         StageCtx {
             session_id: "s",
             session_dir: Path::new("/tmp"),
-            phase: Phase::Plan,
+            stage: Stage::Plan,
             prior_runs: prior,
             pending_task_ids: &[],
             yolo: false,
@@ -93,12 +93,12 @@ mod tests {
     }
 
     #[test]
-    fn identity_and_window_match_legacy_launch() {
+    fn identity_and_window_match_persisted_launch() {
         let s = ShardingStage;
         assert_eq!(s.id(), StageId::Sharding);
         assert_eq!(s.label(), "Sharding");
         assert_eq!(s.window_name(1, None), "[Sharding]");
-        assert_eq!(s.phase_when_running(), Phase::Plan);
+        assert_eq!(s.stage_when_running(), Stage::Plan);
     }
 
     #[test]
@@ -108,7 +108,10 @@ mod tests {
             s.artifact_paths(1),
             vec![PathBuf::from("artifacts/tasks.toml")]
         );
-        assert_eq!(s.prompt_paths(1), vec![PathBuf::from("prompts/sharding.md")]);
+        assert_eq!(
+            s.prompt_paths(1),
+            vec![PathBuf::from("prompts/sharding.md")]
+        );
         assert!(s.restore_backups(1).is_empty());
     }
 
@@ -123,7 +126,10 @@ mod tests {
                 started_at: Utc::now(),
             },
         };
-        assert_eq!(s.next_phase_on_success(&ctx, &outcome), Phase::Implementation(1));
+        assert_eq!(
+            s.next_stage_on_success(&ctx, &outcome),
+            Stage::Implementation(1)
+        );
     }
 
     #[test]

@@ -335,7 +335,9 @@ fn run_acp_install_modal(
         terminal.draw(|frame| {
             render_preflight_modal(frame, scenario, claude_acp_root);
         })?;
-        if event::poll(Duration::from_millis(100))? && let Event::Key(key) = event::read()? {
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
             if key.kind != KeyEventKind::Press {
                 continue;
             }

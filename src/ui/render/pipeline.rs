@@ -219,8 +219,8 @@ impl App {
         if self.should_suppress_tail(run) {
             return None;
         }
-        let phase_label = self.state.current_phase.label();
-        let fetcher = CachedSummaryFetcher::new(&self.live_summary_cached_text, &phase_label);
+        let stage_label = self.state.current_stage.label();
+        let fetcher = CachedSummaryFetcher::new(&self.live_summary_cached_text, &stage_label);
         let clock = crate::app::clock::WallClock::new();
         let line = if self.live_agent_progress_recent() {
             format_running_transcript_leaf(
@@ -410,8 +410,8 @@ impl App {
                 kind: PipelineLineKind::RunningContainerPlaceholder { run_id: run.id },
             });
         }
-        let phase_label = self.state.current_phase.label();
-        let fetcher = CachedSummaryFetcher::new(&self.live_summary_cached_text, &phase_label);
+        let stage_label = self.state.current_stage.label();
+        let fetcher = CachedSummaryFetcher::new(&self.live_summary_cached_text, &stage_label);
         let line = if self.live_agent_progress_recent() {
             format_running_transcript_leaf(
                 TranscriptLeafMarker::new(),

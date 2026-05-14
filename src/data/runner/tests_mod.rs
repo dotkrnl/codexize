@@ -259,8 +259,7 @@ fn finish_stamp_serialization_includes_working_tree_clean() {
 
 #[test]
 fn acp_text_stream_buffers_partial_text_until_paragraph_boundary() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     unsafe {
@@ -419,8 +418,7 @@ fn persisted_texts(session_id: &str, kind: MessageKind) -> Vec<String> {
 
 #[test]
 fn acp_text_stream_start_new_message_splits_adjacent_logical_outputs() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     unsafe {
@@ -457,8 +455,7 @@ fn acp_text_stream_start_new_message_splits_adjacent_logical_outputs() {
 
 #[test]
 fn acp_text_stream_continue_appends_within_stable_identity() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     unsafe {
@@ -495,8 +492,7 @@ fn acp_text_stream_continue_appends_within_stable_identity() {
 
 #[test]
 fn acp_text_stream_start_new_message_preserves_blank_line_splitting() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     unsafe {
@@ -527,8 +523,7 @@ fn acp_text_stream_start_new_message_preserves_blank_line_splitting() {
 
 #[test]
 fn acp_text_stream_boundary_finalizes_live_message_before_next_live_message() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     unsafe {
@@ -571,8 +566,7 @@ fn acp_text_stream_boundary_finalizes_live_message_before_next_live_message() {
 
 #[test]
 fn acp_text_stream_tool_call_boundaries_isolate_thought_and_agent_text() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     unsafe {
@@ -640,8 +634,7 @@ fn acp_text_stream_tool_call_boundaries_isolate_thought_and_agent_text() {
 
 #[test]
 fn acp_text_stream_one_logical_output_persists_one_sequence_without_duplicates() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     unsafe {
@@ -679,8 +672,7 @@ fn acp_session_update_fixture_path_merges_adjacent_no_identity_chunks() {
     // the live buffer is finalized at prompt-turn end. Splitting one
     // streamed response into one persisted message per chunk would be the
     // bug this test guards against.
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     unsafe {
@@ -741,8 +733,7 @@ fn acp_session_update_fixture_path_splits_no_identity_chunks_around_tool_call() 
     // chunk is tagged `StartNewMessage`. The fixture path therefore persists
     // the two AgentText blocks separately even though neither chunk carried
     // a message id.
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     unsafe {
@@ -808,8 +799,7 @@ fn acp_text_stream_persists_one_message_per_finalized_block_plus_live_text() {
     // total of N=4 finalized boundaries plus a final live remainder, then
     // asserts both the persisted count (5) and that every block landed as a
     // distinct Message in arrival order.
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     unsafe {
@@ -873,8 +863,7 @@ fn acp_text_stream_keeps_agent_and_thought_streams_separate_across_turn_finish()
     // ready blocks plus live remainders. Verifies that finalizing one stream
     // does not consume blocks from the other and that no ready block is
     // swallowed by the turn boundary.
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     unsafe {
@@ -944,8 +933,7 @@ fn acp_text_stream_keeps_agent_and_thought_streams_separate_across_turn_finish()
 
 #[test]
 fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     unsafe {
@@ -1065,8 +1053,7 @@ fn run_child_with_timeout_propagates_spawn_failure() {
 }
 
 fn with_test_env<T>(repo_dir: &Path, vars: &[(&str, Option<String>)], f: impl FnOnce() -> T) -> T {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let previous_dir = std::env::current_dir().expect("cwd");
     let previous_vars = vars
         .iter()
@@ -1205,4 +1192,3 @@ fn launch_noninteractive_bails_when_acp_cli_is_missing() {
         },
     );
 }
-

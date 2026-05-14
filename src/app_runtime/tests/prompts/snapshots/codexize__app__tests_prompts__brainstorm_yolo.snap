@@ -64,7 +64,7 @@ Spec structure reminder — include this stub exactly, even if empty:
     ## Out of scope
     <!-- Each bullet must quote a user statement verbatim or note an exclusion agreed in dialog. Never invent exclusions; pick the narrowest reading and record it under `## Assumptions made without user input` if uncertain. -->
 
-Outputs (all under artifacts/, SPEC-ONLY phase — no code, no VCS):
+Outputs (all under artifacts/, SPEC-ONLY stage — no code, no VCS):
   1. /tmp/codexize-prompt-fixture/session/artifacts/spec.md — the design doc. Start with a TL;DR (3–6 bullets a lazy
      reader can skim in 30 sec), then the full spec.
   2. /tmp/codexize-prompt-fixture/session/artifacts/session_summary.toml — TOML with `title = "<≤80 chars naming the actual
@@ -91,7 +91,7 @@ Optional escape hatches (RARE — omit if uncertain):
         rationale = "<≤500 chars why>"
 
 Hard rules:
-  - No VCS mutations; files stay untracked, a later phase commits.
+  - No VCS mutations; files stay untracked, a later stage commits.
   - Don't ask whether to continue or run follow-up skills. When files are
     written, STOP — the orchestrator drives stage transitions.
 Project Memory:

@@ -3,7 +3,7 @@ use crate::app::prompts::brainstorm_prompt;
 use crate::app::{App, guard};
 use crate::artifacts::{ArtifactKind, SkipToImplProposal};
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, Phase};
+use crate::state::{self as session_state, Stage};
 use anyhow::Result;
 impl App {
     pub(crate) fn launch_brainstorm(&mut self, idea: String) {
@@ -19,10 +19,10 @@ impl App {
             return false;
         }
         let modes = self.state.launch_modes();
-        let phase = Self::phase_for_stage("brainstorm");
-        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let stage = Self::selection_stage_for_stage("brainstorm");
+        let effort = modes.effort_for(EffortLevel::Normal, stage);
         let Some(chosen) =
-            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+            self.choose_primary_model(override_model.as_ref(), stage, effort, modes.cheap)
         else {
             self.record_agent_error(
                 "no model available with quota — check model strip".to_string(),
@@ -134,7 +134,7 @@ impl App {
         match launch_result {
             Ok(()) => {
                 session_state::record_brainstorm_launch(&mut self.state, idea, model.clone());
-                self.transition_to_phase_logged(Phase::BrainstormRunning);
+                self.transition_to_stage_logged(Stage::BrainstormRunning);
                 self.start_run_tracking(
                     run_id,
                     "brainstorm",
@@ -160,7 +160,7 @@ impl App {
             }
         }
     }
-    /// Co-located success-finalization for `Phase::BrainstormRunning`.
+    /// Co-located success-finalization for `Stage::BrainstormRunning`.
     ///
     /// Reads the optional `skip_proposal.toml` and `session_summary.toml`
     /// artifacts, marks the run done, and routes the pipeline to either
@@ -211,10 +211,10 @@ impl App {
         match proposal {
             Some(p) if p.proposed => {
                 session_state::record_skip_to_impl_proposal(&mut self.state, p.rationale, p.status);
-                self.transition_to_phase(Phase::SkipToImplPending)?;
+                self.transition_to_stage(Stage::SkipToImplPending)?;
             }
             _ => {
-                self.transition_to_phase(Phase::SpecReviewRunning)?;
+                self.transition_to_stage(Stage::SpecReviewRunning)?;
             }
         }
         Ok(())

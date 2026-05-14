@@ -1,6 +1,6 @@
 #[cfg(test)]
 use crate::app::ModelRefreshState;
-use crate::state::{NodeStatus, Phase, RunRecord, RunStatus};
+use crate::state::{NodeStatus, RunRecord, RunStatus, Stage};
 use chrono::Offset;
 use ratatui::{
     Frame,
@@ -135,7 +135,7 @@ impl App {
                 self.input_mode
             });
         let keymap_line = keymap(
-            self.state.current_phase,
+            self.state.current_stage,
             modal,
             caps,
             input_surface_active || split_owns_input,
@@ -244,7 +244,7 @@ impl App {
             let inner_w = dialog_w.saturating_sub(2);
             let content = self.modal_content_lines(m, inner_w);
             let modal_keymap = keymap(
-                self.state.current_phase,
+                self.state.current_stage,
                 Some(m),
                 caps,
                 false,
@@ -415,25 +415,25 @@ impl App {
         {
             let agent = &run.window_name;
             let summary = if self.live_summary_cached_text.is_empty() {
-                self.state.current_phase.label()
+                self.state.current_stage.label()
             } else {
                 extract_short_title(&self.live_summary_cached_text)
             };
             return format!("{} · {}", agent, summary);
         }
-        let label = self.state.current_phase.label();
-        let state_label = self.phase_state_label();
+        let label = self.state.current_stage.label();
+        let state_label = self.stage_state_label();
         format!("{} · {}", label, state_label)
     }
-    fn phase_state_label(&self) -> &'static str {
+    fn stage_state_label(&self) -> &'static str {
         if self.state.agent_error.is_some() {
             return "error";
         }
-        match self.state.current_phase {
-            Phase::IdeaInput | Phase::BlockedNeedsUser => "awaiting input",
-            Phase::SpecReviewPaused | Phase::PlanReviewPaused => "paused",
-            Phase::SkipToImplPending | Phase::GitGuardPending => "awaiting input",
-            Phase::Done => "done",
+        match self.state.current_stage {
+            Stage::IdeaInput | Stage::BlockedNeedsUser => "awaiting input",
+            Stage::SpecReviewPaused | Stage::PlanReviewPaused => "paused",
+            Stage::SkipToImplPending | Stage::GitGuardPending => "awaiting input",
+            Stage::Done => "done",
             _ => "running",
         }
     }

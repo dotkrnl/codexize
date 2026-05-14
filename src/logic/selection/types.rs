@@ -51,9 +51,9 @@ pub struct QuotaError {
     pub subscription: SubscriptionKind,
     pub message: String,
 }
-/// Origin of the per-phase rank scores carried on a model.
+/// Origin of the per-stage rank scores carried on a model.
 ///
-/// `Ipbr` is the only value that authorizes automatic phase selection or
+/// `Ipbr` is the only value that authorizes automatic stage selection or
 /// any selection-affecting ordering. `None` marks the unranked state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -61,19 +61,19 @@ pub enum ScoreSource {
     /// No score data is associated with this model.
     #[default]
     None,
-    /// Per-phase ipbr rank scores are authoritative for ranking and
+    /// Per-stage ipbr rank scores are authoritative for ranking and
     /// selection.
     Ipbr,
 }
-/// Per-phase ipbr rank scores. Each field corresponds to one ipbr
+/// Per-stage ipbr rank scores. Each field corresponds to one ipbr
 /// scoreboard column: Idea = `i_adj`, Planning = `p_adj`, Build = `b_adj`,
 /// Review = `r`.
 ///
-/// `None` means the matched ipbr row did not provide that phase score, in
+/// `None` means the matched ipbr row did not provide that stage score, in
 /// which case selection MUST exclude the model from auto-selection for
-/// that phase rather than backfilling from any other source.
+/// that stage rather than backfilling from any other source.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
-pub struct IpbrPhaseScores {
+pub struct IpbrStageScores {
     pub idea: Option<f64>,
     pub planning: Option<f64>,
     pub build: Option<f64>,
@@ -123,7 +123,6 @@ impl Candidate {
         }
         None
     }
-
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelRow {
@@ -131,10 +130,10 @@ pub struct ModelRow {
     /// authoritative for launch-time decisions.
     pub subscription: SubscriptionKind,
     pub name: String,
-    /// Per-phase ipbr rank scores. `None` per phase means the matched
-    /// ipbr row did not provide that phase score.
-    pub ipbr_phase_scores: IpbrPhaseScores,
-    /// Where the per-phase rank scores came from. Defaults to
+    /// Per-stage ipbr rank scores. `None` per stage means the matched
+    /// ipbr row did not provide that stage score.
+    pub ipbr_stage_scores: IpbrStageScores,
+    /// Where the per-stage rank scores came from. Defaults to
     /// `ScoreSource::None`. Selection MUST treat anything other than
     /// `Ipbr` as unranked.
     pub score_source: ScoreSource,

@@ -7,8 +7,8 @@
 //! with load/save/log helpers.
 use crate::adapters::EffortLevel;
 use crate::data::config::schema::EffortMapping;
-use crate::logic::pipeline::phase::Phase;
-use crate::logic::selection::SelectionPhase;
+use crate::logic::pipeline::stage::Stage;
+use crate::logic::selection::SelectionStage;
 use crate::state::BuilderState;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};
@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     pub timestamp: String,
-    pub phase: Phase,
+    pub stage: Stage,
     pub message: String,
 }
 /// Coarse provenance for a `BlockedNeedsUser` transition.
@@ -46,7 +46,7 @@ pub enum BlockOrigin {
 impl BlockOrigin {
     /// Map a `RunRecord.stage` string to its block origin.
     /// Returns `None` for unrecognized stages so callers can fall back to a
-    /// safer value (typically the originating phase). The accepted strings
+    /// safer value (typically the originating stage). The accepted strings
     /// match what `start_run_tracking` writes into `agent_runs`, not the
     /// `StageIO::stage` identifiers (which differ for several stages).
     pub fn for_stage(stage: &str) -> Option<Self> {
@@ -103,10 +103,10 @@ impl Modes {
     }
 }
 impl LaunchModes {
-    pub fn effort_for(self, requested: EffortLevel, phase: SelectionPhase) -> EffortLevel {
+    pub fn effort_for(self, requested: EffortLevel, stage: SelectionStage) -> EffortLevel {
         if self.cheap {
             EffortLevel::Low
-        } else if matches!(phase, SelectionPhase::Idea | SelectionPhase::Planning) {
+        } else if matches!(stage, SelectionStage::Idea | SelectionStage::Planning) {
             EffortLevel::Tough
         } else {
             requested
@@ -353,7 +353,7 @@ pub struct SessionState {
     pub modes: Modes,
     #[serde(default)]
     pub agent_runs: Vec<RunRecord>,
-    pub current_phase: Phase,
+    pub current_stage: Stage,
     #[serde(default)]
     pub idea_text: Option<String>,
     /// Operator-facing session title — set by the brainstormer once the spec
@@ -400,12 +400,12 @@ pub struct SessionState {
     /// matches the baseline definition.
     #[serde(default)]
     pub planned_after_session_id: Option<String>,
-    /// Slim lifecycle phase the agent was paused at when the operator issued
+    /// Slim lifecycle stage the agent was paused at when the operator issued
     /// `:stop`. Persisted so the scheduler doesn't relaunch the same stage
     /// immediately after a TUI restart. `None` outside `:stop`-then-`Idle`
     /// transitions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub paused_at_phase: Option<crate::lifecycle::Phase>,
+    pub paused_at_stage: Option<crate::lifecycle::Stage>,
     /// Operator-decision slots used by the slim lifecycle. Persisted so a
     /// modal raised by a prior TUI invocation survives a restart.
     #[serde(
@@ -421,7 +421,7 @@ impl SessionState {
             schema_version: 4,
             modes: Modes::default(),
             agent_runs: Vec::new(),
-            current_phase: Phase::IdeaInput,
+            current_stage: Stage::IdeaInput,
             idea_text: None,
             title: None,
             selected_model: None,
@@ -438,7 +438,7 @@ impl SessionState {
             block_origin: None,
             dreaming_decision: None,
             planned_after_session_id: None,
-            paused_at_phase: None,
+            paused_at_stage: None,
             pending_decisions: crate::lifecycle::PendingDecisions::default(),
         }
     }

@@ -32,8 +32,8 @@ use crate::{
     data::config::schema::EffortMapping,
     selection::{
         CachedModel, CliKind, SubscriptionKind,
-        config::SelectionPhase,
-        selection::{pick_for_phase_with_effort, select_for_review_with_effort},
+        config::SelectionStage,
+        selection::{pick_for_stage_with_effort, select_for_review_with_effort},
     },
     state::{
         self as session_state, LaunchModes, Message, MessageKind, MessageSender, SessionState,
@@ -127,7 +127,7 @@ impl App {
     pub(crate) fn choose_primary_model(
         &mut self,
         override_model: Option<&CachedModel>,
-        phase: SelectionPhase,
+        stage: SelectionStage,
         effort: EffortLevel,
         cheap: bool,
     ) -> Option<StagePick> {
@@ -143,7 +143,7 @@ impl App {
                 effort_eligible,
             ));
         }
-        let outcome = pick_for_phase_with_effort(&self.models, phase, None, effort, cheap)?;
+        let outcome = pick_for_stage_with_effort(&self.models, stage, None, effort, cheap)?;
         let (cli, launch_name, effort_mapping, effort_eligible) =
             pick_cli_and_launch_name(outcome.model);
         let picked = (
@@ -287,7 +287,7 @@ impl App {
         self.run_launched = true;
         // Mirror the launch into the lifecycle FSM so operator paths
         // (:stop / :restart) observe a Running state. Errors are logged;
-        // the legacy phase remains authoritative for persistence.
+        // the persisted stage remains authoritative for persistence.
         if let Some(stage_id) = crate::lifecycle::stage_id_for_run(stage, &run.window_name) {
             let spec = crate::lifecycle::StageSpec {
                 stage_id,

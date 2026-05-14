@@ -1,5 +1,5 @@
 use super::super::{App, ExpansionOverride};
-use crate::state::{NodeStatus, Phase};
+use crate::state::{NodeStatus, Stage};
 use crossterm::event::{KeyCode, KeyEvent};
 impl App {
     pub(crate) fn handle_input_key(&mut self, key: KeyEvent) -> bool {
@@ -46,7 +46,7 @@ impl App {
                         self.input_mode = false;
                         return false;
                     }
-                    if self.state.current_phase == Phase::IdeaInput {
+                    if self.state.current_stage == Stage::IdeaInput {
                         self.input_buffer.clear();
                         self.input_cursor = 0;
                         self.input_mode = false;
@@ -128,7 +128,7 @@ impl App {
             .get(self.selected)
             .map(|row| row.key.clone());
         // Manual focus movement opts out of progress-follow until the next
-        // phase transition or run launch resets the boundary. No-ops at the
+        // stage transition or run launch resets the boundary. No-ops at the
         // top/bottom row do not actually change focus, so they leave the
         // follow flag alone.
         if self.selected != before {

@@ -1,20 +1,20 @@
 //! Pure planning scheduler for the lifecycle FSM.
 //!
 //! [`Scheduler::plan`] is the single decision point: given the agent FSM
-//! state, the current [`Phase`], operator gates, and a read-only
+//! state, the current [`Stage`], operator gates, and a read-only
 //! [`StageCtx`], it returns a [`TickOutcome`] describing what the caller
 //! should do next. The function is **pure** — no IO, no FSM mutation —
 //! which keeps it trivial to unit-test with hand-built inputs.
 //!
 //! The caller (App) takes the returned [`StageSpec`] and decides
 //! whether to actually invoke [`Fsm::start`](super::Fsm::start). This
-//! separation lets project-lane gating, paused-phase gating, and pending
+//! separation lets project-lane gating, paused-stage gating, and pending
 //! decisions all coexist in one place without leaking back into the FSM.
 use super::fsm::AgentState;
 use super::pending::PendingDecisions;
-use super::phase::Phase;
 use super::spec::StageSpec;
 use super::stage::{StageCtx, StageRegistry};
+use super::stage_state::Stage;
 
 /// Why a tick produced no dispatch decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,15 +22,15 @@ pub enum BlockReason {
     /// The FSM is not [`AgentState::Idle`] — a launch is already in flight,
     /// running, or stopping.
     AgentBusy,
-    /// The operator paused this session at exactly its current phase.
+    /// The operator paused this session at exactly its current stage.
     Paused,
-    /// A [`PendingDecisions`] slot blocks the current phase.
+    /// A [`PendingDecisions`] slot blocks the current stage.
     PendingDecision,
     /// The project-lane gate (cross-session) denied the dispatch — typically
     /// because another session in the implementation lane is already
     /// running.
     ProjectLane,
-    /// The session phase is [`Phase::Done`] or [`Phase::Cancelled`]; the
+    /// The session stage is [`Stage::Done`] or [`Stage::Cancelled`]; the
     /// pipeline cannot advance further.
     Terminal,
 }
@@ -38,7 +38,7 @@ pub enum BlockReason {
 /// What a single [`Scheduler::plan`] call decided.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TickOutcome {
-    /// Nothing to launch right now — the phase is awaiting operator input
+    /// Nothing to launch right now — the stage is awaiting operator input
     /// or every candidate stage has no pending work.
     Idle,
     /// A gate prevented dispatching. The variant carries which gate.
@@ -53,11 +53,11 @@ pub enum TickOutcome {
 pub struct TickInput<'a> {
     /// Current FSM state. Only [`AgentState::Idle`] is dispatchable.
     pub agent: &'a AgentState,
-    /// Active lifecycle phase.
-    pub phase: Phase,
-    /// Operator-paused phase, if any. The session is paused only when the
-    /// current phase matches.
-    pub paused_at_phase: Option<Phase>,
+    /// Active lifecycle stage.
+    pub stage: Stage,
+    /// Operator-paused stage, if any. The session is paused only when the
+    /// current stage matches.
+    pub paused_at_stage: Option<Stage>,
     /// Pending operator-decision slots, consulted via
     /// [`PendingDecisions::blocks`].
     pub pending_decisions: &'a PendingDecisions,
@@ -100,23 +100,23 @@ impl Scheduler {
     /// Block precedence (highest priority first):
     /// 1. [`BlockReason::AgentBusy`] — a launch/run/stop is already in
     ///    flight; nothing else matters until the FSM clears.
-    /// 2. [`BlockReason::Terminal`] — the phase is unreachable.
+    /// 2. [`BlockReason::Terminal`] — the stage is unreachable.
     /// 3. [`BlockReason::Paused`] — operator paused this session here.
     /// 4. [`BlockReason::PendingDecision`] — a modal is open.
     /// 5. [`BlockReason::ProjectLane`] — cross-session gate denied us.
     ///
     /// After the gates clear, the registry resolves a stage and the
     /// stage builds a spec. The result is [`TickOutcome::Idle`] when the
-    /// phase has no candidate with pending work (e.g. a stage just
-    /// finished and the FSM hasn't bumped the phase yet).
+    /// stage has no candidate with pending work (e.g. a stage just
+    /// finished and the FSM hasn't bumped the stage yet).
     pub fn plan(&self, input: TickInput<'_>) -> TickOutcome {
         if !matches!(input.agent, AgentState::Idle) {
             return TickOutcome::Blocked(BlockReason::AgentBusy);
         }
-        if input.phase.is_terminal() {
+        if input.stage.is_terminal() {
             return TickOutcome::Blocked(BlockReason::Terminal);
         }
-        if input.paused_at_phase == Some(input.phase) {
+        if input.paused_at_stage == Some(input.stage) {
             return TickOutcome::Blocked(BlockReason::Paused);
         }
         if input.pending_decisions.blocks() {
@@ -126,14 +126,14 @@ impl Scheduler {
             return TickOutcome::Blocked(BlockReason::ProjectLane);
         }
 
-        let Some(stage_id) = self.registry.next_stage_for_phase(input.phase, &input.ctx) else {
+        let Some(stage_id) = self.registry.next_stage_for_stage(input.stage, &input.ctx) else {
             return TickOutcome::Idle;
         };
         let stage = self
             .registry
             .get(stage_id)
-            .expect("registry contract: id from next_stage_for_phase is registered");
-        // `next_stage_for_phase` already filtered by `next_pending_work` —
+            .expect("registry contract: id from next_stage_for_stage is registered");
+        // `next_stage_for_stage` already filtered by `next_pending_work` —
         // re-checking here would be redundant. Build the spec directly.
         TickOutcome::Dispatch(stage.build_spec(&input.ctx))
     }

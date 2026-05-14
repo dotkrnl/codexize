@@ -3,14 +3,14 @@ use super::{
 };
 use crate::app::App;
 use crate::app::tree::node_at_path;
-use crate::lifecycle::{LifecycleOps, Phase as SlimPhase};
-use crate::state::{self as session_state, NodeKind, Phase};
+use crate::lifecycle::{LifecycleOps, Stage as SlimStage};
+use crate::state::{self as session_state, NodeKind, Stage};
 use std::time::Duration;
 
 /// Map the operator-visible [`crate::app::StageId`] modal target to
 /// the lifecycle-internal [`crate::lifecycle::StageId`] used by the stage
 /// registry. These values are intentionally stage-error targets, not slim
-/// phases: multiple concrete lifecycle stages share a phase, but a retry
+/// stages: multiple concrete lifecycle stages share a stage, but a retry
 /// from the modal must relaunch the stage that actually failed.
 fn lifecycle_stage_id_from_view(view: crate::app::StageId) -> crate::lifecycle::StageId {
     use crate::app::StageId as V;
@@ -41,13 +41,13 @@ impl App {
     /// from the stage's `build_spec`, and dispatch via
     /// [`App::dispatch_start`]. Going through `dispatch_start` (rather
     /// than the scheduler tick) keeps the modal's stage choice
-    /// authoritative — slim `Phase::Finalization` covers both
+    /// authoritative — slim `Stage::Finalization` covers both
     /// FinalValidation and Dreaming, so `Scheduler::plan` would otherwise
     /// pick FinalValidation first even when the operator clicked "retry"
     /// on the dreaming modal.
     pub(crate) fn retry_failed_stage(&mut self, view_stage_id: crate::app::StageId) {
         let stage_id = lifecycle_stage_id_from_view(view_stage_id);
-        let spec = self.with_lifecycle_stage_ctx(self.slim_phase, |ctx| {
+        let spec = self.with_lifecycle_stage_ctx(self.slim_stage, |ctx| {
             self.scheduler
                 .registry()
                 .get(stage_id)
@@ -103,11 +103,11 @@ impl App {
             );
             return;
         };
-        let target_phase = match target {
-            RetryTarget::Task(task_id) => slim_phase_for_task_retry(task_id, &self.state),
-            RetryTarget::Stage(stage) => slim_phase_for_stage_retry(stage),
+        let target_stage = match target {
+            RetryTarget::Task(task_id) => slim_stage_for_task_retry(task_id, &self.state),
+            RetryTarget::Stage(stage) => slim_stage_for_stage_retry(stage),
         };
-        self.run_lifecycle_op("retry", |ctx| LifecycleOps::rewind(ctx, target_phase));
+        self.run_lifecycle_op("retry", |ctx| LifecycleOps::rewind(ctx, target_stage));
     }
     pub(crate) fn go_back(&mut self) {
         // Pending decisions are the legitimate exit path — go_back is a
@@ -115,7 +115,7 @@ impl App {
         if self.pending_decisions.blocks() {
             return;
         }
-        let Some(mut target) = self.slim_phase.previous() else {
+        let Some(mut target) = self.slim_stage.previous() else {
             self.push_status(
                 "nothing to go back to".to_string(),
                 Severity::Warn,
@@ -126,50 +126,53 @@ impl App {
         // Implementation(1) has two predecessors depending on whether the
         // operator skipped spec / planning via the skip-to-impl path:
         //   - skip_to_impl_rationale set → rewind all the way to Idea (the
-        //     slim phase brainstorm runs at; FSM will re-offer the modal).
-        //   - otherwise → Plan, and the legacy `reset_builder_after_rewind`
+        //     slim stage brainstorm runs at; FSM will re-offer the modal).
+        //   - otherwise → Plan, and the persisted `reset_builder_after_rewind`
         //     state mutator must fire to clear the pipeline.
-        if matches!(self.slim_phase, SlimPhase::Implementation(1)) {
+        if matches!(self.slim_stage, SlimStage::Implementation(1)) {
             if self.state.skip_to_impl_rationale.is_some() {
-                target = SlimPhase::Idea;
+                target = SlimStage::Idea;
             } else {
                 session_state::reset_builder_after_rewind(&mut self.state);
             }
         }
-        // Rewinding away from a phase that owns the skip-to-impl proposal
-        // must clear the proposal too. The legacy go_back's SkipToImplPending
+        // Rewinding away from a stage that owns the skip-to-impl proposal
+        // must clear the proposal too. The persisted go_back's SkipToImplPending
         // branch did this inline; preserve it here so the modal doesn't
         // re-fire after a rewind to brainstorm.
-        if self.state.current_phase == Phase::SkipToImplPending {
+        if self.state.current_stage == Stage::SkipToImplPending {
             session_state::clear_skip_to_impl_proposal(&mut self.state);
         }
         self.run_lifecycle_op("back", |ctx| LifecycleOps::rewind(ctx, target));
     }
 }
 
-/// Slim phase to rewind to when the operator retries a specific task.
-pub(crate) fn slim_phase_for_task_retry(task_id: u32, state: &crate::state::SessionState) -> SlimPhase {
+/// Slim stage to rewind to when the operator retries a specific task.
+pub(crate) fn slim_stage_for_task_retry(
+    task_id: u32,
+    state: &crate::state::SessionState,
+) -> SlimStage {
     let max_round = state
         .agent_runs
         .iter()
         .filter(|run| run.task_id == Some(task_id))
         .map(|run| run.round)
         .max();
-    let phase_round = match state.current_phase {
-        Phase::ImplementationRound(r) | Phase::ReviewRound(r) => Some(r),
-        Phase::BuilderRecovery(r)
-        | Phase::BuilderRecoveryPlanReview(r)
-        | Phase::BuilderRecoverySharding(r) => Some(r),
+    let stage_round = match state.current_stage {
+        Stage::ImplementationRound(r) | Stage::ReviewRound(r) => Some(r),
+        Stage::BuilderRecovery(r)
+        | Stage::BuilderRecoveryPlanReview(r)
+        | Stage::BuilderRecoverySharding(r) => Some(r),
         _ => None,
     };
-    let round = max_round.or(phase_round).unwrap_or(1);
-    SlimPhase::Implementation(round)
+    let round = max_round.or(stage_round).unwrap_or(1);
+    SlimStage::Implementation(round)
 }
 
-/// Slim phase to rewind to when the operator retries a stage by name.
-pub(crate) fn slim_phase_for_stage_retry(stage: &str) -> SlimPhase {
-    use crate::logic::rules::retry_phase_for_stage;
-    retry_phase_for_stage(stage)
-        .map(|p| p.to_slim_phase())
-        .unwrap_or(SlimPhase::Plan)
+/// Slim stage to rewind to when the operator retries a stage by name.
+pub(crate) fn slim_stage_for_stage_retry(stage: &str) -> SlimStage {
+    use crate::logic::rules::retry_stage_for_stage;
+    retry_stage_for_stage(stage)
+        .map(|p| p.to_slim_stage())
+        .unwrap_or(SlimStage::Plan)
 }

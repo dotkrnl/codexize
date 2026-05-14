@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     artifacts::{ArtifactKind, RecoveryArtifact, ReviewStatus},
-    state::{self as session_state, LaunchModes, Phase, RunRecord},
+    state::{self as session_state, LaunchModes, RunRecord, Stage},
     tasks,
 };
 use std::time::Duration;
@@ -36,9 +36,9 @@ impl App {
         );
     }
     pub(crate) fn live_yolo_paused_gate(&self) -> Option<&'static str> {
-        match self.state.current_phase {
-            Phase::SpecReviewPaused => Some("spec_approval"),
-            Phase::PlanReviewPaused => Some("plan_approval"),
+        match self.state.current_stage {
+            Stage::SpecReviewPaused => Some("spec_approval"),
+            Stage::PlanReviewPaused => Some("plan_approval"),
             _ => None,
         }
     }
@@ -118,11 +118,11 @@ impl App {
         if !self.state.modes.yolo {
             return;
         }
-        match self.state.current_phase {
-            Phase::SpecReviewPaused => {
+        match self.state.current_stage {
+            Stage::SpecReviewPaused => {
                 self.auto_approve_spec_review_pause("spec_approval");
             }
-            Phase::PlanReviewPaused => {
+            Stage::PlanReviewPaused => {
                 self.auto_approve_plan_review_pause("plan_approval");
             }
             _ => {}
@@ -137,7 +137,7 @@ impl App {
             self.pending_yolo_toggle_gate = None;
         }
         self.clear_agent_error();
-        self.transition_to_phase_logged(Phase::PlanningRunning);
+        self.transition_to_stage_logged(Stage::PlanningRunning);
     }
     pub(crate) fn auto_approve_plan_review_pause(&mut self, gate: &'static str) {
         self.log_yolo_auto_approved(gate);
@@ -152,7 +152,7 @@ impl App {
         // Spec §Data model line 96: yolo auto-approval lands in
         // `WaitingToImplement`; the queue scheduler then dispatches into
         // sharding (directly or via repo-state update).
-        self.transition_to_phase_logged(Phase::WaitingToImplement);
+        self.transition_to_stage_logged(Stage::WaitingToImplement);
     }
     pub(crate) fn record_dirty_worktree_yolo_gate(&mut self, dirty: bool, modes: LaunchModes) {
         if dirty && modes.yolo {

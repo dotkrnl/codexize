@@ -3,8 +3,8 @@
 //! [`Fsm`] enforces legal transitions between [`AgentState`] variants. It is
 //! intentionally storage-free — nothing here touches disk. The app mirrors
 //! FSM state into the existing session persistence layer.
-use super::phase::Phase;
 use super::spec::{ActiveRun, StageSpec};
+use super::stage_state::Stage;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -51,11 +51,11 @@ pub enum AgentState {
 /// Mutated in place by [`Fsm::request_stop`] when a second stop request
 /// arrives mid-shutdown — see the precedence rules on that method.
 ///
-/// `Rewind` carries an optional `spec` (None when the target phase has no
-/// next stage to schedule, e.g., rewinding to [`Phase::Idea`]), the
+/// `Rewind` carries an optional `spec` (None when the target stage has no
+/// next stage to schedule, e.g., rewinding to [`Stage::Idea`]), the
 /// [`CleanupPlan`] to apply once the run is dead, and a `clear_pending` flag
 /// so the caller's confirm-dead handler can drop pending decisions that no
-/// longer apply at the rewound phase.
+/// longer apply at the rewound stage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AfterStop {
     /// Plain stop. The FSM returns to [`AgentState::Idle`].
@@ -63,18 +63,18 @@ pub enum AfterStop {
     /// Restart the same stage with `attempt + 1`. The FSM transitions to
     /// [`AgentState::Starting`] with the supplied [`StageSpec`].
     Restart { spec: StageSpec },
-    /// Roll the session [`Phase`] back to `target`, then start the supplied
-    /// spec (if any). The actual phase rewind, file cleanup, and pending-
+    /// Roll the session [`Stage`] back to `target`, then start the supplied
+    /// spec (if any). The actual stage rewind, file cleanup, and pending-
     /// decision pruning live outside the FSM; this variant records the
     /// operator's intent so the resolution carries everything back to the
     /// caller's confirm-dead handler.
     Rewind {
-        target: Phase,
+        target: Stage,
         spec: Option<StageSpec>,
         cleanup: CleanupPlan,
         clear_pending: bool,
     },
-    /// Mark the session [`Phase::Cancelled`]. Once requested, this outcome
+    /// Mark the session [`Stage::Cancelled`]. Once requested, this outcome
     /// cannot be downgraded — see [`Fsm::request_stop`].
     Cancel,
 }
@@ -92,7 +92,10 @@ pub enum Outcome {
     Done,
     Failed(String),
     FailedUnverified(String),
-    Cancelled { by: CancelledBy, reason: String },
+    Cancelled {
+        by: CancelledBy,
+        reason: String,
+    },
     /// Backfilled on resume when the TUI crashed mid-run and we cannot tell
     /// whether the agent actually succeeded.
     Aborted,
@@ -169,9 +172,9 @@ impl Fsm {
                 self.state = AgentState::Starting { spec };
                 Ok(())
             }
-            AgentState::Starting { .. } | AgentState::Running { .. } | AgentState::Stopping { .. } => {
-                Err(FsmError::AlreadyActive)
-            }
+            AgentState::Starting { .. }
+            | AgentState::Running { .. }
+            | AgentState::Stopping { .. } => Err(FsmError::AlreadyActive),
         }
     }
 
@@ -225,7 +228,10 @@ impl Fsm {
                     // Latest non-Cancel request replaces the previous.
                     (_, next) => next,
                 };
-                self.state = AgentState::Stopping { run, after: resolved };
+                self.state = AgentState::Stopping {
+                    run,
+                    after: resolved,
+                };
                 Ok(())
             }
         }
@@ -241,18 +247,18 @@ impl Fsm {
                     outcome: outcome.clone(),
                     ended_at: chrono::Utc::now(),
                 };
-                // Move the FSM to the appropriate follow-on state. The phase
+                // Move the FSM to the appropriate follow-on state. The stage
                 // rewind, file cleanup, and pending-decision pruning in
                 // `AfterStop::Rewind` are the caller's job; the FSM only sets
                 // itself up to launch the supplied spec next (when there is
-                // one — rewinding to a phase with no follow-on stage parks
+                // one — rewinding to a stage with no follow-on stage parks
                 // the FSM in [`AgentState::Idle`]).
                 self.state = match &after {
                     AfterStop::GoIdle | AfterStop::Cancel => AgentState::Idle,
                     AfterStop::Restart { spec } => AgentState::Starting { spec: spec.clone() },
-                    AfterStop::Rewind { spec: Some(spec), .. } => AgentState::Starting {
-                        spec: spec.clone(),
-                    },
+                    AfterStop::Rewind {
+                        spec: Some(spec), ..
+                    } => AgentState::Starting { spec: spec.clone() },
                     AfterStop::Rewind { spec: None, .. } => AgentState::Idle,
                 };
                 Ok(StopResolution {

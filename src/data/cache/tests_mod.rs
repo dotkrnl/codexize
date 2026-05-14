@@ -4,7 +4,7 @@ use tempfile::TempDir;
 fn sample_entries() -> Vec<DashboardEntry> {
     vec![DashboardEntry {
         name: "claude-sonnet".to_string(),
-        ipbr_phase_scores: IpbrPhaseScores::default(),
+        ipbr_stage_scores: IpbrStageScores::default(),
         score_source: ScoreSource::None,
         display_order: 0,
     }]
@@ -112,7 +112,7 @@ fn non_current_cache_version_is_ignored() {
             "fetched_at": now_secs(),
             "data": [{
                 "name": "claude-opus-4.7",
-                "ipbr_phase_scores": {"idea": 91.0, "planning": 90.0, "build": 89.0, "review": 88.0},
+                "ipbr_stage_scores": {"idea": 91.0, "planning": 90.0, "build": 89.0, "review": 88.0},
                 "score_source": "ipbr",
                 "display_order": 0,
             }]
@@ -180,7 +180,7 @@ fn save_after_version_mismatch_rewrites_at_current_version() {
 
 /// A current-version dashboard entry that omits ipbr fields (e.g.
 /// from a fresh save before ipbr scores are attached) loads with
-/// per-phase scores defaulting to `None` and the provenance to a
+/// per-stage scores defaulting to `None` and the provenance to a
 /// non-`Ipbr` value, so missing data cannot masquerade as ipbr authority.
 #[test]
 fn entry_missing_ipbr_fields_defaults_to_unscored_non_ipbr() {
@@ -211,11 +211,11 @@ fn entry_missing_ipbr_fields_defaults_to_unscored_non_ipbr() {
         .next()
         .expect("entry should round-trip");
 
-    assert_eq!(entry.ipbr_phase_scores, IpbrPhaseScores::default());
-    assert_eq!(entry.ipbr_phase_scores.idea, None);
-    assert_eq!(entry.ipbr_phase_scores.planning, None);
-    assert_eq!(entry.ipbr_phase_scores.build, None);
-    assert_eq!(entry.ipbr_phase_scores.review, None);
+    assert_eq!(entry.ipbr_stage_scores, IpbrStageScores::default());
+    assert_eq!(entry.ipbr_stage_scores.idea, None);
+    assert_eq!(entry.ipbr_stage_scores.planning, None);
+    assert_eq!(entry.ipbr_stage_scores.build, None);
+    assert_eq!(entry.ipbr_stage_scores.review, None);
     assert_ne!(
         entry.score_source,
         ScoreSource::Ipbr,
@@ -331,7 +331,7 @@ fn cache_file_writes_current_dashboard_entry_shape() {
         .expect("dashboard entry should be an object");
     assert_eq!(
         keys.keys().cloned().collect::<Vec<_>>(),
-        vec!["display_order", "ipbr_phase_scores", "name", "score_source"]
+        vec!["display_order", "ipbr_stage_scores", "name", "score_source"]
     );
 }
 

@@ -117,4 +117,3 @@ fn explicit_clear_allows_lower_severity_replacement() {
     let rendered = line.render().expect("info should render after clear");
     assert_eq!(rendered.to_string(), "info msg");
 }
-

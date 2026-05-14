@@ -15,8 +15,7 @@ use super::*;
 /// writes leak into the host repo's `.codexize/sessions/` directory.
 /// Serialized via `test_fs_lock` since env mutation is process-global.
 pub(crate) fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let prev_root = std::env::var_os("CODEXIZE_ROOT");
 
@@ -40,8 +39,7 @@ pub(crate) fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
 /// snapshot is independent of what's checked into the host repo. Serialized
 /// via `test_fs_lock` since chdir is process-global.
 pub(crate) fn with_temp_root_and_cwd<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
     let prev_root = std::env::var_os("CODEXIZE_ROOT");
     let prev_cwd = std::env::current_dir().ok();
@@ -69,7 +67,7 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
     let nodes = build_tree(&state);
     let current = current_node_index(&nodes);
     let selected_key = node_key_at_path(&nodes, &[current]);
-    let initial_slim_phase = state.current_phase.to_slim_phase();
+    let initial_slim_stage = state.current_stage.to_slim_stage();
     let mut app = App {
         state,
         nodes,
@@ -119,8 +117,8 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
         pending_shell_command: None,
         current_run_id: Some(2),
         fsm: crate::lifecycle::Fsm::new(),
-        slim_phase: initial_slim_phase,
-        paused_at_phase: None,
+        slim_stage: initial_slim_stage,
+        paused_at_stage: None,
         pending_decisions: crate::lifecycle::PendingDecisions::default(),
         scheduler: crate::lifecycle::Scheduler::new(crate::lifecycle::default_registry()),
         failed_models: HashMap::new(),

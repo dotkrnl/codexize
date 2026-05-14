@@ -1,7 +1,7 @@
 use super::super::palette::{self, PaletteCommand};
 use super::super::status_line::Severity;
 use super::super::{App, ModalKind, StageId};
-use crate::state::Phase;
+use crate::state::Stage;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::time::Duration;
 impl App {
@@ -59,7 +59,7 @@ impl App {
             commands.push(PaletteCommand {
                 name: "back",
                 aliases: &["b"],
-                help: "Rewind to the previous phase",
+                help: "Rewind to the previous stage",
                 key_hint: None,
             });
         }
@@ -339,7 +339,7 @@ impl App {
                 }
                 // Confirm + cancel + quit: the modal cancels the session via
                 // the lifecycle FSM (which kills the running agent and marks
-                // the phase Cancelled) and then signals the App loop to exit
+                // the stage Cancelled) and then signals the App loop to exit
                 // on the next tick.
                 self.run_lifecycle_op("cancel", crate::lifecycle::LifecycleOps::cancel);
                 self.pending_app_exit = true;
@@ -353,7 +353,7 @@ impl App {
         }
     }
     fn cancel_command_available(&self) -> bool {
-        !matches!(self.state.current_phase, Phase::Done | Phase::Cancelled)
+        !matches!(self.state.current_stage, Stage::Done | Stage::Cancelled)
     }
     fn open_cancel_session_modal(&mut self) {
         if !self.cancel_command_available() {
@@ -422,7 +422,7 @@ impl App {
                 // the specific stage the modal targets, then route through
                 // [`Self::dispatch_start`]. Going through `dispatch_start`
                 // (rather than `Scheduler::plan` + tick) keeps the modal's
-                // stage choice authoritative — slim `Phase::Finalization`
+                // stage choice authoritative — slim `Stage::Finalization`
                 // covers both FinalValidation and Dreaming, so a tick
                 // would dispatch FinalValidation first in a healthy
                 // session, but the modal's contract says "retry this
@@ -433,7 +433,7 @@ impl App {
                 false
             }
             KeyCode::Char('e') if stage_id == StageId::Brainstorm => {
-                self.transition_to_phase_logged(Phase::IdeaInput);
+                self.transition_to_stage_logged(Stage::IdeaInput);
                 false
             }
             KeyCode::Char('s') | KeyCode::Char('S') if stage_id == StageId::Dreaming => {
@@ -477,7 +477,7 @@ impl App {
                 // The runtime guard in data/persistence/transitions.rs verifies
                 // block_origin == FinalValidation; this transition stays a no-op
                 // for any other origin.
-                self.transition_to_phase_logged(Phase::Done);
+                self.transition_to_stage_logged(Stage::Done);
                 false
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {

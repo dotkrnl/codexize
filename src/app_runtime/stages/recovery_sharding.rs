@@ -2,7 +2,7 @@ use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::recovery_sharding_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, Phase};
+use crate::state::{self as session_state, Stage};
 use anyhow::Context;
 impl App {
     pub(crate) fn launch_recovery_sharding_with_model(
@@ -13,7 +13,7 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Phase::BuilderRecoverySharding(round) = self.state.current_phase else {
+        let Stage::BuilderRecoverySharding(round) = self.state.current_stage else {
             return false;
         };
         let session_dir = session_state::session_dir(&self.state.session_id);
@@ -28,10 +28,10 @@ impl App {
             .join("prompts")
             .join(format!("recovery-sharding-r{round}.md"));
         let modes = self.state.launch_modes();
-        let phase = Self::phase_for_stage("sharding");
-        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let stage = Self::selection_stage_for_stage("sharding");
+        let effort = modes.effort_for(EffortLevel::Normal, stage);
         let Some(chosen) =
-            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+            self.choose_primary_model(override_model.as_ref(), stage, effort, modes.cheap)
         else {
             self.record_agent_error("no model available with quota".to_string());
             self.save_state();

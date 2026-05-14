@@ -132,7 +132,7 @@ impl App {
             .collect();
         let next_model = select_excluding(
             &self.models,
-            Self::phase_for_stage(&failed_run.stage),
+            Self::selection_stage_for_stage(&failed_run.stage),
             &excluded,
             last_failed_vendor,
         );
@@ -154,8 +154,8 @@ impl App {
             // scheduler handles its baseline differently.
             let sharding_pause = matches!(failed_run.stage.as_str(), "sharding")
                 && !matches!(
-                    self.state.current_phase,
-                    crate::state::Phase::BuilderRecoverySharding(_),
+                    self.state.current_stage,
+                    crate::state::Stage::BuilderRecoverySharding(_),
                 );
             if sharding_pause {
                 self.clear_agent_error();
@@ -164,7 +164,7 @@ impl App {
                 self.live_summary_cached_text.clear();
                 self.live_summary_cached_mtime = None;
                 return self
-                    .transition_to_phase(crate::state::Phase::WaitingToImplement)
+                    .transition_to_stage(crate::state::Stage::WaitingToImplement)
                     .is_ok();
             }
             // Pin the model-fallback choice on the App so the next

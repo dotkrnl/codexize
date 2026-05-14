@@ -7,16 +7,16 @@
 use crate::{
     app::{App, AppStartupOrigin},
     lifecycle::{TickInput, TickOutcome},
-    state::Phase,
+    state::Stage,
 };
 impl App {
-    /// Auto-launch the agent for the current phase if it's a non-interactive
+    /// Auto-launch the agent for the current stage if it's a non-interactive
     /// one. Idempotent: no-op if a run is already launched, if models aren't
     /// loaded, or if the last run errored (user needs to intervene).
     ///
-    /// Routes the per-phase dispatch decision through
+    /// Routes the per-stage dispatch decision through
     /// [`crate::lifecycle::Scheduler::plan`]: this function builds a
-    /// [`TickInput`] from the App's slim phase and FSM state, hands it to
+    /// [`TickInput`] from the App's slim stage and FSM state, hands it to
     /// the scheduler, and dispatches the returned [`crate::lifecycle::StageSpec`]
     /// via [`Self::dispatch_start`]. The cross-session project-lane gate is
     /// enforced by the shell scheduler (see `app_shell::evaluate_tick`) so
@@ -33,24 +33,24 @@ impl App {
         }
         // The shell scheduler owns the WaitingToImplement → Sharding /
         // RepoStateUpdate decision via `decide_waiting_dispatch`; per-session
-        // auto-launch deliberately skips this phase so the baseline check
-        // runs first. The slim phase for WaitingToImplement is `Phase::Plan`
+        // auto-launch deliberately skips this stage so the baseline check
+        // runs first. The slim stage for WaitingToImplement is `Stage::Plan`
         // and `Scheduler::plan` would otherwise pick Sharding here.
-        if matches!(self.state.current_phase, Phase::WaitingToImplement) {
+        if matches!(self.state.current_stage, Stage::WaitingToImplement) {
             return;
         }
         // DreamingPending is the operator-decision modal. It is not yet
         // represented in PendingDecisions (pending_decisions.dreaming is
-        // never populated), so we still gate on the legacy phase.
-        if matches!(self.state.current_phase, Phase::DreamingPending) {
+        // never populated), so we still gate on the persisted stage.
+        if matches!(self.state.current_stage, Stage::DreamingPending) {
             return;
         }
 
-        let spec = self.with_lifecycle_stage_ctx(self.slim_phase, |stage_ctx| {
+        let spec = self.with_lifecycle_stage_ctx(self.slim_stage, |stage_ctx| {
             let input = TickInput {
                 agent: self.fsm.view(),
-                phase: self.slim_phase,
-                paused_at_phase: self.paused_at_phase,
+                stage: self.slim_stage,
+                paused_at_stage: self.paused_at_stage,
                 pending_decisions: &self.pending_decisions,
                 project_lane_allows: true,
                 ctx: stage_ctx,
@@ -70,9 +70,9 @@ impl App {
 mod tests {
     use crate::app::test_support::{mk_app, with_temp_root};
     use crate::logic::selection::{
-        CachedModel, Candidate, CliKind, IpbrPhaseScores, ScoreSource, SubscriptionKind,
+        CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind,
     };
-    use crate::state::{LaunchModes, Phase, RunRecord, RunStatus, SessionState};
+    use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState, Stage};
 
     fn cached_build_model(vendor: SubscriptionKind, name: &str) -> CachedModel {
         let candidate = Candidate {
@@ -95,7 +95,7 @@ mod tests {
         CachedModel {
             subscription: vendor,
             name: name.to_string(),
-            ipbr_phase_scores: IpbrPhaseScores {
+            ipbr_stage_scores: IpbrStageScores {
                 idea: Some(80.0),
                 planning: Some(80.0),
                 build: Some(80.0),
@@ -142,7 +142,7 @@ mod tests {
         // repo-state baseline before launching sharding again.
         with_temp_root(|| {
             let mut state = SessionState::new("20260511-093000-000000001".to_string());
-            state.current_phase = Phase::ShardingRunning;
+            state.current_stage = Stage::ShardingRunning;
             let failed_run = failed_sharding_run();
             state.agent_runs.push(failed_run.clone());
             state.save().unwrap();
@@ -152,7 +152,7 @@ mod tests {
                 .push(cached_build_model(SubscriptionKind::Codex, "next-model"));
 
             assert!(app.maybe_auto_retry(&failed_run));
-            assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+            assert_eq!(app.state.current_stage, Stage::WaitingToImplement);
             assert_eq!(
                 app.state
                     .agent_runs

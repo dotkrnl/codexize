@@ -1,7 +1,7 @@
 //! Flat `crate::state::*` public surface.
 //!
 //! Canonical state/session data, stage IO contracts, and resume validation
-//! live here. The pipeline module only owns the phase graph and pure
+//! live here. The pipeline module only owns the stage graph and pure
 //! transition mutators.
 mod builder;
 #[path = "resume.rs"]
@@ -26,11 +26,11 @@ pub use crate::logic::pipeline::transitions::{
     record_brainstorm_launch, record_builder_recovery_context, record_builder_verdict,
     record_pending_guard_decision, record_session_title, record_skip_to_impl_proposal,
     replace_recovery_pipeline, reset_builder_after_rewind, reset_recovery_cycle_count,
-    restore_archived_session, restore_guard_originating_phase, set_cheap_mode,
-    set_phase_for_operator_retry, set_retry_reset_run_id_cutoff, set_yolo_mode,
+    restore_archived_session, restore_guard_originating_stage, set_cheap_mode,
+    set_retry_reset_run_id_cutoff, set_stage_for_operator_retry, set_yolo_mode,
     take_pending_guard_decision, take_pending_refine_feedback, validate_transition,
 };
-pub use crate::logic::pipeline::{FinishedRunRecord, Phase, TransitionError};
+pub use crate::logic::pipeline::{FinishedRunRecord, Stage, TransitionError};
 pub use builder::BuilderState;
 pub use resume_logic::{ResumeError, can_resume};
 pub use stage_io::{

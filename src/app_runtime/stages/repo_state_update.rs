@@ -24,7 +24,7 @@ use crate::artifacts::ArtifactKind;
 use crate::repo_state_update::{RepoStateUpdateReport, RepoStateUpdateStatus};
 use crate::scheduler::{WaitingDispatch, decide_waiting_dispatch};
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, BlockOrigin, Phase};
+use crate::state::{self as session_state, BlockOrigin, Stage};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
@@ -68,10 +68,10 @@ impl App {
         }
 
         let modes = self.state.launch_modes();
-        let phase = Self::phase_for_stage(STAGE);
-        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let stage = Self::selection_stage_for_stage(STAGE);
+        let effort = modes.effort_for(EffortLevel::Normal, stage);
         let Some(chosen) =
-            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+            self.choose_primary_model(override_model.as_ref(), stage, effort, modes.cheap)
         else {
             self.record_agent_error("no model available with quota".to_string());
             self.save_state();
@@ -229,7 +229,7 @@ impl App {
             if entry.archived {
                 continue;
             }
-            if entry.current_phase != Phase::Done {
+            if entry.current_stage != Stage::Done {
                 continue;
             }
             if entry.session_id >= self.state.session_id {
@@ -254,7 +254,7 @@ impl App {
         (current_baseline, newly_completed)
     }
 
-    /// Co-located success-finalization for `Phase::RepoStateUpdateRunning`.
+    /// Co-located success-finalization for `Stage::RepoStateUpdateRunning`.
     ///
     /// On `implementable`: require both `spec.md` and `plan.md` to have
     /// been rewritten (otherwise stage failure), update
@@ -294,7 +294,7 @@ impl App {
                 self.finalize_run_record(run.id, true, None);
                 self.clear_agent_error();
                 clear_baseline(&session_dir);
-                self.transition_to_phase(Phase::ShardingRunning)?;
+                self.transition_to_stage(Stage::ShardingRunning)?;
             }
             RepoStateUpdateStatus::NotImplementable => {
                 self.finalize_run_record(run.id, true, None);
@@ -306,7 +306,7 @@ impl App {
         Ok(())
     }
 
-    /// Production dispatch out of `Phase::WaitingToImplement`: pure phase
+    /// Production dispatch out of `Stage::WaitingToImplement`: pure stage
     /// transition that the per-tick auto-launch loop consumes. Compares
     /// the session's recorded `planned_after_session_id` with the current
     /// newest-earlier-`Done` baseline and transitions to either
@@ -316,18 +316,18 @@ impl App {
     /// This is the production wiring for the scheduler's
     /// `decide_waiting_dispatch` helper; the launch of the resulting stage
     /// is left to the next auto-launch tick so the same code path covers
-    /// resumed sessions where the phase was already advanced.
+    /// resumed sessions where the stage was already advanced.
     pub(crate) fn dispatch_waiting_to_implement(&mut self) {
         let (current_baseline, _) = self.compute_repo_state_update_inputs();
         let decision = decide_waiting_dispatch(
             self.state.planned_after_session_id.as_deref(),
             current_baseline.as_deref(),
         );
-        let next_phase = match decision {
-            WaitingDispatch::Sharding => Phase::ShardingRunning,
-            WaitingDispatch::RepoStateUpdate => Phase::RepoStateUpdateRunning,
+        let next_stage = match decision {
+            WaitingDispatch::Sharding => Stage::ShardingRunning,
+            WaitingDispatch::RepoStateUpdate => Stage::RepoStateUpdateRunning,
         };
-        if let Err(err) = self.transition_to_phase(next_phase) {
+        if let Err(err) = self.transition_to_stage(next_stage) {
             self.surface_boundary_error(format!("failed to dispatch waiting session: {err}"), true);
         }
     }
@@ -477,8 +477,7 @@ mod tests {
     use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState};
 
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = crate::state::test_fs_lock()
-            .lock();
+        let _guard = crate::state::test_fs_lock().lock();
         let temp = tempfile::TempDir::new().unwrap();
         let prev = std::env::var_os("CODEXIZE_ROOT");
         // SAFETY: serialized by test_fs_lock and restored before returning.
@@ -532,7 +531,7 @@ mod tests {
     fn save_done_session(id: &str) {
         let mut state = SessionState::new(id.to_string());
         state.idea_text = Some(format!("idea {id}"));
-        state.current_phase = Phase::Done;
+        state.current_stage = Stage::Done;
         state.save().unwrap();
         let artifacts = session_state::session_dir(id).join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
@@ -564,7 +563,7 @@ mod tests {
             // newly-discovered Done session id.
             let session_id = "20260511-092000-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::RepoStateUpdateRunning;
+            state.current_stage = Stage::RepoStateUpdateRunning;
             state.planned_after_session_id = None;
             let run = run_record(7);
             state.agent_runs.push(run.clone());
@@ -589,7 +588,7 @@ rewrote_plan = true
             );
             let mut app = mk_app(state);
             app.finalize_repo_state_update_success(&run).unwrap();
-            assert_eq!(app.state.current_phase, Phase::ShardingRunning);
+            assert_eq!(app.state.current_stage, Stage::ShardingRunning);
             assert_eq!(
                 app.state.planned_after_session_id.as_deref(),
                 Some("20260511-090000-000000001")
@@ -614,7 +613,7 @@ rewrote_plan = true
         with_temp_root(|| {
             let session_id = "20260511-092500-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::RepoStateUpdateRunning;
+            state.current_stage = Stage::RepoStateUpdateRunning;
             let run = run_record(21);
             state.agent_runs.push(run.clone());
             state.save().unwrap();
@@ -641,8 +640,8 @@ rewrote_plan = true
                 msg.contains("spec.md") && msg.contains("byte-identical"),
                 "error should call out the unchanged spec.md, got: {msg}"
             );
-            // Phase must stay put so the operator can intervene.
-            assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
+            // Stage must stay put so the operator can intervene.
+            assert_eq!(app.state.current_stage, Stage::RepoStateUpdateRunning);
         });
     }
 
@@ -653,7 +652,7 @@ rewrote_plan = true
         with_temp_root(|| {
             let session_id = "20260511-092600-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::RepoStateUpdateRunning;
+            state.current_stage = Stage::RepoStateUpdateRunning;
             let run = run_record(22);
             state.agent_runs.push(run.clone());
             state.save().unwrap();
@@ -693,7 +692,7 @@ rewrote_plan = true
         with_temp_root(|| {
             let session_id = "20260511-092700-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::RepoStateUpdateRunning;
+            state.current_stage = Stage::RepoStateUpdateRunning;
             let run = run_record(23);
             state.agent_runs.push(run.clone());
             state.save().unwrap();
@@ -715,7 +714,7 @@ rewrote_plan = true
                 format!("{err:#}").contains("baseline"),
                 "error should mention the missing baseline"
             );
-            assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
+            assert_eq!(app.state.current_stage, Stage::RepoStateUpdateRunning);
         });
     }
 
@@ -724,7 +723,7 @@ rewrote_plan = true
         with_temp_root(|| {
             let session_id = "20260511-093000-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::RepoStateUpdateRunning;
+            state.current_stage = Stage::RepoStateUpdateRunning;
             let run = run_record(11);
             state.agent_runs.push(run.clone());
             state.save().unwrap();
@@ -740,7 +739,7 @@ evidence = ["src/cache.rs"]
             );
             let mut app = mk_app(state);
             app.finalize_repo_state_update_success(&run).unwrap();
-            assert_eq!(app.state.current_phase, Phase::BlockedNeedsUser);
+            assert_eq!(app.state.current_stage, Stage::BlockedNeedsUser);
             assert_eq!(app.state.block_origin, Some(BlockOrigin::RepoStateUpdate));
         });
     }
@@ -750,7 +749,7 @@ evidence = ["src/cache.rs"]
         with_temp_root(|| {
             let session_id = "20260511-094000-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::RepoStateUpdateRunning;
+            state.current_stage = Stage::RepoStateUpdateRunning;
             let run = run_record(12);
             state.agent_runs.push(run.clone());
             state.save().unwrap();
@@ -771,8 +770,8 @@ rewrote_spec = true
                 msg.contains("rewrote_plan") || msg.contains("rewrote_spec"),
                 "error should mention required rewrites, got: {msg}"
             );
-            // Phase must stay put so the operator (or a retry) can decide.
-            assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
+            // Stage must stay put so the operator (or a retry) can decide.
+            assert_eq!(app.state.current_stage, Stage::RepoStateUpdateRunning);
         });
     }
 
@@ -781,7 +780,7 @@ rewrote_spec = true
         with_temp_root(|| {
             let session_id = "20260511-095000-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::RepoStateUpdateRunning;
+            state.current_stage = Stage::RepoStateUpdateRunning;
             let run = run_record(13);
             state.agent_runs.push(run.clone());
             state.save().unwrap();
@@ -816,7 +815,7 @@ rewrote_plan = true
             save_done_session("20260511-082000-000000001");
             let session_id = "20260511-092000-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::RepoStateUpdateRunning;
+            state.current_stage = Stage::RepoStateUpdateRunning;
             state.planned_after_session_id = Some("20260511-081000-000000001".to_string());
             state.save().unwrap();
             let app = mk_app(state);
@@ -842,15 +841,15 @@ rewrote_plan = true
             save_done_session("20260511-080000-000000001");
             let session_id = "20260511-090000-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::WaitingToImplement;
+            state.current_stage = Stage::WaitingToImplement;
             state.planned_after_session_id = Some("20260511-080000-000000001".to_string());
             state.save().unwrap();
             let mut app = mk_app(state);
             app.dispatch_waiting_to_implement();
-            assert_eq!(app.state.current_phase, Phase::ShardingRunning);
+            assert_eq!(app.state.current_stage, Stage::ShardingRunning);
             // The transition was persisted to disk.
             let reloaded = SessionState::load(session_id).unwrap();
-            assert_eq!(reloaded.current_phase, Phase::ShardingRunning);
+            assert_eq!(reloaded.current_stage, Stage::ShardingRunning);
         });
     }
 
@@ -864,14 +863,14 @@ rewrote_plan = true
             save_done_session("20260511-081000-000000001");
             let session_id = "20260511-090000-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::WaitingToImplement;
+            state.current_stage = Stage::WaitingToImplement;
             state.planned_after_session_id = Some("20260511-080000-000000001".to_string());
             state.save().unwrap();
             let mut app = mk_app(state);
             app.dispatch_waiting_to_implement();
-            assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
+            assert_eq!(app.state.current_stage, Stage::RepoStateUpdateRunning);
             let reloaded = SessionState::load(session_id).unwrap();
-            assert_eq!(reloaded.current_phase, Phase::RepoStateUpdateRunning);
+            assert_eq!(reloaded.current_stage, Stage::RepoStateUpdateRunning);
         });
     }
 
@@ -882,12 +881,12 @@ rewrote_plan = true
         with_temp_root(|| {
             let session_id = "20260511-090000-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::WaitingToImplement;
+            state.current_stage = Stage::WaitingToImplement;
             state.planned_after_session_id = None;
             state.save().unwrap();
             let mut app = mk_app(state);
             app.dispatch_waiting_to_implement();
-            assert_eq!(app.state.current_phase, Phase::ShardingRunning);
+            assert_eq!(app.state.current_stage, Stage::ShardingRunning);
         });
     }
 
@@ -900,12 +899,12 @@ rewrote_plan = true
             save_done_session("20260511-080000-000000001");
             let session_id = "20260511-090000-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::WaitingToImplement;
+            state.current_stage = Stage::WaitingToImplement;
             state.planned_after_session_id = Some("does-not-exist".to_string());
             state.save().unwrap();
             let mut app = mk_app(state);
             app.dispatch_waiting_to_implement();
-            assert_eq!(app.state.current_phase, Phase::RepoStateUpdateRunning);
+            assert_eq!(app.state.current_stage, Stage::RepoStateUpdateRunning);
         });
     }
 
@@ -914,16 +913,16 @@ rewrote_plan = true
         with_temp_root(|| {
             let session_id = "20260511-090000-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::WaitingToImplement;
+            state.current_stage = Stage::WaitingToImplement;
             state.save().unwrap();
             let mut app = mk_app(state);
             app.run_launched = false;
 
             app.maybe_auto_launch();
 
-            assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+            assert_eq!(app.state.current_stage, Stage::WaitingToImplement);
             let reloaded = SessionState::load(session_id).unwrap();
-            assert_eq!(reloaded.current_phase, Phase::WaitingToImplement);
+            assert_eq!(reloaded.current_stage, Stage::WaitingToImplement);
         });
     }
 
@@ -934,7 +933,7 @@ rewrote_plan = true
             save_done_session("20260511-081000-000000001");
             let session_id = "20260511-090000-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::RepoStateUpdateRunning;
+            state.current_stage = Stage::RepoStateUpdateRunning;
             // Recorded baseline references a session that never existed; the
             // stage must still see every earlier Done session.
             state.planned_after_session_id = Some("nonexistent".to_string());

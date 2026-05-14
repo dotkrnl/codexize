@@ -2,8 +2,8 @@ use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::dreaming_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
-use crate::selection::config::SelectionPhase;
-use crate::state::{self as session_state, Phase};
+use crate::selection::config::SelectionStage;
+use crate::state::{self as session_state, Stage};
 use anyhow::Result;
 
 impl App {
@@ -15,7 +15,7 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Phase::Dreaming(round) = self.state.current_phase else {
+        let Stage::Dreaming(round) = self.state.current_stage else {
             return false;
         };
         let session_id = self.state.session_id.clone();
@@ -30,16 +30,16 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         }
-        // Re-entry of Phase::Dreaming(round) always restarts from scratch;
+        // Re-entry of Stage::Dreaming(round) always restarts from scratch;
         // remove any prior report so the current attempt does not accidentally
         // finalize against stale output.
         let _ = std::fs::remove_file(&dream_report_path);
 
         let modes = self.state.launch_modes();
-        let effort = modes.effort_for(EffortLevel::Normal, SelectionPhase::Review);
+        let effort = modes.effort_for(EffortLevel::Normal, SelectionStage::Review);
         let chosen = self.choose_primary_model(
             override_model.as_ref(),
-            SelectionPhase::Review,
+            SelectionStage::Review,
             effort,
             modes.cheap,
         );
@@ -161,7 +161,7 @@ impl App {
             self.record_agent_error(format!("invalid dream report: {err}"));
             return Ok(());
         }
-        self.transition_to_phase(Phase::Done)?;
+        self.transition_to_stage(Stage::Done)?;
         Ok(())
     }
 }
@@ -172,11 +172,11 @@ mod tests {
     use crate::app::test_support::{key, mk_app};
     use crate::app::{ModalKind, StageId, TestLaunchHarness, TestLaunchOutcome};
     use crate::selection::{
-        CachedModel, Candidate, CliKind, IpbrPhaseScores, ScoreSource, SubscriptionKind,
+        CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind,
     };
     use crate::state::{
-        self as session_state, DreamingDecision, DreamingDecisionKind, LaunchModes, Phase,
-        RunRecord, RunStatus, SessionState,
+        self as session_state, DreamingDecision, DreamingDecisionKind, LaunchModes, RunRecord,
+        RunStatus, SessionState, Stage,
     };
     use crossterm::event::KeyCode;
     use std::collections::VecDeque;
@@ -216,9 +216,9 @@ mod tests {
         CachedModel {
             subscription: SubscriptionKind::Codex,
             name: "dream-model".to_string(),
-            ipbr_phase_scores: IpbrPhaseScores {
+            ipbr_stage_scores: IpbrStageScores {
                 review: Some(1.0),
-                ..IpbrPhaseScores::default()
+                ..IpbrStageScores::default()
             },
             score_source: ScoreSource::Ipbr,
             candidates: vec![candidate],
@@ -286,7 +286,7 @@ reason = "Captured durable session guidance."
     fn launch_dreaming_writes_prompt_and_tracks_review_effort_run() {
         with_temp_session("dream-launch", |session_id| {
             let mut state = SessionState::new(session_id);
-            state.current_phase = Phase::Dreaming(2);
+            state.current_stage = Stage::Dreaming(2);
             prepare_memory(&state.session_id);
             let mut app = mk_app(state);
             app.models.push(cached_model());
@@ -321,7 +321,7 @@ reason = "Captured durable session guidance."
     fn dreaming_success_validates_report_and_finishes_session() {
         with_temp_session("dream-success", |session_id| {
             let mut state = SessionState::new(session_id);
-            state.current_phase = Phase::Dreaming(4);
+            state.current_stage = Stage::Dreaming(4);
             state.dreaming_decision = Some(DreamingDecision {
                 kind: DreamingDecisionKind::OperatorAccepted,
                 round: 4,
@@ -340,7 +340,7 @@ reason = "Captured durable session guidance."
 
             app.finalize_dreaming_success(&run, 4).unwrap();
 
-            assert_eq!(app.state.current_phase, Phase::Done);
+            assert_eq!(app.state.current_stage, Stage::Done);
             assert_eq!(
                 app.state.agent_runs.last().map(|run| run.status),
                 Some(RunStatus::Done)
@@ -353,7 +353,7 @@ reason = "Captured durable session guidance."
     fn dreaming_failure_can_be_skipped_without_rerunning_validation() {
         with_temp_session("dream-failure-skip", |session_id| {
             let mut state = SessionState::new(session_id);
-            state.current_phase = Phase::Dreaming(5);
+            state.current_stage = Stage::Dreaming(5);
             state.dreaming_decision = Some(DreamingDecision {
                 kind: DreamingDecisionKind::OperatorAccepted,
                 round: 5,
@@ -372,7 +372,7 @@ reason = "Captured durable session guidance."
                 key(KeyCode::Char('s')),
             ));
 
-            assert_eq!(app.state.current_phase, Phase::Done);
+            assert_eq!(app.state.current_stage, Stage::Done);
             assert_eq!(
                 app.state.dreaming_decision.as_ref().map(|d| d.kind),
                 Some(DreamingDecisionKind::OperatorSkipped)
@@ -384,7 +384,7 @@ reason = "Captured durable session guidance."
     fn dreaming_failure_retry_relaunches_dreaming_run() {
         with_temp_session("dream-failure-retry", |session_id| {
             let mut state = SessionState::new(session_id);
-            state.current_phase = Phase::Dreaming(6);
+            state.current_stage = Stage::Dreaming(6);
             state.dreaming_decision = Some(DreamingDecision {
                 kind: DreamingDecisionKind::OperatorAccepted,
                 round: 6,

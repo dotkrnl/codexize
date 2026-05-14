@@ -256,7 +256,7 @@ fn make_entry(name: &str, _vendor: &str) -> DashboardEntry {
 fn make_entry_with_order(name: &str, _vendor: &str, display_order: usize) -> DashboardEntry {
     DashboardEntry {
         name: name.to_string(),
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+        ipbr_stage_scores: crate::selection::IpbrStageScores::default(),
         score_source: crate::selection::ScoreSource::None,
         display_order,
     }
@@ -487,13 +487,13 @@ fn assemble_warns_only_for_provider_models_missing_from_ipbr() {
 }
 
 #[test]
-fn assemble_collapsed_kimi_selection_uses_ipbr_phase_scores() {
-    use crate::selection::config::SelectionPhase;
-    use crate::selection::ranking::phase_rank_score;
+fn assemble_collapsed_kimi_selection_uses_ipbr_stage_scores() {
+    use crate::selection::config::SelectionStage;
+    use crate::selection::ranking::stage_rank_score;
 
     let mut entry = make_entry_with_order("kimi-k2.6", "moonshotai", 0);
     entry.score_source = crate::selection::ScoreSource::Ipbr;
-    entry.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
+    entry.ipbr_stage_scores = crate::selection::IpbrStageScores {
         build: Some(82.0),
         review: Some(79.0),
         ..Default::default()
@@ -507,10 +507,10 @@ fn assemble_collapsed_kimi_selection_uses_ipbr_phase_scores() {
     assert_eq!(models.len(), 1);
     let kimi = &models[0];
     assert_eq!(kimi.name, "kimi-k2.6");
-    // Build and Review auto-selection must see the ipbr phase scores
+    // Build and Review auto-selection must see the ipbr stage scores
     // from the collapsed model.
-    assert_eq!(phase_rank_score(kimi, SelectionPhase::Build), Some(82.0));
-    assert_eq!(phase_rank_score(kimi, SelectionPhase::Review), Some(79.0));
+    assert_eq!(stage_rank_score(kimi, SelectionStage::Build), Some(82.0));
+    assert_eq!(stage_rank_score(kimi, SelectionStage::Review), Some(79.0));
 }
 
 #[test]

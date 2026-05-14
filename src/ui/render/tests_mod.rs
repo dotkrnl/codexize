@@ -27,7 +27,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         .filter(|row| row.is_expandable())
         .map(|row| (row.key.clone(), super::super::ExpansionOverride::Expanded))
         .collect();
-    let initial_slim_phase = state.current_phase.to_slim_phase();
+    let initial_slim_stage = state.current_stage.to_slim_stage();
     let app = App {
         state,
         nodes,
@@ -77,8 +77,8 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         pending_shell_command: None,
         current_run_id: None,
         fsm: crate::lifecycle::Fsm::new(),
-        slim_phase: initial_slim_phase,
-        paused_at_phase: None,
+        slim_stage: initial_slim_stage,
+        paused_at_stage: None,
         pending_decisions: crate::lifecycle::PendingDecisions::default(),
         scheduler: crate::lifecycle::Scheduler::new(crate::lifecycle::default_registry()),
         failed_models: HashMap::new(),
@@ -905,7 +905,7 @@ fn running_leaf_row_renders_live_agent_message_and_history_in_main_panel() {
         vec![message(7, "earlier transcript line")],
     );
     app.live_summary_cached_text = "drafting plan | full body of work".to_string();
-    app.state.current_phase = Phase::PlanningRunning;
+    app.state.current_stage = Stage::PlanningRunning;
 
     let lines = render_lines(&app, 12);
 
@@ -1000,19 +1000,19 @@ fn container_placeholder_renders_in_main_panel_when_no_leaf_tail_visible() {
 }
 
 #[test]
-fn running_leaf_renders_phase_tail_in_main_panel() {
+fn running_leaf_renders_stage_tail_in_main_panel() {
     let mut app = test_app(
         leaf_only_tree(),
         vec![run_record(7, RunStatus::Running)],
         Vec::new(),
     );
-    app.state.current_phase = Phase::BrainstormRunning;
+    app.state.current_stage = Stage::BrainstormRunning;
 
     let lines = render_lines(&app, 8);
 
     assert!(
         lines.iter().any(|l| l.contains("Brainstorming")),
-        "leaf tail should render the active phase label: {lines:#?}"
+        "leaf tail should render the active stage label: {lines:#?}"
     );
     assert!(!lines.iter().any(|l| l.contains("working...")));
 }
@@ -1355,7 +1355,7 @@ fn interactive_run_does_not_show_input_sheet_until_waiting() {
         vec![message(1, "waiting")],
     );
     app.current_run_id = Some(1);
-    app.state.current_phase = Phase::BrainstormRunning;
+    app.state.current_stage = Stage::BrainstormRunning;
 
     let lines = render_full_frame(&mut app, 80, 24);
     let text = lines.join("\n");
@@ -1380,7 +1380,7 @@ fn interactive_run_input_sheet_content_uses_agent_placeholder() {
         vec![message(1, "waiting")],
     );
     app.current_run_id = Some(1);
-    app.state.current_phase = Phase::BrainstormRunning;
+    app.state.current_stage = Stage::BrainstormRunning;
 
     let lines = app
         .input_sheet_content(80)
@@ -1415,7 +1415,7 @@ fn interactive_run_input_sheet_does_not_render_duplicate_separator_rule() {
         vec![message(7, "waiting")],
     );
     app.current_run_id = Some(7);
-    app.state.current_phase = Phase::BrainstormRunning;
+    app.state.current_stage = Stage::BrainstormRunning;
     app.input_mode = true;
 
     let lines = render_full_frame(&mut app, 80, 24);
@@ -1772,7 +1772,7 @@ fn interactive_split_owned_input_still_renders_footer_sheet() {
         vec![agent_text(7, "waiting for operator")],
     );
     app.current_run_id = Some(7);
-    app.state.current_phase = crate::state::Phase::BrainstormRunning;
+    app.state.current_stage = crate::state::Stage::BrainstormRunning;
     app.split_target = Some(super::super::split::SplitTarget::Run(7));
     app.input_mode = true;
     crate::runner::request_run_label_interactive_input_for_test("[Run 7]");
@@ -1792,7 +1792,7 @@ fn idea_split_renders_captured_text_from_target_not_selected_row() {
         Vec::new(),
     );
     app.state.idea_text = Some("captured idea belongs in split".to_string());
-    app.state.current_phase = Phase::SpecReviewPaused;
+    app.state.current_stage = Stage::SpecReviewPaused;
     app.selected = 2;
     app.split_target = Some(super::super::split::SplitTarget::Idea);
 
@@ -1808,7 +1808,7 @@ fn idea_input_split_suppresses_competing_bottom_sheet() {
         vec![run_record(1, RunStatus::Running)],
         Vec::new(),
     );
-    app.state.current_phase = Phase::IdeaInput;
+    app.state.current_stage = Stage::IdeaInput;
     app.selected = 2;
     app.split_target = Some(super::super::split::SplitTarget::Idea);
     app.input_mode = true;
@@ -1835,7 +1835,7 @@ fn interactive_run_main_panel_excludes_acp_output_but_shows_running_tail() {
     );
     app.current_run_id = Some(1);
     app.run_launched = true;
-    app.state.current_phase = Phase::BrainstormRunning;
+    app.state.current_stage = Stage::BrainstormRunning;
 
     let lines = render_full_frame(&mut app, 80, 24);
     let text = lines.join("\n");
@@ -1873,7 +1873,7 @@ fn impl_round_2_running_app() -> App {
         // transcript leaf so the assertion surface is deterministic.
         Vec::new(),
     );
-    app.state.current_phase = Phase::ImplementationRound(2);
+    app.state.current_stage = Stage::ImplementationRound(2);
     app.live_summary_cached_text =
         "wiring full-screen tests | adding render-level snapshot coverage".to_string();
     app.current_run_id = Some(42);
@@ -1914,7 +1914,7 @@ fn normalize_frame(lines: Vec<String>) -> Vec<String> {
 #[test]
 fn full_screen_idea_input_renders_top_rule_body_bottom_rule_and_keymap() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::IdeaInput;
+    app.state.current_stage = Stage::IdeaInput;
 
     let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
     let rule = "─".repeat(200);
@@ -1960,7 +1960,7 @@ fn full_screen_idea_input_renders_top_rule_body_bottom_rule_and_keymap() {
 #[test]
 fn full_screen_brainstorm_running_renders_running_state_in_top_rule() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::BrainstormRunning;
+    app.state.current_stage = Stage::BrainstormRunning;
 
     let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
     let rule = "─".repeat(200);
@@ -2006,7 +2006,7 @@ fn full_screen_brainstorm_running_renders_running_state_in_top_rule() {
 #[test]
 fn full_screen_render_does_not_reserve_or_draw_chrome_live_status_row() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::IdeaInput;
+    app.state.current_stage = Stage::IdeaInput;
 
     let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
     let rule = "─".repeat(FULL_FRAME_WIDTH as usize);
@@ -2033,7 +2033,7 @@ fn modal_row(inner_width: u16, text: &str) -> String {
 #[test]
 fn spec_review_modal_is_centered_with_content_driven_height() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::SpecReviewPaused;
+    app.state.current_stage = Stage::SpecReviewPaused;
 
     let width = 100;
     let height = 30;
@@ -2077,7 +2077,7 @@ fn spec_review_modal_is_centered_with_content_driven_height() {
 #[test]
 fn modal_dialog_uses_black_background_and_light_text() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::SpecReviewPaused;
+    app.state.current_stage = Stage::SpecReviewPaused;
 
     let width = 100;
     let height = 30;
@@ -2108,7 +2108,7 @@ fn modal_dialog_uses_black_background_and_light_text() {
 #[test]
 fn modal_border_and_title_use_accent_color_with_bold_modifier() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::SpecReviewPaused;
+    app.state.current_stage = Stage::SpecReviewPaused;
 
     let width = 100;
     let height = 30;
@@ -2145,7 +2145,7 @@ fn modal_border_and_title_use_accent_color_with_bold_modifier() {
 #[test]
 fn modal_drops_offset_shadow_in_favour_of_dim_backdrop() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::SpecReviewPaused;
+    app.state.current_stage = Stage::SpecReviewPaused;
 
     let width = 100;
     let height = 30;
@@ -2182,7 +2182,7 @@ fn modal_drops_offset_shadow_in_favour_of_dim_backdrop() {
 #[test]
 fn stage_error_modal_wraps_long_text_inside_centered_dialog() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::SpecReviewRunning;
+    app.state.current_stage = Stage::SpecReviewRunning;
     app.state.agent_error = Some(
         "model timeout while fetching a response from the remote reviewer after multiple retries"
             .to_string(),
@@ -2225,7 +2225,7 @@ fn stage_error_modal_wraps_long_text_inside_centered_dialog() {
 #[test]
 fn skip_to_impl_modal_wraps_rationale_and_keeps_label_on_its_own_line() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::SkipToImplPending;
+    app.state.current_stage = Stage::SkipToImplPending;
     app.state.skip_to_impl_rationale = Some(
             "This change only touches the centered dialog rendering path and preserves the existing footer controls."
                 .to_string(),
@@ -2266,7 +2266,7 @@ fn skip_to_impl_modal_wraps_rationale_and_keeps_label_on_its_own_line() {
 #[test]
 fn spec_review_modal_clamps_width_on_narrow_terminals() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::SpecReviewPaused;
+    app.state.current_stage = Stage::SpecReviewPaused;
 
     let width = 30;
     let height = 20;
@@ -2338,7 +2338,7 @@ fn footer_line_count(lines: &[String]) -> usize {
 #[test]
 fn pushing_status_message_adds_one_extra_footer_line_then_ttl_hides_it() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::IdeaInput;
+    app.state.current_stage = Stage::IdeaInput;
 
     let baseline = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
     let baseline_footer = footer_line_count(&baseline);
@@ -2383,7 +2383,7 @@ fn pushing_status_message_adds_one_extra_footer_line_then_ttl_hides_it() {
 #[test]
 fn frame_status_line_severity_priority_info_then_error_wins() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::IdeaInput;
+    app.state.current_stage = Stage::IdeaInput;
 
     app.push_status(
         "info first".to_string(),
@@ -2404,7 +2404,7 @@ fn frame_status_line_severity_priority_info_then_error_wins() {
 #[test]
 fn frame_status_line_severity_priority_error_then_info_keeps_error() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::IdeaInput;
+    app.state.current_stage = Stage::IdeaInput;
 
     app.push_status(
         "error stays".to_string(),
@@ -2999,7 +2999,7 @@ fn expanded_agent_row_renders_live_summary_tail_in_main_panel() {
         Vec::new(),
     );
     app.live_summary_cached_text = "live summary tail text".to_string();
-    app.state.current_phase = Phase::BrainstormRunning;
+    app.state.current_stage = Stage::BrainstormRunning;
 
     let lines = render_lines(&app, 8);
     assert!(
@@ -3162,8 +3162,7 @@ fn write_validation_artifact(session_id: &str, round: u32, body: &str) {
 }
 
 fn with_temp_codexize_root<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     // SAFETY: serialized through test_fs_lock and always restored.
@@ -3187,7 +3186,7 @@ fn final_validation_done_run_renders_full_goal_met_report() {
         run.stage = "final-validation".to_string();
         run.round = 1;
         let mut app = test_app(final_validation_tree(101), vec![run], Vec::new());
-        app.state.current_phase = Phase::Done;
+        app.state.current_stage = Stage::Done;
         write_validation_artifact(
             &app.state.session_id,
             1,
@@ -3214,7 +3213,7 @@ fn final_validation_goal_gap_report_includes_gap_citations() {
         run.stage = "final-validation".to_string();
         run.round = 1;
         let mut app = test_app(final_validation_tree(202), vec![run], Vec::new());
-        app.state.current_phase = Phase::ImplementationRound(2);
+        app.state.current_stage = Stage::ImplementationRound(2);
         write_validation_artifact(
             &app.state.session_id,
             1,
@@ -3250,7 +3249,7 @@ fn final_validation_needs_human_report_renders_with_citations() {
         run.stage = "final-validation".to_string();
         run.round = 1;
         let mut app = test_app(final_validation_tree(303), vec![run], Vec::new());
-        app.state.current_phase = Phase::BlockedNeedsUser;
+        app.state.current_stage = Stage::BlockedNeedsUser;
         app.state.block_origin = Some(crate::state::BlockOrigin::FinalValidation);
         write_validation_artifact(
             &app.state.session_id,
@@ -3277,7 +3276,7 @@ checked = ["artifacts/spec.md"]
 fn block_banner_absent_when_block_origin_is_not_final_validation() {
     with_temp_codexize_root(|| {
         let mut app = test_app(final_validation_tree(505), Vec::new(), Vec::new());
-        app.state.current_phase = Phase::BlockedNeedsUser;
+        app.state.current_stage = Stage::BlockedNeedsUser;
         app.state.block_origin = Some(crate::state::BlockOrigin::Brainstorm);
 
         let lines = render_lines(&app, 12);
@@ -3294,7 +3293,7 @@ fn main_panel_shows_live_summary_tail_for_both_run_modes() {
         run.modes.interactive = interactive;
         let mut app = test_app(leaf_only_tree(), vec![run], Vec::new());
         app.live_summary_cached_text = "drafting parity test | covers both modes".to_string();
-        app.state.current_phase = Phase::PlanningRunning;
+        app.state.current_stage = Stage::PlanningRunning;
 
         let lines = render_lines(&app, 12);
         assert!(
@@ -3311,7 +3310,7 @@ fn main_panel_shows_live_summary_tail_for_both_run_modes() {
 #[test]
 fn final_validation_blocked_modal_body_lists_actions() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
-    app.state.current_phase = Phase::BlockedNeedsUser;
+    app.state.current_stage = Stage::BlockedNeedsUser;
     app.state.block_origin = Some(crate::state::BlockOrigin::FinalValidation);
 
     let lines = app.modal_content_lines(ModalKind::FinalValidationBlocked, 80);
@@ -3342,7 +3341,7 @@ fn final_validation_blocked_modal_body_lists_actions() {
 fn pipeline_no_longer_renders_inline_block_banner() {
     with_temp_codexize_root(|| {
         let mut app = test_app(final_validation_tree(999), Vec::new(), Vec::new());
-        app.state.current_phase = Phase::BlockedNeedsUser;
+        app.state.current_stage = Stage::BlockedNeedsUser;
         app.state.block_origin = Some(crate::state::BlockOrigin::FinalValidation);
         let lines = app.pipeline_render_lines(&Default::default());
         let text: String = lines

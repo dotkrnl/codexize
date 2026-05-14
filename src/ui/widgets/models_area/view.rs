@@ -16,8 +16,8 @@ use crate::app::models::{subscription_color, subscription_tag};
 use crate::model_names;
 use crate::selection::{
     CachedModel, QuotaError, SubscriptionKind,
-    config::SelectionPhase,
-    display::{build_rank_order, phase_rank, visible_models},
+    config::SelectionStage,
+    display::{build_rank_order, stage_rank, visible_models},
     ranking::candidate_pool_weights,
 };
 use chrono::{DateTime, Utc};
@@ -115,62 +115,62 @@ fn render_full_table(
     let name_width =
         name_budget_for(width, vendor_width, quota_col, prob_col).max(name_width_min());
     // Sampling probability cells are sourced from the candidate-pool
-    // scorer in ranking.rs: softmax over phase rank weighted by relative
+    // scorer in ranking.rs: softmax over stage rank weighted by relative
     // quota pressure, normalized within the assembled set. That keeps the
     // % column distinct from the rank column (bolding flags rank-1, the
     // number reports the row's sampling share). Models without an ipbr
-    // phase score or with known zero quota receive weight 0.
+    // stage score or with known zero quota receive weight 0.
     let model_refs: Vec<&CachedModel> = models.iter().collect();
-    let idea_weights = candidate_pool_weights(&model_refs, SelectionPhase::Idea);
-    let planning_weights = candidate_pool_weights(&model_refs, SelectionPhase::Planning);
-    let build_weights = candidate_pool_weights(&model_refs, SelectionPhase::Build);
-    let review_weights = candidate_pool_weights(&model_refs, SelectionPhase::Review);
-    let weight_for = |phase: SelectionPhase, model: &CachedModel| -> f64 {
-        let weights = match phase {
-            SelectionPhase::Idea => &idea_weights,
-            SelectionPhase::Planning => &planning_weights,
-            SelectionPhase::Build => &build_weights,
-            SelectionPhase::Review => &review_weights,
+    let idea_weights = candidate_pool_weights(&model_refs, SelectionStage::Idea);
+    let planning_weights = candidate_pool_weights(&model_refs, SelectionStage::Planning);
+    let build_weights = candidate_pool_weights(&model_refs, SelectionStage::Build);
+    let review_weights = candidate_pool_weights(&model_refs, SelectionStage::Review);
+    let weight_for = |stage: SelectionStage, model: &CachedModel| -> f64 {
+        let weights = match stage {
+            SelectionStage::Idea => &idea_weights,
+            SelectionStage::Planning => &planning_weights,
+            SelectionStage::Build => &build_weights,
+            SelectionStage::Review => &review_weights,
         };
         models
             .iter()
             .position(|candidate| std::ptr::eq(candidate, model))
             .map_or(0.0, |index| weights[index])
     };
-    let total_for = |phase: SelectionPhase| -> f64 {
-        match phase {
-            SelectionPhase::Idea => idea_weights.iter().sum(),
-            SelectionPhase::Planning => planning_weights.iter().sum(),
-            SelectionPhase::Build => build_weights.iter().sum(),
-            SelectionPhase::Review => review_weights.iter().sum(),
+    let total_for = |stage: SelectionStage| -> f64 {
+        match stage {
+            SelectionStage::Idea => idea_weights.iter().sum(),
+            SelectionStage::Planning => planning_weights.iter().sum(),
+            SelectionStage::Build => build_weights.iter().sum(),
+            SelectionStage::Review => review_weights.iter().sum(),
         }
     };
-    let total_idea = total_for(SelectionPhase::Idea);
-    let total_planning = total_for(SelectionPhase::Planning);
-    let total_build = total_for(SelectionPhase::Build);
-    let total_review = total_for(SelectionPhase::Review);
-    let idea_ranks = phase_rank(models, SelectionPhase::Idea);
-    let planning_ranks = phase_rank(models, SelectionPhase::Planning);
-    let build_ranks = phase_rank(models, SelectionPhase::Build);
-    let review_ranks = phase_rank(models, SelectionPhase::Review);
-    let max_for = |totals: f64, phase: SelectionPhase| -> u8 {
+    let total_idea = total_for(SelectionStage::Idea);
+    let total_planning = total_for(SelectionStage::Planning);
+    let total_build = total_for(SelectionStage::Build);
+    let total_review = total_for(SelectionStage::Review);
+    let idea_ranks = stage_rank(models, SelectionStage::Idea);
+    let planning_ranks = stage_rank(models, SelectionStage::Planning);
+    let build_ranks = stage_rank(models, SelectionStage::Build);
+    let review_ranks = stage_rank(models, SelectionStage::Review);
+    let max_for = |totals: f64, stage: SelectionStage| -> u8 {
         models
             .iter()
-            .map(|m| probability_percent(weight_for(phase, m), totals))
+            .map(|m| probability_percent(weight_for(stage, m), totals))
             .max()
             .unwrap_or(0)
     };
-    let max_idea = max_for(total_idea, SelectionPhase::Idea);
-    let max_planning = max_for(total_planning, SelectionPhase::Planning);
-    let max_build = max_for(total_build, SelectionPhase::Build);
-    let max_review = max_for(total_review, SelectionPhase::Review);
+    let max_idea = max_for(total_idea, SelectionStage::Idea);
+    let max_planning = max_for(total_planning, SelectionStage::Planning);
+    let max_build = max_for(total_build, SelectionStage::Build);
+    let max_review = max_for(total_review, SelectionStage::Review);
     let mut visible_models_list: Vec<&CachedModel> = models
         .iter()
         .filter(|m| visible_set.contains(&m.name))
         .collect();
     visible_models_list.sort_by(|a, b| {
-        let a_weight = weight_for(SelectionPhase::Build, a);
-        let b_weight = weight_for(SelectionPhase::Build, b);
+        let a_weight = weight_for(SelectionStage::Build, a);
+        let b_weight = weight_for(SelectionStage::Build, b);
         b_weight
             .partial_cmp(&a_weight)
             .unwrap_or(Ordering::Equal)
@@ -243,11 +243,11 @@ fn render_full_table(
         let mut spans: Vec<Span<'static>> =
             vec![vendor_span, Span::raw(" "), dot_span, Span::raw(" ")];
         spans.extend(format_name_with_freshness(short_name, name_width));
-        let phase_data = [
+        let stage_data = [
             (
                 "Idea ",
                 "I",
-                SelectionPhase::Idea,
+                SelectionStage::Idea,
                 total_idea,
                 max_idea,
                 idea_ranks.get(&model.name) == Some(&1),
@@ -255,7 +255,7 @@ fn render_full_table(
             (
                 "Plan ",
                 "P",
-                SelectionPhase::Planning,
+                SelectionStage::Planning,
                 total_planning,
                 max_planning,
                 planning_ranks.get(&model.name) == Some(&1),
@@ -263,7 +263,7 @@ fn render_full_table(
             (
                 "Build ",
                 "B",
-                SelectionPhase::Build,
+                SelectionStage::Build,
                 total_build,
                 max_build,
                 build_ranks.get(&model.name) == Some(&1),
@@ -271,7 +271,7 @@ fn render_full_table(
             (
                 "Review ",
                 "R",
-                SelectionPhase::Review,
+                SelectionStage::Review,
                 total_review,
                 max_review,
                 review_ranks.get(&model.name) == Some(&1),
@@ -281,11 +281,11 @@ fn render_full_table(
             ProbColumn::IpbrVerbose | ProbColumn::Ipbr => {
                 let verbose = matches!(prob_col, ProbColumn::IpbrVerbose);
                 let sep = if verbose { "   " } else { " " };
-                for (idx, (long, short, phase, total, max, is_top)) in phase_data.iter().enumerate()
+                for (idx, (long, short, stage, total, max, is_top)) in stage_data.iter().enumerate()
                 {
                     spans.push(Span::raw(if idx == 0 { " " } else { sep }));
                     let label = if verbose { *long } else { *short };
-                    let pct = probability_percent(weight_for(*phase, model), *total);
+                    let pct = probability_percent(weight_for(*stage, model), *total);
                     spans.push(if vendor_failed {
                         probability_unavailable_span(label)
                     } else {
@@ -297,11 +297,11 @@ fn render_full_table(
                 spans.push(Span::raw(" "));
                 spans.push(top_rank_prob_span(
                     vendor_failed,
-                    &phase_data.map(|(_, short, phase, total, max, is_top)| {
+                    &stage_data.map(|(_, short, stage, total, max, is_top)| {
                         (
                             is_top,
                             short,
-                            probability_percent(weight_for(phase, model), total),
+                            probability_percent(weight_for(stage, model), total),
                             max,
                         )
                     }),

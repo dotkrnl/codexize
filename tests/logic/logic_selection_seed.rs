@@ -1,7 +1,7 @@
 use codexize::logic::selection::{
-    SelectionPhase,
-    selection::pick_for_phase_with_seed,
-    types::{CachedModel, Candidate, CliKind, IpbrPhaseScores, ScoreSource, SubscriptionKind},
+    SelectionStage,
+    selection::pick_for_stage_with_seed,
+    types::{CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind},
 };
 
 fn sample_model(vendor: SubscriptionKind, name: &str, quota: u8) -> CachedModel {
@@ -25,7 +25,7 @@ fn sample_model(vendor: SubscriptionKind, name: &str, quota: u8) -> CachedModel 
     CachedModel {
         subscription: vendor,
         name: name.to_string(),
-        ipbr_phase_scores: IpbrPhaseScores {
+        ipbr_stage_scores: IpbrStageScores {
             idea: Some(85.0),
             planning: Some(85.0),
             build: Some(85.0),
@@ -41,12 +41,12 @@ fn sample_model(vendor: SubscriptionKind, name: &str, quota: u8) -> CachedModel 
 }
 
 #[test]
-fn pick_for_phase_with_seed_is_deterministic_without_clock_access() {
+fn pick_for_stage_with_seed_is_deterministic_without_clock_access() {
     let models = vec![
         sample_model(SubscriptionKind::Claude, "high", 80),
         sample_model(SubscriptionKind::Codex, "low", 1),
     ];
-    let chosen = pick_for_phase_with_seed(&models, SelectionPhase::Build, None, 1)
+    let chosen = pick_for_stage_with_seed(&models, SelectionStage::Build, None, 1)
         .expect("should pick a model");
     assert_eq!(chosen.name, "high");
 }

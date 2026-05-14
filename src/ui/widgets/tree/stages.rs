@@ -111,8 +111,8 @@ pub(super) fn task_ids_for_iteration(state: &SessionState, iteration: u32) -> Ve
         .collect()
 }
 pub(super) fn build_idea_node(state: &SessionState) -> Node {
-    let (status, summary) = match state.current_phase {
-        Phase::IdeaInput => (NodeStatus::WaitingUser, "waiting for idea".to_string()),
+    let (status, summary) = match state.current_stage {
+        Stage::IdeaInput => (NodeStatus::WaitingUser, "waiting for idea".to_string()),
         _ => (NodeStatus::Done, "idea captured".to_string()),
     };
     node("Idea", NodeKind::Stage, status, summary, Vec::new())
@@ -323,13 +323,13 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
         };
         children.push(node(label, NodeKind::Task, task_status, "", round_nodes));
     }
-    let in_recovery_phase = matches!(
-        state.current_phase,
-        Phase::BuilderRecovery(_)
-            | Phase::BuilderRecoveryPlanReview(_)
-            | Phase::BuilderRecoverySharding(_)
+    let in_recovery_stage = matches!(
+        state.current_stage,
+        Stage::BuilderRecovery(_)
+            | Stage::BuilderRecoveryPlanReview(_)
+            | Stage::BuilderRecoverySharding(_)
     );
-    if in_recovery_phase
+    if in_recovery_stage
         || !recovery_runs.is_empty()
         || !recovery_pr_runs.is_empty()
         || !recovery_sharding_runs.is_empty()
@@ -377,7 +377,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
                 mode_nodes,
             ));
         }
-        let recovery_status = if in_recovery_phase {
+        let recovery_status = if in_recovery_stage {
             if state.agent_error.is_some() {
                 NodeStatus::Failed
             } else {
@@ -446,9 +446,9 @@ pub(super) fn build_dreaming_stage(state: &SessionState) -> Node {
     let status = if latest.iter().any(|run| run.status == RunStatus::Running) {
         NodeStatus::Running
     } else {
-        match state.current_phase {
-            Phase::DreamingPending => NodeStatus::WaitingUser,
-            Phase::Dreaming(_) => {
+        match state.current_stage {
+            Stage::DreamingPending => NodeStatus::WaitingUser,
+            Stage::Dreaming(_) => {
                 if state.agent_error.is_some() {
                     NodeStatus::Failed
                 } else if latest.is_empty() {
@@ -470,7 +470,7 @@ pub(super) fn build_dreaming_stage(state: &SessionState) -> Node {
                     per_iteration_terminal_status(&latest)
                 }
                 Some(crate::state::DreamingDecisionKind::Pending) => NodeStatus::WaitingUser,
-                None if state.current_phase == Phase::Done => NodeStatus::Skipped,
+                None if state.current_stage == Stage::Done => NodeStatus::Skipped,
                 None => NodeStatus::Pending,
             },
         }
@@ -480,7 +480,7 @@ pub(super) fn build_dreaming_stage(state: &SessionState) -> Node {
 }
 /// Shared scaffolding for the iteration-scoped trio's tail two stages.
 /// Filters runs to this iteration, derives stage status/summary (delegating
-/// to the global phase machinery only for iteration 1, since later trios
+/// to the global stage machinery only for iteration 1, since later trios
 /// must report from their own runs), and groups the runs into Round nodes.
 fn build_per_iteration_stage(
     state: &SessionState,
@@ -513,8 +513,8 @@ fn build_per_iteration_stage(
     )
 }
 /// Roll up the per-iteration Simplification / Final Validation status when
-/// iteration > 1: only the *current* iteration owns the global phase
-/// machinery (`Phase::Simplification`/`Phase::FinalValidation`), so older
+/// iteration > 1: only the *current* iteration owns the global stage
+/// machinery (`Stage::Simplification`/`Stage::FinalValidation`), so older
 /// trios derive their status from the latest attempts of their own runs.
 fn per_iteration_terminal_status(latest: &[&RunRecord]) -> NodeStatus {
     if latest.iter().any(|r| r.status == RunStatus::Running) {

@@ -2,7 +2,7 @@ use crate::{
     data::session_index,
     picker::SessionEntry,
     scheduler::ScannedSession,
-    state::{self, Phase, SessionState},
+    state::{self, SessionState, Stage},
 };
 use anyhow::Result;
 use std::fs;
@@ -22,12 +22,12 @@ pub fn scan_sessions_by_creation_order(sessions_dir: &Path) -> Result<Vec<Sessio
 /// sessions sorted by creation order.
 ///
 /// Definition (spec § Data model / Session fields): the newest non-archived
-/// session whose session id sorts earlier than `session_id` and whose phase is
+/// session whose session id sorts earlier than `session_id` and whose stage is
 /// `Done`.
 pub fn newest_earlier_done_baseline(session_id: &str, sessions: &[SessionEntry]) -> Option<String> {
     sessions
         .iter()
-        .filter(|e| e.session_id.as_str() < session_id && e.current_phase == Phase::Done)
+        .filter(|e| e.session_id.as_str() < session_id && e.current_stage == Stage::Done)
         .map(|e| e.session_id.clone())
         .next_back()
 }
@@ -79,7 +79,7 @@ pub fn scan_sessions(sessions_dir: &Path) -> Result<Vec<SessionEntry>> {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map_or_else(|| truncate_idea(&state.idea_text), str::to_string),
-            current_phase: state.current_phase,
+            current_stage: state.current_stage,
             modes: state.modes,
             last_modified,
             archived: state.archived,

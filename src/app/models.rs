@@ -95,7 +95,8 @@ impl App {
                     } else {
                         let summary = quota_error_summary(&errors);
                         self.push_status(summary, Severity::Warn, REFRESH_STATUS_TTL);
-                        self.quota_retry_delay = (self.quota_retry_delay * 2).min(cache::MAX_QUOTA_RETRY_BACKOFF);
+                        self.quota_retry_delay =
+                            (self.quota_retry_delay * 2).min(cache::MAX_QUOTA_RETRY_BACKOFF);
                     }
                     self.quota_errors = errors;
                     self.model_refresh = ModelRefreshState::Idle(Instant::now());
@@ -107,7 +108,8 @@ impl App {
                             Severity::Warn,
                             REFRESH_STATUS_TTL,
                         );
-                        self.quota_retry_delay = (self.quota_retry_delay * 2).min(cache::MAX_QUOTA_RETRY_BACKOFF);
+                        self.quota_retry_delay =
+                            (self.quota_retry_delay * 2).min(cache::MAX_QUOTA_RETRY_BACKOFF);
                         self.model_refresh = ModelRefreshState::Idle(Instant::now());
                     }
                 }
@@ -117,7 +119,8 @@ impl App {
                         Severity::Error,
                         REFRESH_STATUS_TTL,
                     );
-                    self.quota_retry_delay = (self.quota_retry_delay * 2).min(cache::MAX_QUOTA_RETRY_BACKOFF);
+                    self.quota_retry_delay =
+                        (self.quota_retry_delay * 2).min(cache::MAX_QUOTA_RETRY_BACKOFF);
                     self.model_refresh = ModelRefreshState::Idle(Instant::now());
                 }
             },

@@ -12,7 +12,7 @@ use codexize::scheduler::{
     ImplementationDecision, ScannedSession, WaitingDispatch, decide_waiting_dispatch,
     evaluate_tick, manual_retry_allowed,
 };
-use codexize::state::{Phase, SessionState};
+use codexize::state::{SessionState, Stage};
 use serial_test::serial;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,10 +35,10 @@ fn with_temp_root<T>(f: impl FnOnce(PathBuf) -> T) -> T {
     result.expect("test panicked")
 }
 
-fn save_session(id: &str, phase: Phase) -> SessionState {
+fn save_session(id: &str, stage: Stage) -> SessionState {
     let mut state = SessionState::new(id.to_string());
     state.idea_text = Some(format!("idea for {id}"));
-    state.current_phase = phase;
+    state.current_stage = stage;
     state.save().expect("save session");
     state
 }
@@ -47,9 +47,9 @@ fn save_session(id: &str, phase: Phase) -> SessionState {
 #[serial]
 fn scheduler_picks_oldest_waiting_to_implement_session() {
     with_temp_root(|sessions_root| {
-        save_session("20260511-090000-000000001", Phase::Done);
-        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
-        save_session("20260511-092000-000000001", Phase::WaitingToImplement);
+        save_session("20260511-090000-000000001", Stage::Done);
+        save_session("20260511-091000-000000001", Stage::WaitingToImplement);
+        save_session("20260511-092000-000000001", Stage::WaitingToImplement);
 
         let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
         let tick = evaluate_tick(&scan);
@@ -67,9 +67,9 @@ fn scheduler_picks_oldest_waiting_to_implement_session() {
 #[serial]
 fn scheduler_planning_lane_independent_when_head_blocked() {
     with_temp_root(|sessions_root| {
-        save_session("20260511-090000-000000001", Phase::BlockedNeedsUser);
-        save_session("20260511-091000-000000001", Phase::PlanningRunning);
-        save_session("20260511-092000-000000001", Phase::BrainstormRunning);
+        save_session("20260511-090000-000000001", Stage::BlockedNeedsUser);
+        save_session("20260511-091000-000000001", Stage::PlanningRunning);
+        save_session("20260511-092000-000000001", Stage::BrainstormRunning);
 
         let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
         let tick = evaluate_tick(&scan);
@@ -99,17 +99,17 @@ fn scheduler_planning_lane_independent_when_head_blocked() {
 #[serial]
 fn scheduler_does_not_start_second_implementation_when_lane_occupied() {
     with_temp_root(|sessions_root| {
-        save_session("20260511-090000-000000001", Phase::ShardingRunning);
-        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
-        save_session("20260511-092000-000000001", Phase::BrainstormRunning);
+        save_session("20260511-090000-000000001", Stage::ShardingRunning);
+        save_session("20260511-091000-000000001", Stage::WaitingToImplement);
+        save_session("20260511-092000-000000001", Stage::BrainstormRunning);
 
         let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
         let tick = evaluate_tick(&scan);
 
         match tick.implementation {
-            ImplementationDecision::LaneOccupied { session_id, phase } => {
+            ImplementationDecision::LaneOccupied { session_id, stage } => {
                 assert_eq!(session_id, "20260511-090000-000000001");
-                assert_eq!(phase, Phase::ShardingRunning);
+                assert_eq!(stage, Stage::ShardingRunning);
             }
             other => panic!("expected LaneOccupied, got {other:?}"),
         }
@@ -128,8 +128,8 @@ fn scheduler_does_not_start_second_implementation_when_lane_occupied() {
 #[serial]
 fn scheduler_skips_cancelled_session_and_picks_later_waiting() {
     with_temp_root(|sessions_root| {
-        save_session("20260511-090000-000000001", Phase::Cancelled);
-        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+        save_session("20260511-090000-000000001", Stage::Cancelled);
+        save_session("20260511-091000-000000001", Stage::WaitingToImplement);
 
         let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
         let tick = evaluate_tick(&scan);
@@ -147,10 +147,10 @@ fn scheduler_skips_cancelled_session_and_picks_later_waiting() {
 fn scheduler_excludes_archived_session_from_lane_decision() {
     with_temp_root(|sessions_root| {
         let mut archived = SessionState::new("20260511-090000-000000001".into());
-        archived.current_phase = Phase::ShardingRunning;
+        archived.current_stage = Stage::ShardingRunning;
         archived.archived = true;
         archived.save().expect("save archived");
-        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+        save_session("20260511-091000-000000001", Stage::WaitingToImplement);
 
         let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
         // Archived session must not appear in the scan at all.
@@ -179,7 +179,7 @@ fn scheduler_corrupt_earlier_session_blocks_implementation_lane() {
         let bad_dir = sessions_root.join("20260511-090000-000000001");
         std::fs::create_dir_all(&bad_dir).expect("mkdir");
         std::fs::write(bad_dir.join("session.toml"), "not = valid = toml").expect("write");
-        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+        save_session("20260511-091000-000000001", Stage::WaitingToImplement);
 
         let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
         let tick = evaluate_tick(&scan);
@@ -197,7 +197,7 @@ fn scheduler_corrupt_earlier_session_blocks_implementation_lane() {
 #[serial]
 fn scheduler_corrupt_later_session_logged_not_blocking() {
     with_temp_root(|sessions_root| {
-        save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+        save_session("20260511-090000-000000001", Stage::WaitingToImplement);
         let bad_dir = sessions_root.join("20260511-091000-000000001");
         std::fs::create_dir_all(&bad_dir).expect("mkdir");
         std::fs::write(bad_dir.join("session.toml"), "not = valid = toml").expect("write");
@@ -220,13 +220,13 @@ fn scheduler_corrupt_later_session_logged_not_blocking() {
 
 #[test]
 #[serial]
-fn opening_or_focusing_session_does_not_launch_or_mutate_phase() {
+fn opening_or_focusing_session_does_not_launch_or_mutate_stage() {
     // AC-4 / AC-9: launches originate only from creation, explicit retry, or
     // the scheduler. The shell's open/focus paths must not change a session's
-    // phase, current_run_id, or run-launched state on their own.
+    // stage, current_run_id, or run-launched state on their own.
     with_temp_root(|_sessions_root| {
-        let first = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
-        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+        let first = save_session("20260511-090000-000000001", Stage::WaitingToImplement);
+        save_session("20260511-091000-000000001", Stage::WaitingToImplement);
 
         let mut shell = AppShell::new(
             first,
@@ -235,7 +235,7 @@ fn opening_or_focusing_session_does_not_launch_or_mutate_phase() {
         )
         .expect("shell");
 
-        // Open the second session; phases on disk and in the workspace must
+        // Open the second session; stages on disk and in the workspace must
         // be unchanged — no auto-launch ran.
         shell
             .open_session("20260511-091000-000000001")
@@ -245,7 +245,7 @@ fn opening_or_focusing_session_does_not_launch_or_mutate_phase() {
         let opened = shell
             .workspace("20260511-091000-000000001")
             .expect("workspace");
-        assert_eq!(opened.phase(), Phase::WaitingToImplement);
+        assert_eq!(opened.stage(), Stage::WaitingToImplement);
         assert_eq!(opened.current_run_id(), None);
 
         // Focusing back to the original does not start a run either.
@@ -276,7 +276,7 @@ fn creating_session_lands_in_brainstorm_so_scheduler_can_continue() {
             codexize::picker::create_session("explore caching layer", Default::default(), None)
                 .expect("create");
         let state = SessionState::load(&session_id).expect("load");
-        assert_eq!(state.current_phase, Phase::BrainstormRunning);
+        assert_eq!(state.current_stage, Stage::BrainstormRunning);
 
         let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
         let tick = evaluate_tick(&scan);
@@ -300,30 +300,30 @@ fn creating_session_lands_in_brainstorm_so_scheduler_can_continue() {
 #[serial]
 fn manual_retry_rejected_for_sharding_when_other_session_occupies_lane() {
     with_temp_root(|sessions_root| {
-        save_session("20260511-090000-000000001", Phase::ShardingRunning);
-        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+        save_session("20260511-090000-000000001", Stage::ShardingRunning);
+        save_session("20260511-091000-000000001", Stage::WaitingToImplement);
 
         let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
         // Operator focused session 02 and asked to retry sharding: rejected
         // because session 01 owns the implementation lane.
         assert!(!manual_retry_allowed(
-            Phase::ShardingRunning,
+            Stage::ShardingRunning,
             "20260511-091000-000000001",
             &scan
         ));
         // Planning-lane retries (e.g. brainstorm) are always allowed.
         assert!(manual_retry_allowed(
-            Phase::BrainstormRunning,
+            Stage::BrainstormRunning,
             "20260511-091000-000000001",
             &scan
         ));
     });
 }
 
-fn save_session_with_baseline(id: &str, phase: Phase, planned_after: Option<&str>) -> SessionState {
+fn save_session_with_baseline(id: &str, stage: Stage, planned_after: Option<&str>) -> SessionState {
     let mut state = SessionState::new(id.to_string());
     state.idea_text = Some(format!("idea for {id}"));
-    state.current_phase = phase;
+    state.current_stage = stage;
     state.planned_after_session_id = planned_after.map(str::to_string);
     state.save().expect("save session");
     state
@@ -336,10 +336,10 @@ fn dispatch_waiting_routes_to_sharding_when_baseline_matches_recorded() {
     // current newest-earlier-Done baseline, the WaitingToImplement head
     // skips repo-state update and goes straight to sharding.
     with_temp_root(|sessions_root| {
-        save_session("20260511-090000-000000001", Phase::Done);
+        save_session("20260511-090000-000000001", Stage::Done);
         save_session_with_baseline(
             "20260511-091000-000000001",
-            Phase::WaitingToImplement,
+            Stage::WaitingToImplement,
             Some("20260511-090000-000000001"),
         );
 
@@ -370,11 +370,11 @@ fn dispatch_waiting_routes_to_repo_state_update_when_baseline_advanced() {
     // baseline-comparison says "different" and the stage must run before
     // sharding.
     with_temp_root(|sessions_root| {
-        save_session("20260511-088000-000000001", Phase::Done);
-        save_session("20260511-090000-000000001", Phase::Done);
+        save_session("20260511-088000-000000001", Stage::Done);
+        save_session("20260511-090000-000000001", Stage::Done);
         save_session_with_baseline(
             "20260511-091000-000000001",
-            Phase::WaitingToImplement,
+            Stage::WaitingToImplement,
             Some("20260511-088000-000000001"),
         );
 
@@ -405,10 +405,10 @@ fn dispatch_waiting_routes_to_repo_state_update_when_recorded_baseline_missing()
     // or archived (here, simply never present); the stage must still run
     // against the current state of the queue.
     with_temp_root(|sessions_root| {
-        save_session("20260511-090000-000000001", Phase::Done);
+        save_session("20260511-090000-000000001", Stage::Done);
         save_session_with_baseline(
             "20260511-091000-000000001",
-            Phase::WaitingToImplement,
+            Stage::WaitingToImplement,
             Some("20260511-089000-000000001"), // never existed
         );
 
@@ -437,7 +437,7 @@ fn dispatch_waiting_skips_repo_state_update_when_no_earlier_done_exists() {
     // Both baselines are None — no prior Done session has been observed and
     // none exists now, so direct sharding is the right call.
     with_temp_root(|sessions_root| {
-        save_session_with_baseline("20260511-090000-000000001", Phase::WaitingToImplement, None);
+        save_session_with_baseline("20260511-090000-000000001", Stage::WaitingToImplement, None);
 
         let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
         let tick = evaluate_tick(&scan);
@@ -511,9 +511,9 @@ fn repo_state_update_policy_restricts_allowed_writes() {
 fn scan_propagates_session_id_creation_order_to_scheduler() {
     with_temp_root(|sessions_root| {
         // Write in arbitrary file-system order; scanner must sort ascending.
-        save_session("20260511-093000-000000001", Phase::WaitingToImplement);
-        save_session("20260511-090000-000000001", Phase::WaitingToImplement);
-        save_session("20260511-092000-000000001", Phase::Cancelled);
+        save_session("20260511-093000-000000001", Stage::WaitingToImplement);
+        save_session("20260511-090000-000000001", Stage::WaitingToImplement);
+        save_session("20260511-092000-000000001", Stage::Cancelled);
 
         let scan = scan_sessions_for_scheduler(&sessions_root).expect("scan");
         let ids: Vec<&str> = scan.iter().map(ScannedSession::session_id).collect();

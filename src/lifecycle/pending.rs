@@ -1,6 +1,6 @@
 //! Pending operator-decision state.
 //!
-//! Replaces the `*Paused` / `*Pending` variants on the old `Phase` enum. Each
+//! Replaces the `*Paused` / `*Pending` variants on the old `Stage` enum. Each
 //! field is `Some(_)` when the lifecycle is waiting on the operator for that
 //! decision. The marker `*Data` structs are intentionally empty named-field
 //! structs (for TOML serialization).
@@ -65,7 +65,6 @@ impl PendingDecisions {
             || self.skip_to_impl.is_some()
             || self.dreaming.is_some()
     }
-
 }
 
 #[cfg(test)]
@@ -106,5 +105,4 @@ mod tests {
             assert!(pd.blocks());
         }
     }
-
 }

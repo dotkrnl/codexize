@@ -35,9 +35,7 @@ impl App {
             // `maybe_auto_retry` and silently relaunch a new agent instead
             // of stopping.
             self.ensure_fsm_running_mirror();
-            let _ = self
-                .fsm
-                .request_stop(crate::lifecycle::AfterStop::GoIdle);
+            let _ = self.fsm.request_stop(crate::lifecycle::AfterStop::GoIdle);
             // `/exit` is a local codexize control for interactive ACP runs,
             // not agent prompt text, so the runner completes this run by id.
             self.runner_supervisor.request_run_exit(run_id);

@@ -4,7 +4,7 @@ fn ipbr_score(name: &str, value: f64, order: usize) -> ScoreEntry {
     ScoreEntry {
         name: name.to_string(),
         display_order: order,
-        ipbr_phase_scores: IpbrPhaseScores {
+        ipbr_stage_scores: IpbrStageScores {
             idea: Some(value),
             planning: Some(value + 1.0),
             build: Some(value + 2.0),
@@ -30,7 +30,7 @@ fn models_surface_directly_from_ipbr_scores() {
             .collect::<Vec<_>>(),
         vec!["gpt-5.4", "claude-opus-4.6"]
     );
-    assert_eq!(result.models[1].ipbr_phase_scores.build, Some(93.0));
+    assert_eq!(result.models[1].ipbr_stage_scores.build, Some(93.0));
 }
 
 #[test]
@@ -68,11 +68,11 @@ fn render_dashboard_models(models: &[DashboardModel]) -> String {
         out.push_str(&format!("  display_order: {}\n", model.display_order));
         out.push_str(&format!("  score_source: {:?}\n", model.score_source));
         out.push_str(&format!(
-            "  ipbr_phase_scores: idea={:?} planning={:?} build={:?} review={:?}\n",
-            model.ipbr_phase_scores.idea,
-            model.ipbr_phase_scores.planning,
-            model.ipbr_phase_scores.build,
-            model.ipbr_phase_scores.review,
+            "  ipbr_stage_scores: idea={:?} planning={:?} build={:?} review={:?}\n",
+            model.ipbr_stage_scores.idea,
+            model.ipbr_stage_scores.planning,
+            model.ipbr_stage_scores.build,
+            model.ipbr_stage_scores.review,
         ));
     }
     out

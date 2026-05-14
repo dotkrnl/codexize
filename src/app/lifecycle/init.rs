@@ -8,7 +8,7 @@ use super::super::{
 };
 use crate::{
     cache,
-    state::{self as session_state, Phase, SessionState},
+    state::{self as session_state, SessionState, Stage},
     tasks,
 };
 use std::{
@@ -83,11 +83,11 @@ impl App {
         let current = current_node_index(&nodes);
         let selected_key = node_key_at_path(&nodes, &[current]);
         let failed_models = Self::rebuild_failed_models(&state);
-        let initial_slim_phase = state.current_phase.to_slim_phase();
+        let initial_slim_stage = state.current_stage.to_slim_stage();
         // Lift the persisted lifecycle-overlay fields out of `state` into the
         // App mirrors. `App::save_state` writes them back before each save so
         // disk and memory stay in sync.
-        let initial_paused_at_phase = state.paused_at_phase;
+        let initial_paused_at_stage = state.paused_at_stage;
         let initial_pending_decisions = state.pending_decisions.clone();
         let project_name = std::env::current_dir()
             .ok()
@@ -153,8 +153,8 @@ impl App {
             pending_shell_command: None,
             current_run_id: None,
             fsm: crate::lifecycle::Fsm::new(),
-            slim_phase: initial_slim_phase,
-            paused_at_phase: initial_paused_at_phase,
+            slim_stage: initial_slim_stage,
+            paused_at_stage: initial_paused_at_stage,
             pending_decisions: initial_pending_decisions,
             scheduler: crate::lifecycle::Scheduler::new(crate::lifecycle::default_registry()),
             failed_models,
@@ -234,7 +234,7 @@ impl App {
         // path remains below as a defense-in-depth no-op on top of this.
         backfill_orphaned_running_runs(&mut app.state);
         if let Ok(_run_id) = session_state::resume_running_runs(&mut app.state) {
-            // FSM is Idle on resume; force the legacy mirrors to match.
+            // FSM is Idle on resume; force the persisted mirrors to match.
             // Whatever `resume_running_runs` reports is moot — the backfill
             // above has already finalized every Running record.
             app.current_run_id = None;
@@ -245,7 +245,7 @@ impl App {
         }
         // Resume validation: if the session was interrupted mid-guard-decision,
         // restore the modal or fail closed.
-        if app.state.current_phase == Phase::GitGuardPending {
+        if app.state.current_stage == Stage::GitGuardPending {
             if app.state.pending_guard_decision.is_none() {
                 app.record_agent_error("guard pending state missing on resume".to_string());
                 app.clear_builder_recovery_context();
@@ -255,9 +255,9 @@ impl App {
                 app.save_state();
             }
         } else if app.state.pending_guard_decision.is_some() {
-            // Stale: pending decision with no matching phase — clear it.
+            // Stale: pending decision with no matching stage — clear it.
             let _ = app.state.log_event(
-                "warning: clearing stale pending_guard_decision (phase mismatch on resume)"
+                "warning: clearing stale pending_guard_decision (stage mismatch on resume)"
                     .to_string(),
             );
             session_state::clear_pending_guard_decision(&mut app.state);
@@ -352,9 +352,7 @@ fn backfill_orphaned_running_runs(state: &mut SessionState) {
     let orphans: Vec<u64> = state
         .agent_runs
         .iter()
-        .filter(|run| {
-            run.status == crate::state::RunStatus::Running && run.ended_at.is_none()
-        })
+        .filter(|run| run.status == crate::state::RunStatus::Running && run.ended_at.is_none())
         .map(|run| run.id)
         .collect();
     if orphans.is_empty() {

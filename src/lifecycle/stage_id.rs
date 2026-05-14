@@ -7,7 +7,7 @@
 //! implementations and registry keys even though the UI groups them under
 //! coarser modal categories.
 //!
-//! Shared by [`super::spec`] and the legacy-run translator so lifecycle code
+//! Shared by [`super::spec`] and the persisted-run translator so lifecycle code
 //! can stay decoupled from the UI's grouped `view::StageId`.
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +31,7 @@ pub enum StageId {
 }
 
 impl StageId {
-    /// Stable string id used for prompt paths and legacy `RunRecord.stage`
+    /// Stable string id used for prompt paths and persisted `RunRecord.stage`
     /// matching.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -53,7 +53,7 @@ impl StageId {
     }
 }
 
-/// Best-effort lifecycle [`StageId`] for a legacy run record's `stage` string
+/// Best-effort lifecycle [`StageId`] for a persisted run record's `stage` string
 /// and `window_name` discriminators.
 ///
 /// Synthesizes a [`StageId`] from the existing `RunRecord` fields.
@@ -88,8 +88,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn as_str_matches_legacy_run_record_literals() {
-        // Spot-check the legacy stage strings the current `RunRecord.stage`
+    fn as_str_matches_persisted_run_record_literals() {
+        // Spot-check the persisted stage strings the current `RunRecord.stage`
         // values use so the V2 cutover can read pre-cutover logs verbatim.
         assert_eq!(StageId::Brainstorm.as_str(), "brainstorm");
         assert_eq!(StageId::Coder.as_str(), "coder");

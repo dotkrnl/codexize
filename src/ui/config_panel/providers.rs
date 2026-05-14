@@ -400,10 +400,7 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
                 Style::default().fg(COLOR_DIM).add_modifier(Modifier::BOLD),
             ),
         ]),
-        ProvidersLine::Provider {
-            entry,
-            is_baked,
-        } => {
+        ProvidersLine::Provider { entry, is_baked } => {
             let focus_glyph = if focused {
                 Span::styled(
                     "▌".to_string(),

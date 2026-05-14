@@ -30,8 +30,8 @@ Assumption-logging rule (HARD):
   scope boundaries, behavioral edge cases, semantics (error/retry/
   cancellation/ordering), versioning/migration. Do NOT bury
   assumptions in prose; reviewers grep for `assumption:`. If a
-  milestone or phase rests on a non-spec assumption, that milestone or
-  phase carries its own assumption comment.
+  milestone or stage rests on a non-spec assumption, that milestone or
+  stage carries its own assumption comment.
 
 Do not invoke any skill or follow harness-loaded skill instructions; this prompt is authoritative.
 
@@ -72,7 +72,7 @@ Required plan schema for {plan}:
 
 ## Dependencies and Sequence
 1. Milestone 1: <description>
-   - Phase A: ...
+   - Stage A: ...
 2. Milestone 2: ...
 ```
 

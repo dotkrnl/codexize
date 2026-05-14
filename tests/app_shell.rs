@@ -4,7 +4,7 @@ use codexize::app_shell::{
     AppShell, ShellCommandOutcome, ShellEvent, ShellFocus, ShellImplementationAction,
 };
 use codexize::data::config::Config;
-use codexize::state::{Phase, RunRecord, RunStatus, SessionState};
+use codexize::state::{RunRecord, RunStatus, SessionState, Stage};
 use serial_test::serial;
 use std::sync::Arc;
 
@@ -25,21 +25,21 @@ fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
     result.expect("test panicked")
 }
 
-fn session(id: &str, phase: Phase) -> SessionState {
+fn session(id: &str, stage: Stage) -> SessionState {
     let mut state = SessionState::new(id.to_string());
     state.idea_text = Some(format!("idea for {id}"));
-    state.current_phase = phase;
+    state.current_stage = stage;
     state
 }
 
-fn save_session(id: &str, phase: Phase) -> SessionState {
-    let state = session(id, phase);
+fn save_session(id: &str, stage: Stage) -> SessionState {
+    let state = session(id, stage);
     state.save().expect("save session");
     state
 }
 
-fn running_state(id: &str, phase: Phase, run_id: u64) -> SessionState {
-    let mut state = session(id, phase);
+fn running_state(id: &str, stage: Stage, run_id: u64) -> SessionState {
+    let mut state = session(id, stage);
     state.agent_runs.push(RunRecord {
         id: run_id,
         stage: "sharding".to_string(),
@@ -82,7 +82,7 @@ fn key(code: UiKeyCode) -> AppCommand {
 #[serial]
 fn shell_starts_with_one_workspace_and_sidebar_hidden() {
     with_temp_root(|| {
-        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+        let initial = save_session("20260511-090000-000000001", Stage::WaitingToImplement);
         let shell = shell_for(initial);
 
         assert_eq!(shell.focused_session_id(), "20260511-090000-000000001");
@@ -103,14 +103,14 @@ fn shell_starts_with_one_workspace_and_sidebar_hidden() {
 #[serial]
 fn sidebar_enter_lazily_opens_and_focuses_without_changing_running_session() {
     with_temp_root(|| {
-        let first = save_session("20260511-090000-000000001", Phase::ShardingRunning);
-        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+        let first = save_session("20260511-090000-000000001", Stage::ShardingRunning);
+        save_session("20260511-091000-000000001", Stage::WaitingToImplement);
         let mut shell = shell_for(first);
         shell.apply_event(ShellEvent::SessionStateChanged {
             session_id: "20260511-090000-000000001".into(),
             state: Box::new(running_state(
                 "20260511-090000-000000001",
-                Phase::ShardingRunning,
+                Stage::ShardingRunning,
                 7,
             )),
         });
@@ -146,8 +146,8 @@ fn sidebar_enter_lazily_opens_and_focuses_without_changing_running_session() {
 #[serial]
 fn focus_changes_preserve_workspace_ui_state() {
     with_temp_root(|| {
-        let first = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
-        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+        let first = save_session("20260511-090000-000000001", Stage::WaitingToImplement);
+        save_session("20260511-091000-000000001", Stage::WaitingToImplement);
         let mut shell = shell_for(first);
 
         shell
@@ -181,17 +181,17 @@ fn focus_changes_preserve_workspace_ui_state() {
 #[serial]
 fn open_workspace_updates_from_events_not_disk_polling() {
     with_temp_root(|| {
-        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+        let initial = save_session("20260511-090000-000000001", Stage::WaitingToImplement);
         let mut shell = shell_for(initial);
 
-        let disk_state = session("20260511-090000-000000001", Phase::Done);
+        let disk_state = session("20260511-090000-000000001", Stage::Done);
         disk_state.save().expect("save changed state to disk");
         assert_eq!(
             shell
                 .workspace("20260511-090000-000000001")
                 .expect("workspace")
-                .phase(),
-            Phase::WaitingToImplement
+                .stage(),
+            Stage::WaitingToImplement
         );
 
         shell.apply_event(ShellEvent::SessionStateChanged {
@@ -203,8 +203,8 @@ fn open_workspace_updates_from_events_not_disk_polling() {
             shell
                 .workspace("20260511-090000-000000001")
                 .expect("workspace")
-                .phase(),
-            Phase::Done
+                .stage(),
+            Stage::Done
         );
     });
 }
@@ -213,12 +213,12 @@ fn open_workspace_updates_from_events_not_disk_polling() {
 #[serial]
 fn sidebar_lists_non_archived_non_cancelled_sessions_in_creation_order() {
     with_temp_root(|| {
-        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
-        save_session("20260511-093000-000000001", Phase::Done);
-        save_session("20260511-092000-000000001", Phase::BlockedNeedsUser);
-        let cancelled = session("20260511-094000-000000001", Phase::Cancelled);
+        let initial = save_session("20260511-090000-000000001", Stage::WaitingToImplement);
+        save_session("20260511-093000-000000001", Stage::Done);
+        save_session("20260511-092000-000000001", Stage::BlockedNeedsUser);
+        let cancelled = session("20260511-094000-000000001", Stage::Cancelled);
         cancelled.save().expect("save cancelled");
-        let mut archived = session("20260511-095000-000000001", Phase::WaitingToImplement);
+        let mut archived = session("20260511-095000-000000001", Stage::WaitingToImplement);
         archived.archived = true;
         archived.save().expect("save archived");
         let mut shell = shell_for(initial);
@@ -246,8 +246,8 @@ fn sidebar_lists_non_archived_non_cancelled_sessions_in_creation_order() {
 #[serial]
 fn sidebar_rows_expose_mm_dd_title_labels() {
     with_temp_root(|| {
-        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
-        let mut titled = session("20260512-091000-000000001", Phase::Done);
+        let initial = save_session("20260511-090000-000000001", Stage::WaitingToImplement);
+        let mut titled = session("20260512-091000-000000001", Stage::Done);
         titled.title = Some("Ship queued sharding".to_string());
         titled.save().expect("save titled");
         let mut shell = shell_for(initial);
@@ -268,7 +268,7 @@ fn sidebar_rows_expose_mm_dd_title_labels() {
 #[serial]
 fn sessions_palette_command_toggles_only_sidebar_and_returns_focus_to_workspace() {
     with_temp_root(|| {
-        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+        let initial = save_session("20260511-090000-000000001", Stage::WaitingToImplement);
         let mut shell = shell_for(initial);
 
         assert_eq!(
@@ -300,7 +300,7 @@ fn sessions_palette_command_toggles_only_sidebar_and_returns_focus_to_workspace(
 #[serial]
 fn sidebar_focus_switching_is_active_only_while_sidebar_visible() {
     with_temp_root(|| {
-        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+        let initial = save_session("20260511-090000-000000001", Stage::WaitingToImplement);
         let mut shell = shell_for(initial);
 
         assert_eq!(
@@ -334,9 +334,9 @@ fn sidebar_focus_switching_is_active_only_while_sidebar_visible() {
 #[serial]
 fn sidebar_keyboard_navigation_selects_and_opens_without_eager_loading() {
     with_temp_root(|| {
-        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
-        save_session("20260511-091000-000000001", Phase::BlockedNeedsUser);
-        save_session("20260511-092000-000000001", Phase::Done);
+        let initial = save_session("20260511-090000-000000001", Stage::WaitingToImplement);
+        save_session("20260511-091000-000000001", Stage::BlockedNeedsUser);
+        save_session("20260511-092000-000000001", Stage::Done);
         let mut shell = shell_for(initial);
 
         shell.toggle_sessions_sidebar().expect("toggle");
@@ -372,7 +372,7 @@ fn sidebar_keyboard_navigation_selects_and_opens_without_eager_loading() {
 #[serial]
 fn esc_from_sidebar_focus_hides_sidebar_after_modal_gets_first_chance() {
     with_temp_root(|| {
-        let initial = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+        let initial = save_session("20260511-090000-000000001", Stage::WaitingToImplement);
         let mut shell = shell_for(initial);
 
         shell.toggle_sessions_sidebar().expect("toggle");
@@ -396,53 +396,53 @@ fn esc_from_sidebar_focus_hides_sidebar_after_modal_gets_first_chance() {
 
 #[test]
 #[serial]
-fn sidebar_shows_every_non_archived_non_cancelled_phase() {
+fn sidebar_shows_every_non_archived_non_cancelled_stage() {
     // AC-8 / spec §"Sidebar list": the sidebar must list non-archived sessions
     // only and show enough state to distinguish focused, open, waiting,
     // running, blocked, done, and cancelled rows. Cancelled sessions are
-    // excluded. Verify that every non-archived, non-cancelled phase appears.
+    // excluded. Verify that every non-archived, non-cancelled stage appears.
     with_temp_root(|| {
-        let phases: Vec<Phase> = vec![
-            Phase::IdeaInput,
-            Phase::BrainstormRunning,
-            Phase::SpecReviewRunning,
-            Phase::SpecReviewPaused,
-            Phase::PlanningRunning,
-            Phase::PlanReviewRunning,
-            Phase::PlanReviewPaused,
-            Phase::WaitingToImplement,
-            Phase::RepoStateUpdateRunning,
-            Phase::ShardingRunning,
-            Phase::ImplementationRound(1),
-            Phase::ReviewRound(1),
-            Phase::BuilderRecovery(1),
-            Phase::BuilderRecoveryPlanReview(1),
-            Phase::BuilderRecoverySharding(1),
-            Phase::Simplification(1),
-            Phase::FinalValidation(1),
-            Phase::DreamingPending,
-            Phase::Dreaming(1),
-            Phase::BlockedNeedsUser,
-            Phase::Done,
+        let stages: Vec<Stage> = vec![
+            Stage::IdeaInput,
+            Stage::BrainstormRunning,
+            Stage::SpecReviewRunning,
+            Stage::SpecReviewPaused,
+            Stage::PlanningRunning,
+            Stage::PlanReviewRunning,
+            Stage::PlanReviewPaused,
+            Stage::WaitingToImplement,
+            Stage::RepoStateUpdateRunning,
+            Stage::ShardingRunning,
+            Stage::ImplementationRound(1),
+            Stage::ReviewRound(1),
+            Stage::BuilderRecovery(1),
+            Stage::BuilderRecoveryPlanReview(1),
+            Stage::BuilderRecoverySharding(1),
+            Stage::Simplification(1),
+            Stage::FinalValidation(1),
+            Stage::DreamingPending,
+            Stage::Dreaming(1),
+            Stage::BlockedNeedsUser,
+            Stage::Done,
         ];
 
-        for (i, phase) in phases.iter().enumerate() {
+        for (i, stage) in stages.iter().enumerate() {
             let id = format!("20260511-{:02}0000-000000001", i);
-            save_session(&id, *phase);
+            save_session(&id, *stage);
         }
 
-        let initial = save_session("20260511-990000-000000001", Phase::WaitingToImplement);
+        let initial = save_session("20260511-990000-000000001", Stage::WaitingToImplement);
         let mut shell = shell_for(initial);
         shell.toggle_sessions_sidebar().expect("toggle");
         let view = shell.sidebar_view();
 
-        let row_phases: Vec<Phase> = view.rows.iter().map(|r| r.phase).collect();
-        for phase in &phases {
-            assert!(row_phases.contains(phase), "sidebar must include {phase:?}");
+        let row_stages: Vec<Stage> = view.rows.iter().map(|r| r.stage).collect();
+        for stage in &stages {
+            assert!(row_stages.contains(stage), "sidebar must include {stage:?}");
         }
         // Cancelled must NOT appear.
         assert!(
-            !row_phases.contains(&Phase::Cancelled),
+            !row_stages.contains(&Stage::Cancelled),
             "sidebar must exclude Cancelled"
         );
     });
@@ -455,14 +455,14 @@ fn background_run_continues_when_focus_switches_to_another_session() {
     // continues when the operator focuses another session. The running
     // session's shell-level tracking must be preserved while focus changes.
     with_temp_root(|| {
-        let running = save_session("20260511-090000-000000001", Phase::ShardingRunning);
-        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+        let running = save_session("20260511-090000-000000001", Stage::ShardingRunning);
+        save_session("20260511-091000-000000001", Stage::WaitingToImplement);
         let mut shell = shell_for(running);
         shell.apply_event(ShellEvent::SessionStateChanged {
             session_id: "20260511-090000-000000001".into(),
             state: Box::new(running_state(
                 "20260511-090000-000000001",
-                Phase::ShardingRunning,
+                Stage::ShardingRunning,
                 42,
             )),
         });
@@ -510,8 +510,8 @@ fn background_run_continues_when_focus_switches_to_another_session() {
 #[serial]
 fn scheduler_tick_continues_planning_while_implementation_lane_is_occupied() {
     with_temp_root(|| {
-        let running = save_session("20260511-090000-000000001", Phase::ShardingRunning);
-        save_session("20260511-091000-000000001", Phase::PlanningRunning);
+        let running = save_session("20260511-090000-000000001", Stage::ShardingRunning);
+        save_session("20260511-091000-000000001", Stage::PlanningRunning);
         let mut shell = shell_for(running);
         shell
             .open_session("20260511-091000-000000001")
@@ -530,7 +530,7 @@ fn scheduler_tick_continues_planning_while_implementation_lane_is_occupied() {
             report.implementation,
             ShellImplementationAction::LaneOccupied {
                 session_id: "20260511-090000-000000001".to_string(),
-                phase: Phase::ShardingRunning,
+                stage: Stage::ShardingRunning,
             }
         );
         assert!(
@@ -541,8 +541,8 @@ fn scheduler_tick_continues_planning_while_implementation_lane_is_occupied() {
             shell
                 .workspace("20260511-091000-000000001")
                 .expect("planning workspace")
-                .phase(),
-            Phase::PlanningRunning
+                .stage(),
+            Stage::PlanningRunning
         );
     });
 }
@@ -551,8 +551,8 @@ fn scheduler_tick_continues_planning_while_implementation_lane_is_occupied() {
 #[serial]
 fn scheduler_tick_blocks_later_implementation_behind_earlier_blocked_session() {
     with_temp_root(|| {
-        let blocked = save_session("20260511-090000-000000001", Phase::BlockedNeedsUser);
-        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+        let blocked = save_session("20260511-090000-000000001", Stage::BlockedNeedsUser);
+        save_session("20260511-091000-000000001", Stage::WaitingToImplement);
         let mut shell = shell_for(blocked);
         shell
             .open_session("20260511-091000-000000001")
@@ -572,8 +572,8 @@ fn scheduler_tick_blocks_later_implementation_behind_earlier_blocked_session() {
         assert_eq!(
             SessionState::load("20260511-091000-000000001")
                 .expect("load later")
-                .current_phase,
-            Phase::WaitingToImplement,
+                .current_stage,
+            Stage::WaitingToImplement,
             "later waiting session must not dispatch while the earlier head is blocked"
         );
     });
@@ -583,9 +583,9 @@ fn scheduler_tick_blocks_later_implementation_behind_earlier_blocked_session() {
 #[serial]
 fn scheduler_tick_skips_cancelled_and_dispatches_oldest_waiting_session() {
     with_temp_root(|| {
-        let initial = save_session("20260511-090000-000000001", Phase::Cancelled);
-        save_session("20260511-091000-000000001", Phase::WaitingToImplement);
-        save_session("20260511-092000-000000001", Phase::WaitingToImplement);
+        let initial = save_session("20260511-090000-000000001", Stage::Cancelled);
+        save_session("20260511-091000-000000001", Stage::WaitingToImplement);
+        save_session("20260511-092000-000000001", Stage::WaitingToImplement);
         let mut shell = shell_for(initial);
         shell
             .open_session("20260511-091000-000000001")
@@ -603,20 +603,20 @@ fn scheduler_tick_skips_cancelled_and_dispatches_oldest_waiting_session() {
             report.implementation,
             ShellImplementationAction::DispatchedWaiting {
                 session_id: "20260511-091000-000000001".to_string(),
-                phase: Phase::ShardingRunning,
+                stage: Stage::ShardingRunning,
             }
         );
         assert_eq!(
             SessionState::load("20260511-091000-000000001")
                 .expect("load dispatched")
-                .current_phase,
-            Phase::ShardingRunning
+                .current_stage,
+            Stage::ShardingRunning
         );
         assert_eq!(
             SessionState::load("20260511-092000-000000001")
                 .expect("load later")
-                .current_phase,
-            Phase::WaitingToImplement,
+                .current_stage,
+            Stage::WaitingToImplement,
             "oldest eligible waiting session should dispatch first"
         );
     });
@@ -628,7 +628,7 @@ fn scheduler_tick_does_not_duplicate_background_planning_run_when_models_loaded(
     use chrono::Utc;
     use codexize::state::RunRecord;
     with_temp_root(|| {
-        let mut state = session("20260511-090000-000000001", Phase::PlanningRunning);
+        let mut state = session("20260511-090000-000000001", Stage::PlanningRunning);
         state.idea_text = Some("idea".to_string());
         let run = RunRecord {
             id: 42,

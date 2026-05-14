@@ -5,7 +5,7 @@
 //! and tests should prefer these wrappers; tests that need a pure mutation
 //! can still call the logic-layer counterpart directly.
 use crate::adapters::EffortLevel;
-use crate::logic::pipeline::phase::Phase;
+use crate::logic::pipeline::stage::Stage;
 use crate::logic::pipeline::transitions::{
     FinishedRunRecord, SIMPLIFICATION_ATTEMPT_CAP, VALIDATION_ATTEMPT_CAP, validate_transition,
 };
@@ -15,13 +15,13 @@ use chrono::Utc;
 /// Execute a validated transition, updating the state and persisting it.
 ///
 /// Force-ship guard: `BlockedNeedsUser -> Done` is rejected at runtime unless
-/// the current `block_origin` is `FinalValidation`. The static phase graph
+/// the current `block_origin` is `FinalValidation`. The static stage graph
 /// allows the edge so the operator-facing affordance can be surfaced, but
 /// only final-validation blocks may take it.
-pub fn execute_transition(state: &mut SessionState, to: Phase) -> Result<()> {
-    validate_transition(&state.current_phase, &to).map_err(|e| anyhow::anyhow!("{e}"))?;
-    if matches!(state.current_phase, Phase::BlockedNeedsUser)
-        && matches!(to, Phase::Done)
+pub fn execute_transition(state: &mut SessionState, to: Stage) -> Result<()> {
+    validate_transition(&state.current_stage, &to).map_err(|e| anyhow::anyhow!("{e}"))?;
+    if matches!(state.current_stage, Stage::BlockedNeedsUser)
+        && matches!(to, Stage::Done)
         && state.block_origin != Some(BlockOrigin::FinalValidation)
     {
         anyhow::bail!(
@@ -29,19 +29,19 @@ pub fn execute_transition(state: &mut SessionState, to: Phase) -> Result<()> {
             state.block_origin
         );
     }
-    let old_phase = state.current_phase;
-    state.current_phase = to;
+    let old_stage = state.current_stage;
+    state.current_stage = to;
     // `block_origin` describes the *current* block. Clear it whenever the
     // session leaves `BlockedNeedsUser` so a subsequent re-block must set a
     // fresh origin and stale provenance can never satisfy the force-ship
     // guard above.
-    if matches!(old_phase, Phase::BlockedNeedsUser) && !matches!(to, Phase::BlockedNeedsUser) {
+    if matches!(old_stage, Stage::BlockedNeedsUser) && !matches!(to, Stage::BlockedNeedsUser) {
         state.block_origin = None;
     }
     state
         .log_event(format!(
-            "transitioned phase from {:?} to {:?}",
-            old_phase, to
+            "transitioned stage from {:?} to {:?}",
+            old_stage, to
         ))
         .context("failed to log transition event")?;
     state
@@ -51,11 +51,11 @@ pub fn execute_transition(state: &mut SessionState, to: Phase) -> Result<()> {
 }
 /// Set `block_origin` and transition to `BlockedNeedsUser`. The single throat
 /// for entering a block — every code path that would have called
-/// `execute_transition(state, Phase::BlockedNeedsUser)` should call this
+/// `execute_transition(state, Stage::BlockedNeedsUser)` should call this
 /// instead so the persisted provenance is always populated.
 pub fn block_with_origin(state: &mut SessionState, origin: BlockOrigin) -> Result<()> {
     state.block_origin = Some(origin);
-    execute_transition(state, Phase::BlockedNeedsUser)
+    execute_transition(state, Stage::BlockedNeedsUser)
 }
 /// Outcome of [`enter_final_validation`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,10 +80,10 @@ pub fn enter_final_validation(
         block_with_origin(state, BlockOrigin::FinalValidation)?;
         return Ok(FinalValidationEntry::CapExceeded);
     }
-    let target = Phase::FinalValidation(round);
-    // Validate before incrementing so an illegal source phase cannot leak a
+    let target = Stage::FinalValidation(round);
+    // Validate before incrementing so an illegal source stage cannot leak a
     // stale attempt count into the persisted state.
-    validate_transition(&state.current_phase, &target).map_err(|e| anyhow::anyhow!("{e}"))?;
+    validate_transition(&state.current_stage, &target).map_err(|e| anyhow::anyhow!("{e}"))?;
     state.validation_attempts += 1;
     let attempt = state.validation_attempts;
     execute_transition(state, target)?;
@@ -116,10 +116,10 @@ pub fn enter_simplification(state: &mut SessionState, round: u32) -> Result<Simp
         block_with_origin(state, BlockOrigin::Simplification)?;
         return Ok(SimplificationEntry::CapExceeded);
     }
-    let target = Phase::Simplification(round);
-    // Validate before incrementing so an illegal source phase cannot leak a
+    let target = Stage::Simplification(round);
+    // Validate before incrementing so an illegal source stage cannot leak a
     // stale attempt count into the persisted state.
-    validate_transition(&state.current_phase, &target).map_err(|e| anyhow::anyhow!("{e}"))?;
+    validate_transition(&state.current_stage, &target).map_err(|e| anyhow::anyhow!("{e}"))?;
     let next = attempts + 1;
     state.simplification_attempts.insert(round, next);
     execute_transition(state, target)?;
@@ -140,14 +140,14 @@ fn compute_section_path(
         "brainstorm" => vec![SectionPart::Brainstorm],
         "spec-review" => vec![SectionPart::SpecReview],
         "planning" => vec![SectionPart::Planning],
-        "plan-review" if matches!(state.current_phase, Phase::BuilderRecoveryPlanReview(_)) => {
+        "plan-review" if matches!(state.current_stage, Stage::BuilderRecoveryPlanReview(_)) => {
             vec![
                 SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),
                 SectionPart::RecoveryPlanReview { round },
             ]
         }
         "plan-review" => vec![SectionPart::PlanReview],
-        "sharding" if matches!(state.current_phase, Phase::BuilderRecoverySharding(_)) => vec![
+        "sharding" if matches!(state.current_stage, Stage::BuilderRecoverySharding(_)) => vec![
             SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),
             SectionPart::RecoverySharding { round },
         ],

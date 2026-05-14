@@ -2,7 +2,7 @@ use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::spec_review_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, MessageKind, Phase, RunStatus};
+use crate::state::{self as session_state, MessageKind, RunStatus, Stage};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use std::path::Path;
@@ -32,8 +32,8 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let round = match self.state.current_phase {
-            Phase::SpecReviewPaused => self.completed_rounds("spec-review") + 1,
+        let round = match self.state.current_stage {
+            Stage::SpecReviewPaused => self.completed_rounds("spec-review") + 1,
             _ => self.completed_rounds("spec-review").max(1),
         };
         let session_dir = session_state::session_dir(&self.state.session_id);
@@ -45,8 +45,8 @@ impl App {
             .join("prompts")
             .join(format!("spec-review-{round}.md"));
         let modes = self.state.launch_modes();
-        let phase = Self::phase_for_stage("spec-review");
-        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let stage = Self::selection_stage_for_stage("spec-review");
+        let effort = modes.effort_for(EffortLevel::Normal, stage);
         let runs: Vec<_> = self
             .state
             .agent_runs
@@ -181,11 +181,11 @@ impl App {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('y') | KeyCode::Enter => {
                 self.clear_agent_error();
-                self.transition_to_phase_logged(Phase::PlanningRunning);
+                self.transition_to_stage_logged(Stage::PlanningRunning);
                 false
             }
             KeyCode::Char('n') => {
-                self.transition_to_phase_logged(Phase::SpecReviewRunning);
+                self.transition_to_stage_logged(Stage::SpecReviewRunning);
                 self.launch_spec_review();
                 false
             }
@@ -193,14 +193,14 @@ impl App {
             _ => false,
         }
     }
-    /// Co-located success-finalization for `Phase::SpecReviewRunning`.
+    /// Co-located success-finalization for `Stage::SpecReviewRunning`.
     pub(crate) fn finalize_spec_review_success(
         &mut self,
         run: &crate::state::RunRecord,
     ) -> Result<()> {
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
-        self.transition_to_phase(Phase::SpecReviewPaused)?;
+        self.transition_to_stage(Stage::SpecReviewPaused)?;
         self.append_system_message(
             run.id,
             MessageKind::Summary,

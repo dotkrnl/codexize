@@ -1,21 +1,21 @@
 use super::App;
-use crate::data::notifications::{InteractiveWaitMarker, NotificationContext, phase_needs_input};
+use crate::data::notifications::{InteractiveWaitMarker, NotificationContext, stage_needs_input};
 #[cfg(test)]
 use crate::data::notifications::{NotificationEvent, NotificationRuntime};
-use crate::state::{BlockOrigin, MessageKind, Phase, RunRecord, SessionState};
+use crate::state::{BlockOrigin, MessageKind, RunRecord, SessionState, Stage};
 use std::time::Duration;
 
 const NOTIFICATION_WARNING_TTL: Duration = Duration::from_secs(8);
 const NOTIFICATION_SHUTDOWN_DRAIN: Duration = Duration::from_secs(2);
 
 impl App {
-    pub(crate) fn maybe_emit_phase_notification(&mut self, phase: Phase) {
-        if phase_needs_input(phase) {
-            let context = self.notification_context_for_phase(phase);
-            self.notification_runtime.emit_phase_wait(phase, context);
-        } else if phase == Phase::Done {
+    pub(crate) fn maybe_emit_stage_notification(&mut self, stage: Stage) {
+        if stage_needs_input(stage) {
+            let context = self.notification_context_for_stage(stage);
+            self.notification_runtime.emit_stage_wait(stage, context);
+        } else if stage == Stage::Done {
             let context = self.notification_context_for_done();
-            self.notification_runtime.emit_pipeline_done(phase, context);
+            self.notification_runtime.emit_pipeline_done(stage, context);
         }
     }
 
@@ -40,7 +40,7 @@ impl App {
         };
         let context = self.notification_context_for_run(&run);
         self.notification_runtime
-            .emit_interactive_wait(self.state.current_phase, context, marker);
+            .emit_interactive_wait(self.state.current_stage, context, marker);
     }
 
     pub(crate) fn poll_notification_reports(&mut self) {
@@ -90,26 +90,26 @@ impl App {
         })
     }
 
-    fn notification_context_for_phase(&self, phase: Phase) -> NotificationContext {
-        let mut context = match phase {
-            Phase::BlockedNeedsUser => {
-                let stage = self
+    fn notification_context_for_stage(&self, stage: Stage) -> NotificationContext {
+        let mut context = match stage {
+            Stage::BlockedNeedsUser => {
+                let stage_name = self
                     .state
                     .block_origin
                     .map(stage_for_block_origin)
                     .or_else(|| self.running_run().map(|run| run.stage.as_str()))
                     .unwrap_or("blocked")
                     .to_string();
-                self.notification_context(stage, None, phase_round(phase), None, None)
+                self.notification_context(stage_name, None, stage_round(stage), None, None)
             }
-            Phase::SpecReviewPaused => self.notification_context_for_stage("spec-review"),
-            Phase::PlanReviewPaused => self.notification_context_for_stage("plan-review"),
-            Phase::SkipToImplPending => {
+            Stage::SpecReviewPaused => self.notification_context_for_stage_name("spec-review"),
+            Stage::PlanReviewPaused => self.notification_context_for_stage_name("plan-review"),
+            Stage::SkipToImplPending => {
                 // Skip confirmation is a modal rather than a RunRecord stage;
                 // a stable pseudo-stage keeps its dedupe identity reviewable.
-                self.notification_context_for_stage("skip-to-impl")
+                self.notification_context_for_stage_name("skip-to-impl")
             }
-            Phase::GitGuardPending => {
+            Stage::GitGuardPending => {
                 if let Some(decision) = &self.state.pending_guard_decision {
                     self.notification_context(
                         decision.stage.clone(),
@@ -119,29 +119,29 @@ impl App {
                         Some(decision.run_id),
                     )
                 } else {
-                    self.notification_context_for_stage("git-guard")
+                    self.notification_context_for_stage_name("git-guard")
                 }
             }
             _ => self.notification_context(
-                phase.label().to_ascii_lowercase().replace(' ', "-"),
+                stage.label().to_ascii_lowercase().replace(' ', "-"),
                 None,
-                phase_round(phase),
+                stage_round(stage),
                 None,
                 None,
             ),
         };
-        // Phase waits surface "what was the agent doing when this fired?" —
+        // Stage waits surface "what was the agent doing when this fired?" —
         // the live-summary line is the right answer. Skip-to-impl and
         // git-guard prompts are modal decisions where the live summary
         // would just repeat the prompt, so omit it there.
-        if phase_carries_live_summary(phase) {
+        if stage_carries_live_summary(stage) {
             context.last_live_summary = self.last_live_summary_text();
         }
         context
     }
 
     fn notification_context_for_done(&self) -> NotificationContext {
-        let mut context = self.notification_context_for_stage("pipeline");
+        let mut context = self.notification_context_for_stage_name("pipeline");
         context.last_live_summary = self.last_live_summary_text();
         context
     }
@@ -161,7 +161,7 @@ impl App {
         context
     }
 
-    fn notification_context_for_stage(&self, stage: &str) -> NotificationContext {
+    fn notification_context_for_stage_name(&self, stage: &str) -> NotificationContext {
         self.notification_context(stage.to_string(), None, None, None, None)
     }
 
@@ -254,25 +254,25 @@ fn stage_for_block_origin(origin: BlockOrigin) -> &'static str {
     }
 }
 
-/// True when the phase represents "the agent paused, here's what it was
+/// True when the stage represents "the agent paused, here's what it was
 /// doing": a live-summary excerpt is then the right context to surface in
 /// the notification body. Skip-to-impl and git-guard prompts are modal
 /// decisions where the live summary would just echo the prompt itself, so
 /// they opt out and let the lead sentence stand alone.
-fn phase_carries_live_summary(phase: Phase) -> bool {
-    !matches!(phase, Phase::SkipToImplPending | Phase::GitGuardPending)
+fn stage_carries_live_summary(stage: Stage) -> bool {
+    !matches!(stage, Stage::SkipToImplPending | Stage::GitGuardPending)
 }
 
-fn phase_round(phase: Phase) -> Option<u32> {
-    match phase {
-        Phase::ImplementationRound(round)
-        | Phase::ReviewRound(round)
-        | Phase::BuilderRecovery(round)
-        | Phase::BuilderRecoveryPlanReview(round)
-        | Phase::BuilderRecoverySharding(round)
-        | Phase::FinalValidation(round)
-        | Phase::Dreaming(round)
-        | Phase::Simplification(round) => Some(round),
+fn stage_round(stage: Stage) -> Option<u32> {
+    match stage {
+        Stage::ImplementationRound(round)
+        | Stage::ReviewRound(round)
+        | Stage::BuilderRecovery(round)
+        | Stage::BuilderRecoveryPlanReview(round)
+        | Stage::BuilderRecoverySharding(round)
+        | Stage::FinalValidation(round)
+        | Stage::Dreaming(round)
+        | Stage::Simplification(round) => Some(round),
         _ => None,
     }
 }

@@ -56,7 +56,7 @@ pub fn emit_annotated(config: &Config) -> String {
     out.push('\n');
 
     out.push_str("[ntfy.events]\n");
-    writeln!(out, "phase_wait = {}", n.events.phase_wait.value()).ok();
+    writeln!(out, "stage_wait = {}", n.events.stage_wait.value()).ok();
     writeln!(
         out,
         "interactive_wait = {}",

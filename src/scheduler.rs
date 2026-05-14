@@ -9,63 +9,63 @@
 //!
 //! The module is intentionally IO-free so it can be unit-tested against
 //! hand-built session lists without a tempdir.
-use crate::state::Phase;
+use crate::state::Stage;
 
-/// Lane categorization for a [`Phase`]. The scheduler uses lane membership
+/// Lane categorization for a [`Stage`]. The scheduler uses lane membership
 /// to decide whether a session may run alongside others (Planning) or must
 /// be the sole active session in its lane across the entire project
 /// (Implementation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PhaseLane {
+pub enum StageLane {
     Planning,
     Implementation,
     /// Terminal or operator-blocked: not eligible for either lane.
     Other,
 }
 
-/// Return the lane a `Phase` belongs to.
+/// Return the lane a `Stage` belongs to.
 ///
 /// `IdeaInput`, `SkipToImplPending`, `GitGuardPending`, `WaitingToImplement`,
 /// `Done`, `Cancelled`, and `BlockedNeedsUser` are deliberately `Other` —
-/// they are not active automation phases. `WaitingToImplement` is the
+/// they are not active automation stages. `WaitingToImplement` is the
 /// implementation lane's head-of-queue candidate, not an occupant.
-pub fn phase_lane(phase: Phase) -> PhaseLane {
-    match phase {
-        Phase::BrainstormRunning
-        | Phase::SpecReviewRunning
-        | Phase::SpecReviewPaused
-        | Phase::PlanningRunning
-        | Phase::PlanReviewRunning
-        | Phase::PlanReviewPaused => PhaseLane::Planning,
-        Phase::RepoStateUpdateRunning
-        | Phase::ShardingRunning
-        | Phase::ImplementationRound(_)
-        | Phase::ReviewRound(_)
-        | Phase::BuilderRecovery(_)
-        | Phase::BuilderRecoveryPlanReview(_)
-        | Phase::BuilderRecoverySharding(_)
-        | Phase::Simplification(_)
-        | Phase::FinalValidation(_)
-        | Phase::DreamingPending
-        | Phase::Dreaming(_) => PhaseLane::Implementation,
-        Phase::IdeaInput
-        | Phase::WaitingToImplement
-        | Phase::SkipToImplPending
-        | Phase::GitGuardPending
-        | Phase::Done
-        | Phase::Cancelled
-        | Phase::BlockedNeedsUser => PhaseLane::Other,
+pub fn stage_lane(stage: Stage) -> StageLane {
+    match stage {
+        Stage::BrainstormRunning
+        | Stage::SpecReviewRunning
+        | Stage::SpecReviewPaused
+        | Stage::PlanningRunning
+        | Stage::PlanReviewRunning
+        | Stage::PlanReviewPaused => StageLane::Planning,
+        Stage::RepoStateUpdateRunning
+        | Stage::ShardingRunning
+        | Stage::ImplementationRound(_)
+        | Stage::ReviewRound(_)
+        | Stage::BuilderRecovery(_)
+        | Stage::BuilderRecoveryPlanReview(_)
+        | Stage::BuilderRecoverySharding(_)
+        | Stage::Simplification(_)
+        | Stage::FinalValidation(_)
+        | Stage::DreamingPending
+        | Stage::Dreaming(_) => StageLane::Implementation,
+        Stage::IdeaInput
+        | Stage::WaitingToImplement
+        | Stage::SkipToImplPending
+        | Stage::GitGuardPending
+        | Stage::Done
+        | Stage::Cancelled
+        | Stage::BlockedNeedsUser => StageLane::Other,
     }
 }
 
 #[inline]
-pub fn is_planning_lane_phase(phase: Phase) -> bool {
-    phase_lane(phase) == PhaseLane::Planning
+pub fn is_planning_lane_stage(stage: Stage) -> bool {
+    stage_lane(stage) == StageLane::Planning
 }
 
 #[inline]
-pub fn is_implementation_lane_phase(phase: Phase) -> bool {
-    phase_lane(phase) == PhaseLane::Implementation
+pub fn is_implementation_lane_stage(stage: Stage) -> bool {
+    stage_lane(stage) == StageLane::Implementation
 }
 
 /// Minimal session snapshot the scheduler consumes. Decoupled from
@@ -74,7 +74,7 @@ pub fn is_implementation_lane_phase(phase: Phase) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchedulerSession {
     pub session_id: String,
-    pub current_phase: Phase,
+    pub current_stage: Stage,
 }
 
 /// One entry in a scan: either a loaded snapshot or a per-session load
@@ -95,25 +95,25 @@ impl ScannedSession {
 }
 
 /// A planning-lane continuation. The scheduler emits one per session whose
-/// current phase is a planning-lane phase. Continuations are independent:
+/// current stage is a planning-lane stage. Continuations are independent:
 /// nothing else in the project blocks them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanningContinuation {
     pub session_id: String,
-    pub phase: Phase,
+    pub stage: Stage,
 }
 
 /// Outcome of the single implementation-lane decision per tick.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImplementationDecision {
-    /// Some session is already in an implementation-lane phase. The shell
+    /// Some session is already in an implementation-lane stage. The shell
     /// must not start another implementation-lane stage anywhere.
-    LaneOccupied { session_id: String, phase: Phase },
+    LaneOccupied { session_id: String, stage: Stage },
     /// Oldest unresolved session is `BlockedNeedsUser`. Lane is idle and
     /// remains idle until the operator resolves the block.
     BlockedByHead { session_id: String },
     /// Oldest unresolved session is still planning. Lane is idle this tick.
-    PlanningHead { session_id: String, phase: Phase },
+    PlanningHead { session_id: String, stage: Stage },
     /// Oldest unresolved session is `WaitingToImplement` and eligible. The
     /// shell consults the repo-state-update decider to choose between
     /// `RepoStateUpdateRunning` and `ShardingRunning`.
@@ -150,17 +150,17 @@ pub fn evaluate_tick(scanned: &[ScannedSession]) -> SchedulerTick {
     // implementation, or any other state never blocks a later session's
     // planning lane" rule.
     let mut planning = Vec::new();
-    let mut lane_occupied: Option<(String, Phase)> = None;
+    let mut lane_occupied: Option<(String, Stage)> = None;
     for entry in scanned {
         if let ScannedSession::Loaded(session) = entry {
-            if is_planning_lane_phase(session.current_phase) {
+            if is_planning_lane_stage(session.current_stage) {
                 planning.push(PlanningContinuation {
                     session_id: session.session_id.clone(),
-                    phase: session.current_phase,
+                    stage: session.current_stage,
                 });
             }
-            if lane_occupied.is_none() && is_implementation_lane_phase(session.current_phase) {
-                lane_occupied = Some((session.session_id.clone(), session.current_phase));
+            if lane_occupied.is_none() && is_implementation_lane_stage(session.current_stage) {
+                lane_occupied = Some((session.session_id.clone(), session.current_stage));
             }
         }
     }
@@ -192,30 +192,30 @@ pub fn evaluate_tick(scanned: &[ScannedSession]) -> SchedulerTick {
             ScannedSession::Loaded(session) => {
                 // Done and Cancelled sessions never count as the head; the
                 // scheduler must walk past them to find a live candidate.
-                if matches!(session.current_phase, Phase::Done | Phase::Cancelled) {
+                if matches!(session.current_stage, Stage::Done | Stage::Cancelled) {
                     continue;
                 }
                 head_chosen = true;
-                implementation = match session.current_phase {
-                    Phase::BlockedNeedsUser => ImplementationDecision::BlockedByHead {
+                implementation = match session.current_stage {
+                    Stage::BlockedNeedsUser => ImplementationDecision::BlockedByHead {
                         session_id: session.session_id.clone(),
                     },
-                    Phase::WaitingToImplement => ImplementationDecision::DispatchWaiting {
+                    Stage::WaitingToImplement => ImplementationDecision::DispatchWaiting {
                         session_id: session.session_id.clone(),
                     },
-                    phase if is_planning_lane_phase(phase) => {
+                    stage if is_planning_lane_stage(stage) => {
                         ImplementationDecision::PlanningHead {
                             session_id: session.session_id.clone(),
-                            phase,
+                            stage,
                         }
                     }
-                    phase if is_implementation_lane_phase(phase) => {
+                    stage if is_implementation_lane_stage(stage) => {
                         // The head itself occupies the lane — preserved as
                         // LaneOccupied so callers get a single canonical
                         // "lane busy" answer.
                         ImplementationDecision::LaneOccupied {
                             session_id: session.session_id.clone(),
-                            phase,
+                            stage,
                         }
                     }
                     // Other (IdeaInput / SkipToImplPending / GitGuardPending):
@@ -232,9 +232,9 @@ pub fn evaluate_tick(scanned: &[ScannedSession]) -> SchedulerTick {
         }
     }
 
-    // If a different session is already in an impl-lane phase, the lane
+    // If a different session is already in an impl-lane stage, the lane
     // is occupied even if the oldest-not-Done head suggests otherwise.
-    if let Some((occupant_id, occupant_phase)) = lane_occupied {
+    if let Some((occupant_id, occupant_stage)) = lane_occupied {
         // Skip the override when the head itself was already that occupant
         // (LaneOccupied was emitted in the head walk).
         let already_reported = matches!(
@@ -245,7 +245,7 @@ pub fn evaluate_tick(scanned: &[ScannedSession]) -> SchedulerTick {
         if !already_reported {
             implementation = ImplementationDecision::LaneOccupied {
                 session_id: occupant_id,
-                phase: occupant_phase,
+                stage: occupant_stage,
             };
         }
     }
@@ -294,22 +294,22 @@ pub fn decide_waiting_dispatch(
 
 /// Manual-retry gating per spec § Auto-launch rules: a retry of an
 /// implementation-lane stage is allowed only when the lane is otherwise
-/// idle (other sessions are not in an impl-lane phase). Retries of
+/// idle (other sessions are not in an impl-lane stage). Retries of
 /// non-impl-lane stages are always allowed; the focused session may be
 /// the one whose run just stopped, so its own (now-terminated) impl-lane
-/// phase does not count as occupancy.
+/// stage does not count as occupancy.
 pub fn manual_retry_allowed(
-    target_phase: Phase,
+    target_stage: Stage,
     focused_session_id: &str,
     scanned: &[ScannedSession],
 ) -> bool {
-    if !is_implementation_lane_phase(target_phase) {
+    if !is_implementation_lane_stage(target_stage) {
         return true;
     }
     !scanned.iter().any(|entry| match entry {
         ScannedSession::Loaded(session) => {
             session.session_id != focused_session_id
-                && is_implementation_lane_phase(session.current_phase)
+                && is_implementation_lane_stage(session.current_stage)
         }
         ScannedSession::Corrupt { .. } => false,
     })
@@ -319,10 +319,10 @@ pub fn manual_retry_allowed(
 mod tests {
     use super::*;
 
-    fn loaded(id: &str, phase: Phase) -> ScannedSession {
+    fn loaded(id: &str, stage: Stage) -> ScannedSession {
         ScannedSession::Loaded(SchedulerSession {
             session_id: id.to_string(),
-            current_phase: phase,
+            current_stage: stage,
         })
     }
 
@@ -334,50 +334,50 @@ mod tests {
     }
 
     #[test]
-    fn phase_lane_classifies_each_phase() {
+    fn stage_lane_classifies_each_stage() {
         // Planning lane: explicit list from spec § Queue scheduler.
-        for phase in [
-            Phase::BrainstormRunning,
-            Phase::SpecReviewRunning,
-            Phase::SpecReviewPaused,
-            Phase::PlanningRunning,
-            Phase::PlanReviewRunning,
-            Phase::PlanReviewPaused,
+        for stage in [
+            Stage::BrainstormRunning,
+            Stage::SpecReviewRunning,
+            Stage::SpecReviewPaused,
+            Stage::PlanningRunning,
+            Stage::PlanReviewRunning,
+            Stage::PlanReviewPaused,
         ] {
-            assert_eq!(phase_lane(phase), PhaseLane::Planning, "phase: {:?}", phase);
+            assert_eq!(stage_lane(stage), StageLane::Planning, "stage: {:?}", stage);
         }
         // Implementation lane: explicit list from spec § Queue scheduler.
-        for phase in [
-            Phase::RepoStateUpdateRunning,
-            Phase::ShardingRunning,
-            Phase::ImplementationRound(1),
-            Phase::ReviewRound(2),
-            Phase::BuilderRecovery(1),
-            Phase::BuilderRecoveryPlanReview(1),
-            Phase::BuilderRecoverySharding(1),
-            Phase::Simplification(1),
-            Phase::FinalValidation(1),
-            Phase::DreamingPending,
-            Phase::Dreaming(1),
+        for stage in [
+            Stage::RepoStateUpdateRunning,
+            Stage::ShardingRunning,
+            Stage::ImplementationRound(1),
+            Stage::ReviewRound(2),
+            Stage::BuilderRecovery(1),
+            Stage::BuilderRecoveryPlanReview(1),
+            Stage::BuilderRecoverySharding(1),
+            Stage::Simplification(1),
+            Stage::FinalValidation(1),
+            Stage::DreamingPending,
+            Stage::Dreaming(1),
         ] {
             assert_eq!(
-                phase_lane(phase),
-                PhaseLane::Implementation,
-                "phase: {:?}",
-                phase
+                stage_lane(stage),
+                StageLane::Implementation,
+                "stage: {:?}",
+                stage
             );
         }
-        // Not-eligible: terminal, operator-blocking, idle-head phases.
-        for phase in [
-            Phase::IdeaInput,
-            Phase::WaitingToImplement,
-            Phase::SkipToImplPending,
-            Phase::GitGuardPending,
-            Phase::Done,
-            Phase::Cancelled,
-            Phase::BlockedNeedsUser,
+        // Not-eligible: terminal, operator-blocking, idle-head stages.
+        for stage in [
+            Stage::IdeaInput,
+            Stage::WaitingToImplement,
+            Stage::SkipToImplPending,
+            Stage::GitGuardPending,
+            Stage::Done,
+            Stage::Cancelled,
+            Stage::BlockedNeedsUser,
         ] {
-            assert_eq!(phase_lane(phase), PhaseLane::Other, "phase: {:?}", phase);
+            assert_eq!(stage_lane(stage), StageLane::Other, "stage: {:?}", stage);
         }
     }
 
@@ -388,9 +388,9 @@ mod tests {
         // "earlier BlockedNeedsUser never blocks a later session's
         // planning lane."
         let scan = vec![
-            loaded("01-blocked", Phase::BlockedNeedsUser),
-            loaded("02-brainstorm", Phase::BrainstormRunning),
-            loaded("03-plan-review-paused", Phase::PlanReviewPaused),
+            loaded("01-blocked", Stage::BlockedNeedsUser),
+            loaded("02-brainstorm", Stage::BrainstormRunning),
+            loaded("03-plan-review-paused", Stage::PlanReviewPaused),
         ];
         let tick = evaluate_tick(&scan);
         let ids: Vec<&str> = tick
@@ -404,14 +404,14 @@ mod tests {
     #[test]
     fn implementation_lane_single_occupancy_blocks_other_starts() {
         let scan = vec![
-            loaded("01-sharding", Phase::ShardingRunning),
-            loaded("02-waiting", Phase::WaitingToImplement),
+            loaded("01-sharding", Stage::ShardingRunning),
+            loaded("02-waiting", Stage::WaitingToImplement),
         ];
         let tick = evaluate_tick(&scan);
         match tick.implementation {
-            ImplementationDecision::LaneOccupied { session_id, phase } => {
+            ImplementationDecision::LaneOccupied { session_id, stage } => {
                 assert_eq!(session_id, "01-sharding");
-                assert_eq!(phase, Phase::ShardingRunning);
+                assert_eq!(stage, Stage::ShardingRunning);
             }
             other => panic!("expected LaneOccupied, got {other:?}"),
         }
@@ -420,10 +420,10 @@ mod tests {
     #[test]
     fn implementation_lane_picks_oldest_waiting_when_idle() {
         let scan = vec![
-            loaded("01-done", Phase::Done),
-            loaded("02-cancelled", Phase::Cancelled),
-            loaded("03-waiting", Phase::WaitingToImplement),
-            loaded("04-waiting", Phase::WaitingToImplement),
+            loaded("01-done", Stage::Done),
+            loaded("02-cancelled", Stage::Cancelled),
+            loaded("03-waiting", Stage::WaitingToImplement),
+            loaded("04-waiting", Stage::WaitingToImplement),
         ];
         let tick = evaluate_tick(&scan);
         assert_eq!(
@@ -439,8 +439,8 @@ mod tests {
         // Head BlockedNeedsUser blocks the lane even when later sessions
         // are eligible WaitingToImplement.
         let scan = vec![
-            loaded("01-blocked", Phase::BlockedNeedsUser),
-            loaded("02-waiting", Phase::WaitingToImplement),
+            loaded("01-blocked", Stage::BlockedNeedsUser),
+            loaded("02-waiting", Stage::WaitingToImplement),
         ];
         let tick = evaluate_tick(&scan);
         assert_eq!(
@@ -454,8 +454,8 @@ mod tests {
     #[test]
     fn cancelled_session_does_not_block_later_implementation() {
         let scan = vec![
-            loaded("01-cancelled", Phase::Cancelled),
-            loaded("02-waiting", Phase::WaitingToImplement),
+            loaded("01-cancelled", Stage::Cancelled),
+            loaded("02-waiting", Stage::WaitingToImplement),
         ];
         let tick = evaluate_tick(&scan);
         assert_eq!(
@@ -471,14 +471,14 @@ mod tests {
         // Head is still planning — implementation lane idle this tick.
         // The same session is also reported in planning continuations.
         let scan = vec![
-            loaded("01-planning", Phase::PlanningRunning),
-            loaded("02-waiting", Phase::WaitingToImplement),
+            loaded("01-planning", Stage::PlanningRunning),
+            loaded("02-waiting", Stage::WaitingToImplement),
         ];
         let tick = evaluate_tick(&scan);
         match &tick.implementation {
-            ImplementationDecision::PlanningHead { session_id, phase } => {
+            ImplementationDecision::PlanningHead { session_id, stage } => {
                 assert_eq!(session_id, "01-planning");
-                assert_eq!(*phase, Phase::PlanningRunning);
+                assert_eq!(*stage, Stage::PlanningRunning);
             }
             other => panic!("expected PlanningHead, got {other:?}"),
         }
@@ -496,7 +496,7 @@ mod tests {
         // captured for operator visibility but does not change the
         // decision.
         let scan = vec![
-            loaded("01-waiting", Phase::WaitingToImplement),
+            loaded("01-waiting", Stage::WaitingToImplement),
             corrupt("02-corrupt", "broken toml"),
         ];
         let tick = evaluate_tick(&scan);
@@ -516,7 +516,7 @@ mod tests {
     fn corrupt_earlier_session_blocks_implementation_lane() {
         let scan = vec![
             corrupt("01-corrupt", "fs error"),
-            loaded("02-waiting", Phase::WaitingToImplement),
+            loaded("02-waiting", Stage::WaitingToImplement),
         ];
         let tick = evaluate_tick(&scan);
         match tick.implementation {
@@ -534,8 +534,8 @@ mod tests {
     #[test]
     fn nothing_to_do_when_all_sessions_terminal() {
         let scan = vec![
-            loaded("01-done", Phase::Done),
-            loaded("02-cancelled", Phase::Cancelled),
+            loaded("01-done", Stage::Done),
+            loaded("02-cancelled", Stage::Cancelled),
         ];
         let tick = evaluate_tick(&scan);
         assert_eq!(tick.implementation, ImplementationDecision::NothingToDo);
@@ -546,9 +546,9 @@ mod tests {
     fn manual_retry_allowed_for_non_impl_lane_targets() {
         // A retry of a planning-lane stage is always allowed regardless
         // of what other sessions are doing.
-        let scan = vec![loaded("01-sharding", Phase::ShardingRunning)];
+        let scan = vec![loaded("01-sharding", Stage::ShardingRunning)];
         assert!(manual_retry_allowed(
-            Phase::BrainstormRunning,
+            Stage::BrainstormRunning,
             "02-other",
             &scan
         ));
@@ -557,13 +557,13 @@ mod tests {
     #[test]
     fn manual_retry_rejected_when_other_session_occupies_impl_lane() {
         let scan = vec![
-            loaded("01-sharding", Phase::ShardingRunning),
-            loaded("02-waiting", Phase::WaitingToImplement),
+            loaded("01-sharding", Stage::ShardingRunning),
+            loaded("02-waiting", Stage::WaitingToImplement),
         ];
         // A retry of Sharding for session 02 is rejected because session 01
         // owns the implementation lane.
         assert!(!manual_retry_allowed(
-            Phase::ShardingRunning,
+            Stage::ShardingRunning,
             "02-waiting",
             &scan
         ));
@@ -571,11 +571,11 @@ mod tests {
 
     #[test]
     fn manual_retry_allowed_when_only_focused_session_was_in_impl_lane() {
-        // The focused session's own previous impl-lane phase doesn't count
+        // The focused session's own previous impl-lane stage doesn't count
         // as occupancy — it has been stopped and is being retried.
-        let scan = vec![loaded("01-sharding", Phase::ShardingRunning)];
+        let scan = vec![loaded("01-sharding", Stage::ShardingRunning)];
         assert!(manual_retry_allowed(
-            Phase::ShardingRunning,
+            Stage::ShardingRunning,
             "01-sharding",
             &scan
         ));
@@ -622,18 +622,18 @@ mod tests {
 
     #[test]
     fn manual_retry_rejected_for_any_impl_lane_target_when_lane_busy() {
-        // Cover the rest of the impl-lane phases the dispatch table can
+        // Cover the rest of the impl-lane stages the dispatch table can
         // retry (Recovery / Coder / Reviewer / FinalValidation /
         // Dreaming) to ensure they all gate on lane occupancy.
-        let scan = vec![loaded("01-busy", Phase::ImplementationRound(1))];
+        let scan = vec![loaded("01-busy", Stage::ImplementationRound(1))];
         for target in [
-            Phase::ShardingRunning,
-            Phase::BuilderRecovery(2),
-            Phase::ImplementationRound(2),
-            Phase::ReviewRound(2),
-            Phase::Simplification(2),
-            Phase::FinalValidation(2),
-            Phase::Dreaming(2),
+            Stage::ShardingRunning,
+            Stage::BuilderRecovery(2),
+            Stage::ImplementationRound(2),
+            Stage::ReviewRound(2),
+            Stage::Simplification(2),
+            Stage::FinalValidation(2),
+            Stage::Dreaming(2),
         ] {
             assert!(
                 !manual_retry_allowed(target, "02-other", &scan),

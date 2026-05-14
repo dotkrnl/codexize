@@ -5,7 +5,7 @@
 //! no process spawning. The persisting counterparts that wrap these helpers
 //! with logging and `state.save()` live in
 //! [`crate::data::persistence::transitions`].
-use crate::logic::pipeline::phase::Phase;
+use crate::logic::pipeline::stage::Stage;
 use crate::state::{
     BuilderState, Modes, PendingGuardDecision, PipelineItem, PipelineItemStatus, SessionState,
 };
@@ -15,18 +15,18 @@ use std::collections::BTreeSet;
 #[cfg(test)]
 #[path = "transitions_tests.rs"]
 mod transitions_tests;
-/// Errors that can occur during phase transitions.
+/// Errors that can occur during stage transitions.
 #[derive(Debug, thiserror::Error)]
 pub enum TransitionError {
     #[error("Cannot transition from {from} to {to}: {reason}")]
     InvalidTransition {
-        from: Phase,
-        to: Phase,
+        from: Stage,
+        to: Stage,
         reason: String,
     },
 }
 /// Validate that a transition from `from` to `to` is allowed.
-pub fn validate_transition(from: &Phase, to: &Phase) -> Result<(), TransitionError> {
+pub fn validate_transition(from: &Stage, to: &Stage) -> Result<(), TransitionError> {
     if !from.can_transition_to(to) {
         return Err(TransitionError::InvalidTransition {
             from: *from,
@@ -54,7 +54,7 @@ pub fn prepare_new_session_for_brainstorm(
 ) {
     state.modes = modes;
     state.idea_text = Some(idea.into());
-    state.current_phase = Phase::BrainstormRunning;
+    state.current_stage = Stage::BrainstormRunning;
 }
 pub fn archive_session(state: &mut SessionState) {
     state.archived = true;
@@ -332,8 +332,8 @@ fn normalize_pipeline_item_ids(builder: &mut BuilderState) {
 pub fn set_retry_reset_run_id_cutoff(state: &mut SessionState, run_id: u64) {
     state.builder.retry_reset_run_id_cutoff = Some(run_id);
 }
-pub fn set_phase_for_operator_retry(state: &mut SessionState, phase: Phase) {
-    state.current_phase = phase;
+pub fn set_stage_for_operator_retry(state: &mut SessionState, stage: Stage) {
+    state.current_stage = stage;
 }
 pub fn increment_recovery_cycle_count(state: &mut SessionState) -> u32 {
     state.builder.recovery_cycle_count += 1;
@@ -385,10 +385,10 @@ pub fn take_pending_guard_decision(
 pub fn clear_pending_guard_decision(state: &mut SessionState) {
     state.pending_guard_decision = None;
 }
-pub fn restore_guard_originating_phase(state: &mut SessionState, originating: Phase) {
-    // The guard modal is an interstitial persisted phase; on "keep", finalization
-    // must resume the original running phase before applying its normal successor.
-    // Phase::can_transition_to intentionally does not list GitGuardPending back
-    // to the paused running phases, so this restore cannot use execute_transition.
-    state.current_phase = originating;
+pub fn restore_guard_originating_stage(state: &mut SessionState, originating: Stage) {
+    // The guard modal is an interstitial persisted stage; on "keep", finalization
+    // must resume the original running stage before applying its normal successor.
+    // Stage::can_transition_to intentionally does not list GitGuardPending back
+    // to the paused running stages, so this restore cannot use execute_transition.
+    state.current_stage = originating;
 }

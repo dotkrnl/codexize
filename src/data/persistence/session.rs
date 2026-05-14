@@ -5,7 +5,7 @@
 //! reads. The struct itself lives in `src/state/types.rs`; this file extends
 //! it with another `impl` block.
 use crate::adapters::EffortLevel;
-use crate::logic::pipeline::phase::Phase;
+use crate::logic::pipeline::stage::Stage;
 use crate::state::{
     Event, EventsFile, LaunchModes, Message, MessageKind, MessageSender, MessagesFile, RunRecord,
     RunStatus, SectionPart, SessionState, session_dir,
@@ -45,7 +45,7 @@ impl SessionState {
         let path = dir.join("events.toml");
         let event = Event {
             timestamp: chrono::Utc::now().to_rfc3339(),
-            phase: self.current_phase,
+            stage: self.current_stage,
             message: message.into(),
         };
         let mut file = read_events_file(&path)?;
@@ -55,9 +55,9 @@ impl SessionState {
             .with_context(|| format!("failed to write events to {}", path.display()))?;
         Ok(())
     }
-    /// Transition to a new phase with validation and persistence.
-    pub fn transition_to(&mut self, next_phase: Phase) -> Result<()> {
-        super::transitions::execute_transition(self, next_phase)
+    /// Transition to a new stage with validation and persistence.
+    pub fn transition_to(&mut self, next_stage: Stage) -> Result<()> {
+        super::transitions::execute_transition(self, next_stage)
     }
     /// Append a message to the session's messages.toml file.
     pub fn append_message(&self, message: &Message) -> Result<()> {
@@ -295,4 +295,3 @@ fn read_messages_file(path: &std::path::Path) -> Result<MessagesFile> {
     toml::from_str(&text)
         .with_context(|| format!("failed to parse messages from {}", path.display()))
 }
-

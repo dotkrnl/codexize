@@ -1,17 +1,17 @@
 //! Recovery stage: builder-only intervention launched mid-implementation
-//! when the reviewer escalates. Runs inside [`Phase::Implementation(r)`]
+//! when the reviewer escalates. Runs inside [`Stage::Implementation(r)`]
 //! and stays there on success — recovery-plan-review / recovery-sharding
-//! pick up next on the same phase.
+//! pick up next on the same stage.
 use super::{has_succeeded, next_attempt};
-use crate::lifecycle::phase::Phase;
+use crate::lifecycle::Stage;
 use crate::lifecycle::spec::StageSpec;
-use crate::lifecycle::stage::{Stage, StageCtx, SuccessOutcome, WorkUnit};
+use crate::lifecycle::stage::{StageCtx, StageDriver, SuccessOutcome, WorkUnit};
 use crate::lifecycle::stage_id::StageId;
 use std::path::PathBuf;
 
 fn current_round(ctx: &StageCtx<'_>) -> u32 {
-    match ctx.phase {
-        Phase::Implementation(r) => r,
+    match ctx.stage {
+        Stage::Implementation(r) => r,
         _ => 1,
     }
 }
@@ -19,7 +19,7 @@ fn current_round(ctx: &StageCtx<'_>) -> u32 {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecoveryStage;
 
-impl Stage for RecoveryStage {
+impl StageDriver for RecoveryStage {
     fn id(&self) -> StageId {
         StageId::Recovery
     }
@@ -57,17 +57,17 @@ impl Stage for RecoveryStage {
         }
     }
 
-    fn phase_when_running(&self) -> Phase {
+    fn stage_when_running(&self) -> Stage {
         // Round comes from StageCtx; registry key uses Implementation(1).
-        Phase::Implementation(1)
+        Stage::Implementation(1)
     }
 
-    fn next_phase_on_success(&self, ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Phase {
-        Phase::Implementation(current_round(ctx))
+    fn next_stage_on_success(&self, ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Stage {
+        Stage::Implementation(current_round(ctx))
     }
 
     fn artifact_paths(&self, _round: u32) -> Vec<PathBuf> {
-        // Recovery produces `rounds/{r:03}/recovery.toml` but the legacy
+        // Recovery produces `rounds/{r:03}/recovery.toml` but the persisted
         // `go_back()` does not remove it — only the prompt file is cleaned.
         // Preserve that behavior so Step 2 stays behavior-neutral; Step 8
         // can decide whether to start tracking the artifact.
@@ -90,11 +90,11 @@ mod tests {
     use crate::lifecycle::stage::RunHistoryEntry;
     use std::path::Path;
 
-    fn mk_ctx<'a>(phase: Phase, prior: &'a [RunHistoryEntry]) -> StageCtx<'a> {
+    fn mk_ctx<'a>(stage: Stage, prior: &'a [RunHistoryEntry]) -> StageCtx<'a> {
         StageCtx {
             session_id: "s",
             session_dir: Path::new("/tmp"),
-            phase,
+            stage,
             prior_runs: prior,
             pending_task_ids: &[],
             yolo: false,
@@ -106,13 +106,13 @@ mod tests {
     }
 
     #[test]
-    fn identity_and_window_match_legacy_launch() {
+    fn identity_and_window_match_persisted_launch() {
         let s = RecoveryStage;
         assert_eq!(s.id(), StageId::Recovery);
         assert_eq!(s.label(), "Recovery");
         assert_eq!(s.window_name(1, None), "[Recovery]");
         assert_eq!(s.window_name(4, None), "[Recovery]");
-        assert_eq!(s.phase_when_running(), Phase::Implementation(1));
+        assert_eq!(s.stage_when_running(), Stage::Implementation(1));
     }
 
     #[test]
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn build_spec_carries_round_from_context() {
         let s = RecoveryStage;
-        let ctx = mk_ctx(Phase::Implementation(3), &[]);
+        let ctx = mk_ctx(Stage::Implementation(3), &[]);
         let spec = s.build_spec(&ctx);
         assert_eq!(spec.stage_id, StageId::Recovery);
         assert_eq!(spec.round, 3);
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn next_pending_work_clears_when_done_for_round() {
         let s = RecoveryStage;
-        let ctx = mk_ctx(Phase::Implementation(2), &[]);
+        let ctx = mk_ctx(Stage::Implementation(2), &[]);
         assert!(s.next_pending_work(&ctx).is_some());
         let prior = [RunHistoryEntry {
             stage_id: StageId::Recovery,
@@ -148,6 +148,9 @@ mod tests {
             attempt: 1,
             outcome: Some(Outcome::Done),
         }];
-        assert!(s.next_pending_work(&mk_ctx(Phase::Implementation(2), &prior)).is_none());
+        assert!(
+            s.next_pending_work(&mk_ctx(Stage::Implementation(2), &prior))
+                .is_none()
+        );
     }
 }

@@ -136,7 +136,7 @@ pub(crate) enum ModalKind {
 /// the resume path's repair logic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingRewindApply {
-    pub(crate) target: crate::lifecycle::Phase,
+    pub(crate) target: crate::lifecycle::Stage,
     pub(crate) spec: Option<crate::lifecycle::StageSpec>,
     pub(crate) cleanup: crate::lifecycle::CleanupPlan,
     pub(crate) clear_pending: bool,
@@ -169,13 +169,13 @@ pub enum AppStartupOrigin {
 impl App {
     /// Persist session state and log failures instead of silently dropping them.
     ///
-    /// Mirrors the App-side lifecycle-overlay fields (`paused_at_phase`,
+    /// Mirrors the App-side lifecycle-overlay fields (`paused_at_stage`,
     /// `pending_decisions`) into `state` immediately before the write so the
     /// on-disk `session.toml` reflects the current FSM context. The reverse
     /// copy happens in `App::new` from the loaded `SessionState` into the
     /// App mirrors.
     pub(crate) fn save_state(&mut self) {
-        self.state.paused_at_phase = self.paused_at_phase;
+        self.state.paused_at_stage = self.paused_at_stage;
         self.state.pending_decisions = self.pending_decisions.clone();
         if let Err(e) = self.state.save() {
             tracing::warn!("failed to save session state: {e}");
@@ -211,7 +211,7 @@ impl App {
             .filter_map(|s| match s {
                 crate::scheduler::ScannedSession::Loaded(session) => {
                     if session.session_id < self.state.session_id
-                        && session.current_phase == crate::state::Phase::WaitingToImplement
+                        && session.current_stage == crate::state::Stage::WaitingToImplement
                     {
                         Some(
                             crate::state::session_dir(&session.session_id)
@@ -240,10 +240,10 @@ pub struct App {
     /// When true, the viewport was intentionally paged away from the focused
     /// row and clamp_viewport should not pull it back toward focus.
     pub(crate) explicit_viewport_scroll: bool,
-    /// While true, automatic progress events (startup, phase changes, run
+    /// While true, automatic progress events (startup, stage changes, run
     /// launches/retries, live-summary updates) move the focus arrow to the
     /// newest active run row. Manual focus moves and explicit viewport paging
-    /// flip this off; the next phase transition or run launch flips it back on.
+    /// flip this off; the next stage transition or run launch flips it back on.
     pub(crate) progress_follow_active: bool,
     /// Snapshot of `messages.len()` taken when tail-follow was last
     /// disengaged. None while following. Used to count missed messages
@@ -297,19 +297,19 @@ pub struct App {
     pub(crate) pending_app_exit: bool,
     pub(crate) pending_shell_command: Option<String>,
     pub(crate) current_run_id: Option<u64>,
-    /// Lifecycle FSM. `current_run_id` is the legacy mirror; the FSM owns
+    /// Lifecycle FSM. `current_run_id` is the persisted mirror; the FSM owns
     /// `ActiveRun` but the app still needs the run id for UI binding.
     pub(crate) fsm: crate::lifecycle::Fsm,
-    /// Slim, round-aware lifecycle [`crate::lifecycle::Phase`] derived from
-    /// `state.current_phase` via [`Phase::to_slim_phase`].
-    /// Refreshed by [`crate::app::App::refresh_slim_phase`] at every phase
+    /// Slim, round-aware lifecycle [`crate::lifecycle::Stage`] derived from
+    /// `state.current_stage` via [`Stage::to_slim_stage`].
+    /// Refreshed by [`crate::app::App::refresh_slim_stage`] at every stage
     /// mutation site.
-    pub(crate) slim_phase: crate::lifecycle::Phase,
-    /// Slot for the slim phase the lifecycle was paused at when the
+    pub(crate) slim_stage: crate::lifecycle::Stage,
+    /// Slot for the slim stage the lifecycle was paused at when the
     /// operator issued `:stop`. None outside `Stopping`/`Idle`-after-stop
-    /// transitions. Mirrors `OpsCtx.paused_at_phase` so the scheduler can
+    /// transitions. Mirrors `OpsCtx.paused_at_stage` so the scheduler can
     /// avoid relaunching the same stage immediately after a stop.
-    pub(crate) paused_at_phase: Option<crate::lifecycle::Phase>,
+    pub(crate) paused_at_stage: Option<crate::lifecycle::Stage>,
     /// Operator-decision slots used by the slim lifecycle. Populated by
     /// operator paths that raise modal decisions (`:stop`, `:retry`,
     /// guard approvals, etc.).

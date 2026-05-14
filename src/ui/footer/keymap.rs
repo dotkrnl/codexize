@@ -3,7 +3,7 @@ use super::keymap_view_model::{
     select_width_tier,
 };
 use crate::app::{ModalKind, StageId};
-use crate::state::Phase;
+use crate::state::Stage;
 use crate::ui::focus_caps::FocusCaps;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -72,7 +72,7 @@ pub(crate) const RULE_COLOR: Color = Color::DarkGray;
 pub(crate) const SEP_INNER: &str = " · ";
 /// Separator between categories.
 pub(crate) const SEP_CATEGORY: &str = "  ·  ";
-/// Default phase keymap: navigation · actions · system.
+/// Default stage keymap: navigation · actions · system.
 fn default_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
     let nav = vec![
         key("↑↓", "move"),
@@ -290,17 +290,17 @@ fn render_default_keymap(
 }
 /// Renders a context-aware keymap line.
 ///
-/// Pure function that produces the exact keymap for a given phase, modal,
+/// Pure function that produces the exact keymap for a given stage, modal,
 /// focus capabilities, and terminal width.
 ///
 /// # Arguments
-/// * `phase` - Current pipeline phase.
-/// * `modal` - Active modal (overrides phase keymap).
+/// * `stage` - Current pipeline stage.
+/// * `modal` - Active modal (overrides stage keymap).
 /// * `caps` - Capabilities of the currently focused row.
 /// * `input_mode` - Whether input mode is active.
 /// * `width` - Available terminal width in columns.
 pub fn keymap(
-    _phase: Phase,
+    _stage: Stage,
     modal: Option<ModalKind>,
     caps: FocusCaps,
     input_mode: bool,

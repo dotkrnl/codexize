@@ -277,7 +277,6 @@ estimated_tokens = 0
     assert!(format!("{err:#}").contains("estimated_tokens"));
 }
 
-
 #[test]
 fn enforce_terminal_review_rejects_refine_on_last_task() {
     let dir = tempfile::TempDir::new().unwrap();

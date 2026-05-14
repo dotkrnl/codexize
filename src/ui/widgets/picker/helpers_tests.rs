@@ -1,12 +1,12 @@
 use super::*;
-use crate::state::{Modes, Phase};
+use crate::state::{Modes, Stage};
 use std::time::SystemTime;
 
 fn entry(id: &str, archived: bool) -> SessionEntry {
     SessionEntry {
         session_id: id.to_string(),
         idea_summary: id.to_string(),
-        current_phase: Phase::IdeaInput,
+        current_stage: Stage::IdeaInput,
         modes: Modes::default(),
         last_modified: SystemTime::UNIX_EPOCH,
         archived,

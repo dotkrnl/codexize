@@ -1,19 +1,19 @@
 use crate::data::dashboard_model::{ScoreEntry, models_from_scores};
-use crate::selection::{IpbrPhaseScores, ScoreSource};
+use crate::selection::{IpbrStageScores, ScoreSource};
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
-/// Source of truth for the model universe and its per-phase rank scores.
+/// Source of truth for the model universe and its per-stage rank scores.
 /// ipbr is the only upstream feed; provider entries are the launch inventory.
 pub const IPBR_SCOREBOARD_URL: &str = "https://ipbr.dev/scoreboard.toml";
 #[derive(Debug, Clone)]
 pub struct DashboardModel {
     pub name: String,
-    /// Per-phase ipbr rank scores. `None` per phase means the matched
-    /// ipbr row did not provide that phase score.
-    pub ipbr_phase_scores: crate::selection::IpbrPhaseScores,
-    /// Where the per-phase rank scores came from. Defaults to
+    /// Per-stage ipbr rank scores. `None` per stage means the matched
+    /// ipbr row did not provide that stage score.
+    pub ipbr_stage_scores: crate::selection::IpbrStageScores,
+    /// Where the per-stage rank scores came from. Defaults to
     /// `ScoreSource::None`; only `Ipbr` may drive automatic selection.
     pub score_source: crate::selection::ScoreSource,
     pub display_order: usize,
@@ -91,7 +91,7 @@ fn parse_ipbr_scoreboard(body: &str) -> Result<Vec<ScoreEntry>> {
             continue;
         }
         let scores_row = row.scores.unwrap_or_default();
-        let phase_scores = IpbrPhaseScores {
+        let stage_scores = IpbrStageScores {
             idea: scores_row.i_adj,
             planning: scores_row.p_adj,
             build: scores_row.b_adj,
@@ -100,7 +100,7 @@ fn parse_ipbr_scoreboard(body: &str) -> Result<Vec<ScoreEntry>> {
         entries.push(ScoreEntry {
             name: display_key,
             display_order: i,
-            ipbr_phase_scores: phase_scores,
+            ipbr_stage_scores: stage_scores,
             score_source: ScoreSource::Ipbr,
         });
     }

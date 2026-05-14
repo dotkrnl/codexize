@@ -1,17 +1,17 @@
 //! Simplification stage: code-producing pass that follows a successful
-//! review of a round. Runs on [`Phase::Review(r)`] and stays there on
+//! review of a round. Runs on [`Stage::Review(r)`] and stays there on
 //! success — the round-loop logic in the FSM decides whether to launch
 //! another implementation round or move to finalization.
 use super::{has_succeeded, next_attempt};
-use crate::lifecycle::phase::Phase;
+use crate::lifecycle::Stage;
 use crate::lifecycle::spec::StageSpec;
-use crate::lifecycle::stage::{Stage, StageCtx, SuccessOutcome, WorkUnit};
+use crate::lifecycle::stage::{StageCtx, StageDriver, SuccessOutcome, WorkUnit};
 use crate::lifecycle::stage_id::StageId;
 use std::path::PathBuf;
 
 fn current_round(ctx: &StageCtx<'_>) -> u32 {
-    match ctx.phase {
-        Phase::Review(r) => r,
+    match ctx.stage {
+        Stage::Review(r) => r,
         _ => 1,
     }
 }
@@ -19,7 +19,7 @@ fn current_round(ctx: &StageCtx<'_>) -> u32 {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SimplificationStage;
 
-impl Stage for SimplificationStage {
+impl StageDriver for SimplificationStage {
     fn id(&self) -> StageId {
         StageId::Simplification
     }
@@ -57,17 +57,17 @@ impl Stage for SimplificationStage {
         }
     }
 
-    fn phase_when_running(&self) -> Phase {
-        Phase::Review(1)
+    fn stage_when_running(&self) -> Stage {
+        Stage::Review(1)
     }
 
-    fn next_phase_on_success(&self, ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Phase {
-        // Stays on Phase::Review(r); the round loop decides what's next.
-        Phase::Review(current_round(ctx))
+    fn next_stage_on_success(&self, ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Stage {
+        // Stays on Stage::Review(r); the round loop decides what's next.
+        Stage::Review(current_round(ctx))
     }
 
     fn artifact_paths(&self, _round: u32) -> Vec<PathBuf> {
-        // Legacy go_back() (retry.rs:476) doesn't remove artifacts — it
+        // Persisted go_back() (retry.rs:476) doesn't remove artifacts — it
         // only cancels the run and transitions back to ReviewRound(r).
         Vec::new()
     }
@@ -87,11 +87,11 @@ mod tests {
     use crate::lifecycle::stage::RunHistoryEntry;
     use std::path::Path;
 
-    fn mk_ctx<'a>(phase: Phase, prior: &'a [RunHistoryEntry]) -> StageCtx<'a> {
+    fn mk_ctx<'a>(stage: Stage, prior: &'a [RunHistoryEntry]) -> StageCtx<'a> {
         StageCtx {
             session_id: "s",
             session_dir: Path::new("/tmp"),
-            phase,
+            stage,
             prior_runs: prior,
             pending_task_ids: &[],
             yolo: false,
@@ -103,12 +103,12 @@ mod tests {
     }
 
     #[test]
-    fn identity_and_window_match_legacy_launch() {
+    fn identity_and_window_match_persisted_launch() {
         let s = SimplificationStage;
         assert_eq!(s.id(), StageId::Simplification);
         assert_eq!(s.label(), "Simplification");
         assert_eq!(s.window_name(1, None), "[Simplifier]");
-        assert_eq!(s.phase_when_running(), Phase::Review(1));
+        assert_eq!(s.stage_when_running(), Stage::Review(1));
     }
 
     #[test]
@@ -123,9 +123,9 @@ mod tests {
     }
 
     #[test]
-    fn build_spec_carries_round_from_phase() {
+    fn build_spec_carries_round_from_stage() {
         let s = SimplificationStage;
-        let ctx = mk_ctx(Phase::Review(3), &[]);
+        let ctx = mk_ctx(Stage::Review(3), &[]);
         let spec = s.build_spec(&ctx);
         assert_eq!(spec.round, 3);
         assert_eq!(spec.stage_id, StageId::Simplification);

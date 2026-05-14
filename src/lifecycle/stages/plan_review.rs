@@ -1,15 +1,15 @@
 //! Plan review stage: per-round review of `artifacts/plan.md`. Produces
 //! `artifacts/plan-review-{round}.md`.
 //!
-//! Single-shot per round. Runs on [`Phase::Plan`]. The legacy code restores
+//! Single-shot per round. Runs on [`Stage::Plan`]. The persisted code restores
 //! `plan.pre-review-1.md`/`spec.pre-review-1.md` only on round-1 rewind —
 //! this stage preserves that asymmetry verbatim. Future work may revisit
 //! per-round backups; until then, matching today's behavior is the
 //! contract.
 use super::{has_succeeded, next_attempt};
-use crate::lifecycle::phase::Phase;
+use crate::lifecycle::Stage;
 use crate::lifecycle::spec::StageSpec;
-use crate::lifecycle::stage::{Stage, StageCtx, SuccessOutcome, WorkUnit};
+use crate::lifecycle::stage::{StageCtx, StageDriver, SuccessOutcome, WorkUnit};
 use crate::lifecycle::stage_id::StageId;
 use std::path::PathBuf;
 
@@ -32,7 +32,7 @@ fn current_round(ctx: &StageCtx<'_>) -> u32 {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PlanReviewStage;
 
-impl Stage for PlanReviewStage {
+impl StageDriver for PlanReviewStage {
     fn id(&self) -> StageId {
         StageId::PlanReview
     }
@@ -70,15 +70,15 @@ impl Stage for PlanReviewStage {
         }
     }
 
-    fn phase_when_running(&self) -> Phase {
-        Phase::Plan
+    fn stage_when_running(&self) -> Stage {
+        Stage::Plan
     }
 
-    fn next_phase_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Phase {
-        // Stays on Phase::Plan; sharding (also Phase::Plan) takes over once
+    fn next_stage_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Stage {
+        // Stays on Stage::Plan; sharding (also Stage::Plan) takes over once
         // the operator approves via PendingDecisions and the
         // repo-state-update baseline check clears.
-        Phase::Plan
+        Stage::Plan
     }
 
     fn artifact_paths(&self, round: u32) -> Vec<PathBuf> {
@@ -98,7 +98,7 @@ impl Stage for PlanReviewStage {
                 ),
             ]
         } else {
-            // Legacy retry.rs only restores round-1 backups; later rounds
+            // Persisted retry.rs only restores round-1 backups; later rounds
             // overwrite plan.md in place without a fresh backup. Preserve
             // that behavior verbatim — future work may revisit per-round
             // backups, but Step 2 is behavior-preserving.
@@ -121,7 +121,7 @@ mod tests {
         StageCtx {
             session_id: "s",
             session_dir: Path::new("/tmp"),
-            phase: Phase::Plan,
+            stage: Stage::Plan,
             prior_runs: prior,
             pending_task_ids: &[],
             yolo: false,
@@ -133,13 +133,13 @@ mod tests {
     }
 
     #[test]
-    fn identity_and_window_match_legacy_launch() {
+    fn identity_and_window_match_persisted_launch() {
         let s = PlanReviewStage;
         assert_eq!(s.id(), StageId::PlanReview);
         assert_eq!(s.label(), "Plan Review");
         assert_eq!(s.window_name(1, None), "[Plan Review 1]");
         assert_eq!(s.window_name(2, None), "[Plan Review 2]");
-        assert_eq!(s.phase_when_running(), Phase::Plan);
+        assert_eq!(s.stage_when_running(), Stage::Plan);
     }
 
     #[test]

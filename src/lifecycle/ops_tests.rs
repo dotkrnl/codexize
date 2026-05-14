@@ -5,9 +5,9 @@
 //! All tests use hand-built [`Fsm`] / [`StageCtx`] / [`StageRegistry`]
 //! inputs — there is no App, no process spawning, no disk IO.
 use super::*;
+use crate::lifecycle::Stage;
 use crate::lifecycle::fsm::{AgentState, Outcome};
 use crate::lifecycle::pending::PendingDecisions;
-use crate::lifecycle::phase::Phase;
 use crate::lifecycle::spec::{ActiveRun, StageSpec};
 use crate::lifecycle::stage::{StageCtx, StageRegistry};
 use crate::lifecycle::stage_id::StageId;
@@ -43,8 +43,8 @@ fn full_registry() -> StageRegistry {
 /// Test-only container for owned data the borrowed [`OpsCtx`] points at.
 struct OpsState {
     fsm: Fsm,
-    phase: Phase,
-    paused_at_phase: Option<Phase>,
+    stage: Stage,
+    paused_at_stage: Option<Stage>,
     pending: PendingDecisions,
     session_dir: PathBuf,
     prior_runs: Vec<crate::lifecycle::stage::RunHistoryEntry>,
@@ -52,11 +52,11 @@ struct OpsState {
 }
 
 impl OpsState {
-    fn new(phase: Phase) -> Self {
+    fn new(stage: Stage) -> Self {
         Self {
             fsm: Fsm::new(),
-            phase,
-            paused_at_phase: None,
+            stage,
+            paused_at_stage: None,
             pending: PendingDecisions::default(),
             session_dir: PathBuf::from("/tmp/codexize-test-session"),
             prior_runs: Vec::new(),
@@ -69,7 +69,7 @@ fn build_ops_ctx<'a>(state: &'a mut OpsState, registry: &'a StageRegistry) -> Op
     let stage_ctx = StageCtx {
         session_id: "test-session",
         session_dir: state.session_dir.as_path(),
-        phase: state.phase,
+        stage: state.stage,
         prior_runs: state.prior_runs.as_slice(),
         pending_task_ids: state.pending_task_ids.as_slice(),
         yolo: false,
@@ -80,8 +80,8 @@ fn build_ops_ctx<'a>(state: &'a mut OpsState, registry: &'a StageRegistry) -> Op
     };
     OpsCtx {
         fsm: &mut state.fsm,
-        phase: &mut state.phase,
-        paused_at_phase: &mut state.paused_at_phase,
+        stage: &mut state.stage,
+        paused_at_stage: &mut state.paused_at_stage,
         pending_decisions: &mut state.pending,
         registry,
         stage_ctx,
@@ -112,7 +112,7 @@ fn drive_running(fsm: &mut Fsm, stage_id: StageId, attempt: u32, run_id: u64) {
 #[test]
 fn stop_when_idle_is_noop() {
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
     let outcome = LifecycleOps::stop(&mut ctx);
@@ -126,7 +126,7 @@ fn stop_when_idle_is_noop() {
 #[test]
 fn stop_when_running_stages_pending_stop() {
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
     drive_running(&mut state.fsm, StageId::Planning, 1, 11);
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
@@ -135,20 +135,20 @@ fn stop_when_running_stages_pending_stop() {
         OpOutcome::Staged(OpAction::PendingStop {
             after,
             cleanup,
-            phase_change,
+            stage_change,
             clear_paused,
             clear_pending,
         }) => {
             assert_eq!(after, AfterStop::GoIdle);
             assert!(cleanup.is_empty());
-            assert!(phase_change.is_none());
+            assert!(stage_change.is_none());
             assert!(!clear_paused);
             assert!(!clear_pending);
         }
         other => panic!("expected PendingStop, got {other:?}"),
     }
     assert!(matches!(state.fsm.view(), AgentState::Stopping { .. }));
-    assert_eq!(state.paused_at_phase, Some(Phase::Plan));
+    assert_eq!(state.paused_at_stage, Some(Stage::Plan));
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn stop_when_stopping_re_requests_with_goidle() {
     // a fresh GoIdle from :stop, exercising Fsm::request_stop's
     // "latest non-Cancel wins" rule.
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
     drive_running(&mut state.fsm, StageId::Planning, 1, 11);
     state
         .fsm
@@ -185,7 +185,7 @@ fn stop_when_stopping_re_requests_with_goidle() {
 #[test]
 fn restart_when_idle_is_noop() {
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
     let outcome = LifecycleOps::restart(&mut ctx);
@@ -198,8 +198,8 @@ fn restart_when_idle_is_noop() {
 #[test]
 fn restart_when_running_stages_pending_stop_with_restart() {
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
-    state.paused_at_phase = Some(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
+    state.paused_at_stage = Some(Stage::Plan);
     drive_running(&mut state.fsm, StageId::Planning, 3, 11);
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
@@ -207,11 +207,11 @@ fn restart_when_running_stages_pending_stop_with_restart() {
     match outcome {
         OpOutcome::Staged(OpAction::PendingStop {
             after,
-            phase_change,
+            stage_change,
             clear_paused,
             ..
         }) => {
-            assert!(phase_change.is_none());
+            assert!(stage_change.is_none());
             assert!(clear_paused);
             match after {
                 AfterStop::Restart { spec } => {
@@ -227,15 +227,15 @@ fn restart_when_running_stages_pending_stop_with_restart() {
         }
         other => panic!("expected PendingStop, got {other:?}"),
     }
-    // paused_at_phase cleared so the scheduler will pick the restart up.
-    assert!(state.paused_at_phase.is_none());
+    // paused_at_stage cleared so the scheduler will pick the restart up.
+    assert!(state.paused_at_stage.is_none());
 }
 
 #[test]
 fn restart_when_stage_does_not_support_restart_is_noop() {
     // FinalValidation has `supports_restart() == false`.
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Finalization);
+    let mut state = OpsState::new(Stage::Finalization);
     drive_running(&mut state.fsm, StageId::FinalValidation, 1, 12);
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
@@ -251,48 +251,48 @@ fn restart_when_stage_does_not_support_restart_is_noop() {
 // ─────────────────────────── :rewind ───────────────────────────
 
 #[test]
-fn rewind_to_equal_phase_is_noop() {
+fn rewind_to_equal_stage_is_noop() {
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
-    let outcome = LifecycleOps::rewind(&mut ctx, Phase::Plan);
+    let outcome = LifecycleOps::rewind(&mut ctx, Stage::Plan);
     assert!(matches!(outcome, OpOutcome::NoOp(_)));
 }
 
 #[test]
-fn rewind_to_later_phase_is_noop() {
+fn rewind_to_later_stage_is_noop() {
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
-    let outcome = LifecycleOps::rewind(&mut ctx, Phase::Implementation(2));
+    let outcome = LifecycleOps::rewind(&mut ctx, Stage::Implementation(2));
     assert!(matches!(outcome, OpOutcome::NoOp(_)));
 }
 
 #[test]
-fn rewind_to_earlier_phase_when_idle_returns_immediate_with_cleanup() {
+fn rewind_to_earlier_stage_when_idle_returns_immediate_with_cleanup() {
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
-    state.paused_at_phase = Some(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
+    state.paused_at_stage = Some(Stage::Plan);
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
-    let outcome = LifecycleOps::rewind(&mut ctx, Phase::Spec);
+    let outcome = LifecycleOps::rewind(&mut ctx, Stage::Spec);
     match outcome {
         OpOutcome::Staged(OpAction::Immediate {
-            phase_change,
+            stage_change,
             cleanup,
             clear_paused,
             clear_pending,
             start_spec,
         }) => {
-            assert_eq!(phase_change, Some(Phase::Spec));
+            assert_eq!(stage_change, Some(Stage::Spec));
             assert!(clear_paused);
             assert!(clear_pending);
             // Spec → SpecReviewStage is the canonical start.
-            let s = start_spec.expect("start_spec for Phase::Spec");
+            let s = start_spec.expect("start_spec for Stage::Spec");
             assert_eq!(s.stage_id, StageId::SpecReview);
-            // Plan-phase artifacts must be cleaned (plan.md from Planning,
+            // Plan-stage artifacts must be cleaned (plan.md from Planning,
             // plan-review-*.md from PlanReview, tasks.toml from Sharding).
             let dels: Vec<String> = cleanup
                 .delete
@@ -313,23 +313,29 @@ fn rewind_to_earlier_phase_when_idle_returns_immediate_with_cleanup() {
 }
 
 #[test]
-fn rewind_to_earlier_phase_when_running_returns_pending_stop() {
+fn rewind_to_earlier_stage_when_running_returns_pending_stop() {
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
     drive_running(&mut state.fsm, StageId::Planning, 1, 21);
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
-    let outcome = LifecycleOps::rewind(&mut ctx, Phase::Spec);
+    let outcome = LifecycleOps::rewind(&mut ctx, Stage::Spec);
     match outcome {
         OpOutcome::Staged(OpAction::PendingStop {
             after,
-            phase_change,
+            stage_change,
             clear_paused,
             clear_pending,
             ..
         }) => {
-            assert!(matches!(after, AfterStop::Rewind { target: Phase::Spec, .. }));
-            assert_eq!(phase_change, Some(Phase::Spec));
+            assert!(matches!(
+                after,
+                AfterStop::Rewind {
+                    target: Stage::Spec,
+                    ..
+                }
+            ));
+            assert_eq!(stage_change, Some(Stage::Spec));
             assert!(clear_paused);
             assert!(clear_pending);
         }
@@ -343,7 +349,7 @@ fn rewind_to_earlier_phase_when_running_returns_pending_stop() {
                 clear_pending,
                 ..
             } => {
-                assert_eq!(*target, Phase::Spec);
+                assert_eq!(*target, Stage::Spec);
                 assert!(*clear_pending);
             }
             other => panic!("expected AfterStop::Rewind, got {other:?}"),
@@ -354,18 +360,18 @@ fn rewind_to_earlier_phase_when_running_returns_pending_stop() {
 
 #[test]
 fn rewind_cleanup_includes_artifacts_for_all_stages_after_target() {
-    // Rewinding to Phase::Idea from Phase::Implementation(2) must clean
-    // every artifact produced by stages strictly after Phase::Idea —
+    // Rewinding to Stage::Idea from Stage::Implementation(2) must clean
+    // every artifact produced by stages strictly after Stage::Idea —
     // spec-review outputs, plan, plan-review, sharding outputs, and the
     // per-round implementation directories. (Brainstorm's spec.md is
-    // *at* Phase::Idea, not strictly after, so it's intentionally
+    // *at* Stage::Idea, not strictly after, so it's intentionally
     // preserved — operators rewinding to Idea retain whatever
     // brainstorm produced; they re-run brainstorm explicitly.)
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Implementation(2));
+    let mut state = OpsState::new(Stage::Implementation(2));
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
-    let outcome = LifecycleOps::rewind(&mut ctx, Phase::Idea);
+    let outcome = LifecycleOps::rewind(&mut ctx, Stage::Idea);
     let cleanup = match outcome {
         OpOutcome::Staged(OpAction::Immediate { cleanup, .. }) => cleanup,
         other => panic!("expected Immediate, got {other:?}"),
@@ -392,13 +398,13 @@ fn rewind_cleanup_includes_artifacts_for_all_stages_after_target() {
 
 #[test]
 fn rewind_cleanup_includes_target_stage_backup_restore_for_plan_review() {
-    // Rewinding to Phase::Plan restores the round-1 plan.md / spec.md
+    // Rewinding to Stage::Plan restores the round-1 plan.md / spec.md
     // backups that PlanReviewStage takes before it overwrites plan.md.
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Implementation(1));
+    let mut state = OpsState::new(Stage::Implementation(1));
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
-    let outcome = LifecycleOps::rewind(&mut ctx, Phase::Plan);
+    let outcome = LifecycleOps::rewind(&mut ctx, Stage::Plan);
     let cleanup = match outcome {
         OpOutcome::Staged(OpAction::Immediate { cleanup, .. }) => cleanup,
         other => panic!("expected Immediate, got {other:?}"),
@@ -430,21 +436,21 @@ fn rewind_cleanup_includes_target_stage_backup_restore_for_plan_review() {
 // ─────────────────────────── :cancel ───────────────────────────
 
 #[test]
-fn cancel_when_idle_sets_phase_immediately() {
+fn cancel_when_idle_sets_stage_immediately() {
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
     let outcome = LifecycleOps::cancel(&mut ctx);
     match outcome {
         OpOutcome::Staged(OpAction::Immediate {
-            phase_change,
+            stage_change,
             cleanup,
             start_spec,
             clear_pending,
             ..
         }) => {
-            assert_eq!(phase_change, Some(Phase::Cancelled));
+            assert_eq!(stage_change, Some(Stage::Cancelled));
             assert!(cleanup.is_empty());
             assert!(start_spec.is_none());
             assert!(clear_pending);
@@ -456,7 +462,7 @@ fn cancel_when_idle_sets_phase_immediately() {
 #[test]
 fn cancel_when_running_stages_pending_stop_with_cancel() {
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
     drive_running(&mut state.fsm, StageId::Planning, 1, 31);
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
@@ -464,12 +470,12 @@ fn cancel_when_running_stages_pending_stop_with_cancel() {
     match outcome {
         OpOutcome::Staged(OpAction::PendingStop {
             after,
-            phase_change,
+            stage_change,
             clear_pending,
             ..
         }) => {
             assert_eq!(after, AfterStop::Cancel);
-            assert_eq!(phase_change, Some(Phase::Cancelled));
+            assert_eq!(stage_change, Some(Stage::Cancelled));
             assert!(clear_pending);
         }
         other => panic!("expected PendingStop, got {other:?}"),
@@ -481,7 +487,7 @@ fn cancel_beats_restart_in_stop_precedence() {
     // Start a Restart, then Cancel — the FSM's Cancel-sticks rule must
     // hold, and the AfterStop carried by Stopping must be Cancel.
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
     drive_running(&mut state.fsm, StageId::Planning, 1, 41);
 
     {
@@ -504,7 +510,7 @@ fn latest_replaces_in_stop_precedence() {
     // FSM's "latest non-Cancel wins" rule means the second Restart's
     // spec is what Stopping carries.
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
     drive_running(&mut state.fsm, StageId::Planning, 5, 42);
 
     {
@@ -562,7 +568,7 @@ fn resolution_to_action_lifts_rewind_carry_back() {
             reason: "rewind".into(),
         },
         next: AfterStop::Rewind {
-            target: Phase::Plan,
+            target: Stage::Plan,
             spec: Some(next_spec.clone()),
             cleanup: cleanup.clone(),
             clear_pending: true,
@@ -582,13 +588,13 @@ fn resolution_to_action_lifts_rewind_carry_back() {
     };
     match resolution_to_action(resolution) {
         OpAction::Immediate {
-            phase_change,
+            stage_change,
             cleanup: c,
             clear_paused,
             clear_pending,
             start_spec,
         } => {
-            assert_eq!(phase_change, Some(Phase::Plan));
+            assert_eq!(stage_change, Some(Stage::Plan));
             assert_eq!(c, cleanup);
             assert!(clear_paused);
             assert!(clear_pending);
@@ -603,11 +609,11 @@ fn cleanup_paths_are_absolute_under_session_dir() {
     // Spot-check that build_rewind_cleanup joins session_dir to relative
     // stage paths.
     let registry = full_registry();
-    let mut state = OpsState::new(Phase::Plan);
+    let mut state = OpsState::new(Stage::Plan);
     let session_dir = state.session_dir.clone();
     let mut ctx = build_ops_ctx(&mut state, &registry);
 
-    let outcome = LifecycleOps::rewind(&mut ctx, Phase::Idea);
+    let outcome = LifecycleOps::rewind(&mut ctx, Stage::Idea);
     let cleanup = match outcome {
         OpOutcome::Staged(OpAction::Immediate { cleanup, .. }) => cleanup,
         other => panic!("expected Immediate, got {other:?}"),

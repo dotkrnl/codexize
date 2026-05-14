@@ -10,7 +10,7 @@
 //! terminal loop publishes the view each tick. Some focus-local surfaces still
 //! read state directly from [`crate::app::App`]. The view types remain
 //! authoritative for the runtime/UI seam.
-use crate::logic::pipeline::Phase;
+use crate::logic::pipeline::Stage;
 use crate::state::{RunRecord, RunStatus};
 use std::sync::Arc;
 /// Severity tag for a UI-neutral status message. The TUI maps each variant
@@ -31,13 +31,11 @@ pub struct StatusMessage {
 /// Operator-visible stage-error target used by stage-scoped modals and
 /// retry commands.
 ///
-/// Distinct from [`Phase`] because phases mix modal state, pipeline position,
+/// Distinct from [`Stage`] because stages mix modal state, pipeline position,
 /// and running-agent identity. This enum names the stage the operator sees
 /// in a stage-error modal, so retry can relaunch the exact lifecycle stage
-/// that failed even when several stages share one slim phase.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
+/// that failed even when several stages share one slim stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum StageId {
     Brainstorm,
     SpecReview,
@@ -111,8 +109,8 @@ pub struct ModeFlags {
 pub struct AppView {
     /// Session identifier (`.codexize/runs/<session_id>/`).
     pub session_id: Arc<str>,
-    /// Active pipeline phase as derived by [`crate::logic`].
-    pub phase: Phase,
+    /// Active pipeline stage as derived by [`crate::logic`].
+    pub stage: Stage,
     /// Active modal, if any. The UI overlays the corresponding prompt.
     pub modal: Option<ModalKind>,
     /// Latest status-line entry, if any.
@@ -136,7 +134,7 @@ impl AppView {
     pub fn empty(session_id: impl Into<Arc<str>>) -> Self {
         Self {
             session_id: session_id.into(),
-            phase: Phase::IdeaInput,
+            stage: Stage::IdeaInput,
             modal: None,
             status: None,
             agent_runs: Arc::from(Vec::<AgentRunSummary>::new()),

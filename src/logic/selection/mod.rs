@@ -9,6 +9,6 @@ pub mod subscription;
 pub mod types;
 pub use config::*;
 pub use types::{
-    CachedModel, Candidate, CliKind, IpbrPhaseScores, ModelRow, QuotaError, ScoreSource,
+    CachedModel, Candidate, CliKind, IpbrStageScores, ModelRow, QuotaError, ScoreSource,
     SubscriptionKind,
 };

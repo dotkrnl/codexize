@@ -8,13 +8,13 @@ use ratatui::widgets::{Paragraph, Widget};
 
 fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> CachedModel {
     // Tests used to vary a single `axis_score` knob; the spec restricts
-    // ranking and sampling weights to authoritative ipbr phase scores, so
-    // mirror the value into every ipbr phase to keep their relative
+    // ranking and sampling weights to authoritative ipbr stage scores, so
+    // mirror the value into every ipbr stage to keep their relative
     // ordering and percentage shape.
     CachedModel {
         subscription: SubscriptionKind::Codex,
         name: name.to_string(),
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+        ipbr_stage_scores: crate::selection::IpbrStageScores {
             idea: Some(axis_score),
             planning: Some(axis_score),
             build: Some(axis_score),
@@ -196,7 +196,7 @@ fn full_to_compact_uses_strict_threshold() {
         model_with_axis_score("gpt-5.5", 1.0, 2),
     ];
     // visible_count >= 3 (all three picked because per-vendor backfill
-    // promotes the best-score representative when phases miss).
+    // promotes the best-score representative when stages miss).
     let visible_count = visible_models(&models).len() as u16;
 
     // Full mode now needs one row of headroom before it stays full.
@@ -325,7 +325,7 @@ fn omit_then_grow_preserves_compact_state() {
 // ----- model_strip_* tests -----
 
 #[test]
-fn full_table_bolds_only_phase_rank_one_when_percentages_round_together() {
+fn full_table_bolds_only_stage_rank_one_when_percentages_round_together() {
     let models = vec![
         model_with_axis_score("gpt-5.2", 1.0, 0),
         model_with_axis_score("gpt-5.4", 0.996_655, 1),
@@ -384,7 +384,7 @@ fn full_table_keeps_full_ipbr_at_or_above_80() {
     let (lines, _) = responsive_models_area(&models, &[], 80, 50, ModelsAreaMode::FullTable);
     let row = full_model_buffer_line(&lines, 0, 80);
 
-    // All four phase letters must appear at width 80.
+    // All four stage letters must appear at width 80.
     assert!(
         row.contains('I') && row.contains('P') && row.contains('B') && row.contains('R'),
         "full IPBR at width 80: {row:?}"
@@ -401,7 +401,7 @@ fn full_table_collapses_to_top_rank_only_between_60_and_80() {
     let (lines, _) = responsive_models_area(&models, &[], 70, 50, ModelsAreaMode::FullTable);
 
     // The full IPBR string would not fit; the top-rank cell does.
-    // Each row should contain exactly ONE phase-letter cell (Lxx where
+    // Each row should contain exactly ONE stage-letter cell (Lxx where
     // L is one of I/P/B/R and xx is two digits). We assert that at
     // least one row carries one such cell, and no row carries the full
     // four-cell IPBR sequence.
@@ -422,7 +422,7 @@ fn full_table_collapses_to_top_rank_only_between_60_and_80() {
             .count();
         assert!(
             cell_count <= 1,
-            "row {i}: expected at most one phase cell at 60-79: {row:?}"
+            "row {i}: expected at most one stage cell at 60-79: {row:?}"
         );
     }
 }
@@ -766,7 +766,7 @@ fn full_table_failed_vendor_renders_red_dashes_for_quota_and_probs() {
     let quota_col = row.find("--%").expect("--% must appear for failed quota") as u16;
     assert_eq!(buf.cell((quota_col, row_y)).unwrap().fg, Color::Red);
 
-    // At width 120, IpbrVerbose is chosen, so phase labels are full words.
+    // At width 120, IpbrVerbose is chosen, so stage labels are full words.
     // probability_unavailable_span renders the entire label+dashes as one red span.
     for (label, pat) in [
         ("Idea", "Idea --"),
@@ -831,7 +831,7 @@ fn full_table_dot_color_tracks_quota_not_score() {
 
 fn snapshot_models() -> Vec<CachedModel> {
     // Four vendors so width-tier collapse is observable. Scores stagger
-    // so phase ranks are deterministic. Use baked canonical names so the
+    // so stage ranks are deterministic. Use baked canonical names so the
     // curated brand-tags appear in rendered output.
     vec![
         vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2.6", 80.0, 0),
@@ -914,7 +914,7 @@ fn quota_summary_compacts_reset_before_dropping_to_mid_form() {
 }
 
 #[test]
-fn full_table_keeps_quota_and_phase_width_tiers_together() {
+fn full_table_keeps_quota_and_stage_width_tiers_together() {
     let models = vec![vendor_model_with_axis_score(
         SubscriptionKind::Claude,
         "claude-opus-4.7",
@@ -927,16 +927,16 @@ fn full_table_keeps_quota_and_phase_width_tiers_together() {
 
     assert!(
         !row.contains("Idea"),
-        "phase labels must not stay verbose after quota falls to narrow form: {row:?}"
+        "stage labels must not stay verbose after quota falls to narrow form: {row:?}"
     );
     assert!(
         row.contains("Quota"),
-        "quota label should remain expanded when the phase labels downgrade together: {row:?}"
+        "quota label should remain expanded when the stage labels downgrade together: {row:?}"
     );
 }
 
 #[test]
-fn full_table_expanded_quota_single_digits_use_phase_cell_padding() {
+fn full_table_expanded_quota_single_digits_use_stage_cell_padding() {
     let models = vec![model_with_quota(
         vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 100.0, 0),
         5,
@@ -947,7 +947,7 @@ fn full_table_expanded_quota_single_digits_use_phase_cell_padding() {
 
     assert!(
         row.contains("Quota  5%"),
-        "single-digit expanded quota should use two spaces like verbose phase cells: {row:?}"
+        "single-digit expanded quota should use two spaces like verbose stage cells: {row:?}"
     );
     assert!(
         !row.contains("Quota   5%"),
@@ -1196,14 +1196,14 @@ fn scores_right_anchored_row_spans_equal_width() {
 
 #[test]
 fn verbose_tier_renders_full_labels_with_three_space_separation() {
-    // The IpbrVerbose tier needs the full phase-label budget plus the wider
+    // The IpbrVerbose tier needs the full stage-label budget plus the wider
     // bracketed vendor column; at width 80 there is room for both.
     let models = vec![model_with_axis_score("gpt-5.2", 1.0, 0)];
 
     let (lines, _) = responsive_models_area(&models, &[], 80, 50, ModelsAreaMode::FullTable);
     let row = full_model_buffer_line(&lines, 0, 80);
 
-    // IpbrVerbose should render full phase labels.
+    // IpbrVerbose should render full stage labels.
     assert!(
         row.contains("Idea"),
         "verbose tier: missing 'Idea': {row:?}"
@@ -1356,7 +1356,7 @@ fn full_table_renders_curated_dim_tag_for_zero_candidate_row() {
 
 #[test]
 fn full_table_renders_vendor_label_on_every_row() {
-    // Tied phase scores so both same-vendor rows clear the >10% pool
+    // Tied stage scores so both same-vendor rows clear the >10% pool
     // weight visibility threshold. The intent is to assert the vendor
     // label is rendered on consecutive same-vendor rows, not to drive any
     // particular ranking outcome.
@@ -1417,7 +1417,7 @@ fn compact_quota_renders_narrow_quota_when_tight() {
 }
 
 #[test]
-fn full_table_expands_quota_and_phase_labels_when_space_permits() {
+fn full_table_expands_quota_and_stage_labels_when_space_permits() {
     let models = vec![vendor_model_with_axis_score(
         SubscriptionKind::Claude,
         "claude-opus-4.7",
@@ -1443,7 +1443,7 @@ fn unscored_provider_model(
     CachedModel {
         subscription: vendor,
         name: name.to_string(),
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+        ipbr_stage_scores: crate::selection::IpbrStageScores::default(),
         score_source: crate::selection::ScoreSource::None,
         candidates: Vec::new(),
         selected_candidate: None,
@@ -1454,7 +1454,7 @@ fn unscored_provider_model(
 }
 
 #[test]
-fn full_table_unscored_model_renders_as_unscored_for_current_phase() {
+fn full_table_unscored_model_renders_as_unscored_for_current_stage() {
     let mut ranked = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 90.0, 0);
     ranked.quota_percent = Some(80);
     let unscored = unscored_provider_model(SubscriptionKind::Gemini, "gemini-2.5-pro", Some(80), 0);
@@ -1469,7 +1469,7 @@ fn full_table_unscored_model_renders_as_unscored_for_current_phase() {
         .find(|r| r.contains("2.5 pro"))
         .expect("unscored row should still render");
     // Sampling cells must show 0% for the unscored model — it has no
-    // pool weight in any phase. The ranked model is the only sampling
+    // pool weight in any stage. The ranked model is the only sampling
     // candidate and gets ~99%.
     assert!(
         unscored_row.contains("Idea  0")
@@ -1555,7 +1555,7 @@ fn full_table_known_zero_quota_renders_exhausted_with_zero_sampling() {
     );
 
     // Pool-derived sampling: zero-quota model gets weight 0 → 0% in every
-    // phase even though its phase score equals the healthy model's.
+    // stage even though its stage score equals the healthy model's.
     let zero_row = &rows[zero_row_y];
     assert!(
         zero_row.contains("Build  0") || zero_row.contains("B  0") || zero_row.contains("B 0"),
@@ -1564,12 +1564,12 @@ fn full_table_known_zero_quota_renders_exhausted_with_zero_sampling() {
 }
 
 #[test]
-fn full_table_sampling_percentage_sourced_from_pool_weights_not_phase_score() {
+fn full_table_sampling_percentage_sourced_from_pool_weights_not_stage_score() {
     // The percentage rendered in the sampling column is the pool-derived
-    // softmax weight (× relative-quota factor) — not the raw phase score.
+    // softmax weight (× relative-quota factor) — not the raw stage score.
     // With two ipbr-ranked models at scores 90 and 75, the pool softmax
     // assigns the lower-scored model a small but nonzero share (well below
-    // its share of phase-score totals, which would be 75/(90+75) ≈ 45%).
+    // its share of stage-score totals, which would be 75/(90+75) ≈ 45%).
     let high = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 90.0, 0);
     let low = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 75.0, 0);
     let models = vec![high, low];
@@ -1581,12 +1581,12 @@ fn full_table_sampling_percentage_sourced_from_pool_weights_not_phase_score() {
         .iter()
         .find(|r| r.contains("opus 4.7"))
         .expect("low row");
-    // 15-point softmax gap → lower-scored share is ~6-8%. Phase-score
+    // 15-point softmax gap → lower-scored share is ~6-8%. Stage-score
     // proportional rendering would have put it near 45.
     assert!(
         low_row.contains("Build  6")
             || low_row.contains("Build  7")
             || low_row.contains("Build  8"),
-        "sampling percentage must come from pool weights (~6-8%), not phase score (~45%): {low_row:?}"
+        "sampling percentage must come from pool weights (~6-8%), not stage score (~45%): {low_row:?}"
     );
 }

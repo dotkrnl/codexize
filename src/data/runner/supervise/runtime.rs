@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use std::{collections::VecDeque, fs};
 use tokio::sync::{mpsc, watch};
 
-/// Cancel-ack watchdog phase constants.
+/// Cancel-ack watchdog stage constants.
 const CANCEL_ACK_RESEND_SECS: u64 = 60;
 const CANCEL_ACK_TERMINATE_SECS: u64 = 60;
 
@@ -390,8 +390,7 @@ pub(super) async fn finalize_managed_acp_launch(
             let _ = waiting_for_input.send_replace(false);
             let _ = write_launch_cause(&launch.cause_path, &format!("{err:#}"));
             let head_before = git_rev_parse_head().unwrap_or_default();
-            let _ = write_finish_stamp_for_outcome(&launch.stamp_path, head_before, 1, "")
-                .await;
+            let _ = write_finish_stamp_for_outcome(&launch.stamp_path, head_before, 1, "").await;
             return;
         }
     };
@@ -419,8 +418,7 @@ pub(super) async fn finalize_managed_acp_launch(
             let _ = waiting_for_input.send_replace(false);
             let _ = write_launch_cause(&launch.cause_path, &format!("{err:#}"));
             let head_before = git_rev_parse_head().unwrap_or_default();
-            let _ = write_finish_stamp_for_outcome(&launch.stamp_path, head_before, 1, "")
-                .await;
+            let _ = write_finish_stamp_for_outcome(&launch.stamp_path, head_before, 1, "").await;
         }
     }
 }

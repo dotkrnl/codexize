@@ -1,23 +1,23 @@
 //! Repo-state update stage: re-baselines a `WaitingToImplement` session's
 //! spec/plan against the current repository state before sharding launches.
-//! Runs on [`Phase::Plan`] (right before sharding) and stays on
-//! [`Phase::Plan`] on success so the FSM can dispatch sharding.
+//! Runs on [`Stage::Plan`] (right before sharding) and stays on
+//! [`Stage::Plan`] on success so the FSM can dispatch sharding.
 //!
 //! Per the spec §AC-6, a `not_implementable` verdict is a routed outcome
 //! the FSM consumes via [`super::super::PendingDecisions`] — not a separate
-//! phase. The Stage trait's success path returns Phase::Plan and the FSM
+//! stage. The Stage trait's success path returns Stage::Plan and the FSM
 //! reads the verdict to decide whether to dispatch sharding or block.
 use super::{has_succeeded, next_attempt};
-use crate::lifecycle::phase::Phase;
+use crate::lifecycle::Stage;
 use crate::lifecycle::spec::StageSpec;
-use crate::lifecycle::stage::{Stage, StageCtx, SuccessOutcome, WorkUnit};
+use crate::lifecycle::stage::{StageCtx, StageDriver, SuccessOutcome, WorkUnit};
 use crate::lifecycle::stage_id::StageId;
 use std::path::PathBuf;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RepoStateUpdateStage;
 
-impl Stage for RepoStateUpdateStage {
+impl StageDriver for RepoStateUpdateStage {
     fn id(&self) -> StageId {
         StageId::RepoStateUpdate
     }
@@ -53,19 +53,19 @@ impl Stage for RepoStateUpdateStage {
         }
     }
 
-    fn phase_when_running(&self) -> Phase {
-        Phase::Plan
+    fn stage_when_running(&self) -> Stage {
+        Stage::Plan
     }
 
-    fn next_phase_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Phase {
+    fn next_stage_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Stage {
         // A `not_implementable` verdict blocks via PendingDecisions.plan_approval
-        // while the slim phase stays on Plan.
-        Phase::Plan
+        // while the slim stage stays on Plan.
+        Stage::Plan
     }
 
     fn artifact_paths(&self, _round: u32) -> Vec<PathBuf> {
         // The launcher pre-removes `artifacts/repo_state_update.toml`
-        // (line 61), but the legacy `go_back()` does not have a branch
+        // (line 61), but the persisted `go_back()` does not have a branch
         // for RepoStateUpdateRunning — it falls through the noop arm at
         // retry.rs:488-493. Match that: no rewind-time cleanup.
         Vec::new()
@@ -90,7 +90,7 @@ mod tests {
         StageCtx {
             session_id: "s",
             session_dir: Path::new("/tmp"),
-            phase: Phase::Plan,
+            stage: Stage::Plan,
             prior_runs: prior,
             pending_task_ids: &[],
             yolo: false,
@@ -102,12 +102,12 @@ mod tests {
     }
 
     #[test]
-    fn identity_and_window_match_legacy_launch() {
+    fn identity_and_window_match_persisted_launch() {
         let s = RepoStateUpdateStage;
         assert_eq!(s.id(), StageId::RepoStateUpdate);
         assert_eq!(s.label(), "Repo State Update");
         assert_eq!(s.window_name(1, None), "[RepoStateUpdate]");
-        assert_eq!(s.phase_when_running(), Phase::Plan);
+        assert_eq!(s.stage_when_running(), Stage::Plan);
     }
 
     #[test]

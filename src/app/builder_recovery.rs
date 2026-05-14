@@ -1,7 +1,7 @@
 use crate::app::{App, Reason};
 use crate::state::{
-    self as session_state, Message, MessageKind, MessageSender, Phase, PipelineItem,
-    PipelineItemStatus,
+    self as session_state, Message, MessageKind, MessageSender, PipelineItem, PipelineItemStatus,
+    Stage,
 };
 use crate::{review, tasks};
 use anyhow::{Context, Result};
@@ -76,7 +76,7 @@ impl App {
             interactive,
         );
         self.clear_agent_error();
-        if let Err(err) = self.transition_to_phase(Phase::BuilderRecovery(triggering_round)) {
+        if let Err(err) = self.transition_to_stage(Stage::BuilderRecovery(triggering_round)) {
             self.record_agent_error(format!("failed to enter builder recovery: {err}"));
             tracing::warn!("failed to enter builder recovery, blocking: {err}");
             self.clear_builder_recovery_context();
@@ -116,11 +116,11 @@ impl App {
             .iter()
             .filter_map(|item| item.round)
             .max()
-            .or(match self.state.current_phase {
-                Phase::ImplementationRound(r)
-                | Phase::ReviewRound(r)
-                | Phase::Simplification(r)
-                | Phase::FinalValidation(r) => Some(r),
+            .or(match self.state.current_stage {
+                Stage::ImplementationRound(r)
+                | Stage::ReviewRound(r)
+                | Stage::Simplification(r)
+                | Stage::FinalValidation(r) => Some(r),
                 _ => None,
             })
             .unwrap_or(1);
@@ -310,7 +310,7 @@ impl App {
             review::ReviewStatus::Approved | review::ReviewStatus::Refine => {
                 session_state::reset_recovery_cycle_count(&mut self.state);
                 self.queue_recovery_sharding_pipeline_item(round);
-                self.transition_to_phase(Phase::BuilderRecoverySharding(round))?;
+                self.transition_to_stage(Stage::BuilderRecoverySharding(round))?;
             }
             review::ReviewStatus::Revise
             | review::ReviewStatus::HumanBlocked
@@ -432,7 +432,7 @@ impl App {
             self.state.builder.pending_task_ids().len()
         );
         self.append_system_message(run.id, MessageKind::Summary, pipeline_msg);
-        self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+        self.transition_to_stage(Stage::ImplementationRound(round + 1))?;
         Ok(())
     }
 }

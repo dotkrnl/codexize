@@ -1,5 +1,5 @@
 ---
 source: src/ui/footer/keymap/tests_mod.rs
-expression: "snapshot_text(&keymap(Phase::IdeaInput, None, FocusCaps::default(), true,\nfalse, 80,))"
+expression: "snapshot_text(&keymap(Stage::IdeaInput, None, FocusCaps::default(), true,\nfalse, 80,))"
 ---
 [fg=White]Esc[fg=DarkGray] cancel[fg=DarkGray] · [fg=Blue]Enter[fg=DarkGray] submit

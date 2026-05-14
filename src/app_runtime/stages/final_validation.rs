@@ -4,8 +4,8 @@ use crate::app::prompts::final_validation_prompt;
 use crate::app::{App, guard};
 use crate::final_validation::{self, DreamRecommendation, ValidationStatus};
 use crate::selection::CachedModel;
-use crate::selection::config::SelectionPhase;
-use crate::state::{self as session_state, DreamingDecision, DreamingDecisionKind, Phase};
+use crate::selection::config::SelectionStage;
+use crate::state::{self as session_state, DreamingDecision, DreamingDecisionKind, Stage};
 use anyhow::{Context, Result};
 impl App {
     pub(crate) fn launch_final_validation_with_model(
@@ -16,7 +16,7 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Phase::FinalValidation(round) = self.state.current_phase else {
+        let Stage::FinalValidation(round) = self.state.current_stage else {
             return false;
         };
         let session_id = self.state.session_id.clone();
@@ -30,9 +30,9 @@ impl App {
         let idea_text = self.state.idea_text.clone().unwrap_or_default();
         let spec_text = std::fs::read_to_string(&spec_path).unwrap_or_default();
         let modes = self.state.launch_modes();
-        // Validator effort dial reuses the existing review-phase setting; no
+        // Validator effort dial reuses the existing review-stage setting; no
         // new knob (per spec §5.3).
-        let effort = modes.effort_for(EffortLevel::Normal, SelectionPhase::Review);
+        let effort = modes.effort_for(EffortLevel::Normal, SelectionStage::Review);
         // Spec §5.3: model = session.selected_model, vendor inherited from
         // that model. Fall back to the standard primary picker if the
         // selected model is unknown to the current model list (e.g. the
@@ -54,7 +54,7 @@ impl App {
             })
             .or_else(|| self.session_selected_model_for_validator())
             .or_else(|| {
-                self.choose_primary_model(None, SelectionPhase::Review, effort, modes.cheap)
+                self.choose_primary_model(None, SelectionStage::Review, effort, modes.cheap)
             });
         let Some((model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible)) =
             chosen
@@ -158,7 +158,7 @@ impl App {
             }
         }
     }
-    /// Co-located success-finalization for `Phase::FinalValidation(round)`.
+    /// Co-located success-finalization for `Stage::FinalValidation(round)`.
     pub(crate) fn finalize_final_validation_success(
         &mut self,
         run: &crate::state::RunRecord,
@@ -181,7 +181,7 @@ impl App {
                         reason: None,
                     });
                     self.state.save()?;
-                    self.transition_to_phase(Phase::Done)?;
+                    self.transition_to_stage(Stage::Done)?;
                 }
                 Some(DreamRecommendation::Suggest) => {
                     self.state.dreaming_decision = Some(DreamingDecision {
@@ -190,7 +190,7 @@ impl App {
                         reason: verdict.dream_reason,
                     });
                     self.state.save()?;
-                    self.transition_to_phase(Phase::DreamingPending)?;
+                    self.transition_to_stage(Stage::DreamingPending)?;
                 }
                 None => {
                     anyhow::bail!("goal_met verdict missing dream_recommendation");
@@ -204,7 +204,7 @@ impl App {
                     &verdict_artifact,
                 );
                 self.append_goal_gap_tasks(&session_dir, &new_tasks)?;
-                self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+                self.transition_to_stage(Stage::ImplementationRound(round + 1))?;
             }
             ValidationStatus::NeedsHuman => {
                 self.transition_to_blocked(crate::state::BlockOrigin::FinalValidation)?;
@@ -225,8 +225,7 @@ mod tests {
     use crossterm::event::KeyCode;
 
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = crate::state::test_fs_lock()
-            .lock();
+        let _guard = crate::state::test_fs_lock().lock();
         let temp = tempfile::TempDir::new().unwrap();
         let prev = std::env::var_os("CODEXIZE_ROOT");
         // SAFETY: serialized by test_fs_lock and restored before returning.
@@ -277,7 +276,7 @@ mod tests {
     fn goal_met_skip_finishes_and_persists_validator_skip() {
         with_temp_root(|| {
             let mut state = SessionState::new("fv-skip".to_string());
-            state.current_phase = Phase::FinalValidation(1);
+            state.current_stage = Stage::FinalValidation(1);
             let run = run_record(10, 1);
             state.agent_runs.push(run.clone());
             write_verdict(
@@ -293,7 +292,7 @@ dream_recommendation = "skip"
 
             app.finalize_final_validation_success(&run, 1).unwrap();
 
-            assert_eq!(app.state.current_phase, Phase::Done);
+            assert_eq!(app.state.current_stage, Stage::Done);
             assert_eq!(
                 app.state.dreaming_decision,
                 Some(DreamingDecision {
@@ -310,7 +309,7 @@ dream_recommendation = "skip"
     fn goal_met_suggest_enters_persisted_decision_prompt() {
         with_temp_root(|| {
             let mut state = SessionState::new("fv-suggest".to_string());
-            state.current_phase = Phase::FinalValidation(2);
+            state.current_stage = Stage::FinalValidation(2);
             let run = run_record(20, 2);
             state.agent_runs.push(run.clone());
             write_verdict(
@@ -327,7 +326,7 @@ dream_reason = "Several memory lessons should be consolidated."
 
             app.finalize_final_validation_success(&run, 2).unwrap();
 
-            assert_eq!(app.state.current_phase, Phase::DreamingPending);
+            assert_eq!(app.state.current_stage, Stage::DreamingPending);
             assert_eq!(
                 app.state.dreaming_decision,
                 Some(DreamingDecision {
@@ -347,7 +346,7 @@ dream_reason = "Several memory lessons should be consolidated."
     fn skip_decision_persists_and_finishes_without_reoffering() {
         with_temp_root(|| {
             let mut state = SessionState::new("fv-operator-skip".to_string());
-            state.current_phase = Phase::DreamingPending;
+            state.current_stage = Stage::DreamingPending;
             state.dreaming_decision = Some(DreamingDecision {
                 kind: DreamingDecisionKind::Pending,
                 round: 3,
@@ -360,7 +359,7 @@ dream_reason = "Several memory lessons should be consolidated."
                 key(KeyCode::Char('s')),
             );
 
-            assert_eq!(app.state.current_phase, Phase::Done);
+            assert_eq!(app.state.current_stage, Stage::Done);
             assert_eq!(
                 app.state.dreaming_decision,
                 Some(DreamingDecision {

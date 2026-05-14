@@ -95,5 +95,3 @@ fn eperm_from_signal_probe_counts_as_live_process() {
         nix::errno::Errno::ESRCH
     )));
 }
-
-

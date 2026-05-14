@@ -2,7 +2,7 @@ use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::recovery_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, Phase, PipelineItemStatus};
+use crate::state::{self as session_state, PipelineItemStatus, Stage};
 use anyhow::{Context, Result};
 impl App {
     pub(crate) fn launch_recovery_with_model(
@@ -13,7 +13,7 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Phase::BuilderRecovery(round) = self.state.current_phase else {
+        let Stage::BuilderRecovery(round) = self.state.current_stage else {
             return false;
         };
         let session_dir = session_state::session_dir(&self.state.session_id);
@@ -30,10 +30,10 @@ impl App {
             .join("prompts")
             .join(format!("recovery-r{round}.md"));
         let modes = self.state.launch_modes();
-        let phase = Self::phase_for_stage("recovery");
-        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let stage = Self::selection_stage_for_stage("recovery");
+        let effort = modes.effort_for(EffortLevel::Normal, stage);
         let Some(chosen) =
-            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+            self.choose_primary_model(override_model.as_ref(), stage, effort, modes.cheap)
         else {
             self.record_agent_error("no model available with quota".to_string());
             self.save_state();
@@ -165,7 +165,7 @@ impl App {
             }
         }
     }
-    /// Co-located success-finalization for `Phase::BuilderRecovery(round)`.
+    /// Co-located success-finalization for `Stage::BuilderRecovery(round)`.
     ///
     /// Runs `reconcile_builder_recovery` and then either advances to recovery
     /// plan-review (or sharding under yolo) or surfaces the failure and lets
@@ -184,12 +184,12 @@ impl App {
                     // delegates the review gate, not the artifact validation step.
                     self.log_yolo_auto_approved("recovery_plan_review_skipped");
                     self.queue_recovery_sharding_pipeline_item(round);
-                    self.transition_to_phase(Phase::BuilderRecoverySharding(round))?;
+                    self.transition_to_stage(Stage::BuilderRecoverySharding(round))?;
                 } else {
                     // Insert the recovery-mode plan review pipeline item before
                     // transitioning so the UI shows it as the next pending stage.
                     session_state::queue_recovery_plan_review(&mut self.state, round);
-                    self.transition_to_phase(Phase::BuilderRecoveryPlanReview(round))?;
+                    self.transition_to_stage(Stage::BuilderRecoveryPlanReview(round))?;
                 }
             }
             Err(err) => {

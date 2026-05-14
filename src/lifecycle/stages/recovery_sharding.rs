@@ -1,17 +1,17 @@
 //! Recovery sharding stage: re-shards the plan inside an implementation
 //! round after recovery, producing a fresh `tasks.toml`. Runs on
-//! [`Phase::Implementation(r)`] and stays there on success so the coder
+//! [`Stage::Implementation(r)`] and stays there on success so the coder
 //! picks the next pending task.
 use super::{has_succeeded, next_attempt};
-use crate::lifecycle::phase::Phase;
+use crate::lifecycle::Stage;
 use crate::lifecycle::spec::StageSpec;
-use crate::lifecycle::stage::{Stage, StageCtx, SuccessOutcome, WorkUnit};
+use crate::lifecycle::stage::{StageCtx, StageDriver, SuccessOutcome, WorkUnit};
 use crate::lifecycle::stage_id::StageId;
 use std::path::PathBuf;
 
 fn current_round(ctx: &StageCtx<'_>) -> u32 {
-    match ctx.phase {
-        Phase::Implementation(r) => r,
+    match ctx.stage {
+        Stage::Implementation(r) => r,
         _ => 1,
     }
 }
@@ -19,7 +19,7 @@ fn current_round(ctx: &StageCtx<'_>) -> u32 {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecoveryShardingStage;
 
-impl Stage for RecoveryShardingStage {
+impl StageDriver for RecoveryShardingStage {
     fn id(&self) -> StageId {
         StageId::RecoverySharding
     }
@@ -57,16 +57,16 @@ impl Stage for RecoveryShardingStage {
         }
     }
 
-    fn phase_when_running(&self) -> Phase {
-        Phase::Implementation(1)
+    fn stage_when_running(&self) -> Stage {
+        Stage::Implementation(1)
     }
 
-    fn next_phase_on_success(&self, ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Phase {
-        Phase::Implementation(current_round(ctx))
+    fn next_stage_on_success(&self, ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Stage {
+        Stage::Implementation(current_round(ctx))
     }
 
     fn artifact_paths(&self, _round: u32) -> Vec<PathBuf> {
-        // Recovery sharding mutates `artifacts/tasks.toml`, but the legacy
+        // Recovery sharding mutates `artifacts/tasks.toml`, but the persisted
         // `go_back()` does not clean it (it only removes the prompt). Keep
         // that asymmetry — Step 8 may revisit.
         Vec::new()
@@ -89,11 +89,11 @@ mod tests {
     use crate::lifecycle::stage::RunHistoryEntry;
     use std::path::Path;
 
-    fn mk_ctx<'a>(phase: Phase, prior: &'a [RunHistoryEntry]) -> StageCtx<'a> {
+    fn mk_ctx<'a>(stage: Stage, prior: &'a [RunHistoryEntry]) -> StageCtx<'a> {
         StageCtx {
             session_id: "s",
             session_dir: Path::new("/tmp"),
-            phase,
+            stage,
             prior_runs: prior,
             pending_task_ids: &[],
             yolo: false,
@@ -105,12 +105,12 @@ mod tests {
     }
 
     #[test]
-    fn identity_and_window_match_legacy_launch() {
+    fn identity_and_window_match_persisted_launch() {
         let s = RecoveryShardingStage;
         assert_eq!(s.id(), StageId::RecoverySharding);
         assert_eq!(s.label(), "Recovery Sharding");
         assert_eq!(s.window_name(1, None), "[Recovery Sharding]");
-        assert_eq!(s.phase_when_running(), Phase::Implementation(1));
+        assert_eq!(s.stage_when_running(), Stage::Implementation(1));
     }
 
     #[test]
@@ -125,9 +125,9 @@ mod tests {
     }
 
     #[test]
-    fn build_spec_carries_round_from_phase() {
+    fn build_spec_carries_round_from_stage() {
         let s = RecoveryShardingStage;
-        let ctx = mk_ctx(Phase::Implementation(5), &[]);
+        let ctx = mk_ctx(Stage::Implementation(5), &[]);
         let spec = s.build_spec(&ctx);
         assert_eq!(spec.round, 5);
         assert_eq!(spec.stage_id, StageId::RecoverySharding);

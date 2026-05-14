@@ -1,13 +1,13 @@
 //! Spec review stage: per-round review of `artifacts/spec.md` that produces
 //! `artifacts/spec-review-{round}.md`.
 //!
-//! Single-shot per round. Runs while the session sits on [`Phase::Spec`].
+//! Single-shot per round. Runs while the session sits on [`Stage::Spec`].
 //! On success the FSM consults pending decisions (spec approval modal) and
-//! either re-launches another round or moves to [`Phase::Plan`].
+//! either re-launches another round or moves to [`Stage::Plan`].
 use super::{has_succeeded, next_attempt};
-use crate::lifecycle::phase::Phase;
+use crate::lifecycle::Stage;
 use crate::lifecycle::spec::StageSpec;
-use crate::lifecycle::stage::{Stage, StageCtx, SuccessOutcome, WorkUnit};
+use crate::lifecycle::stage::{StageCtx, StageDriver, SuccessOutcome, WorkUnit};
 use crate::lifecycle::stage_id::StageId;
 use std::path::PathBuf;
 
@@ -20,7 +20,8 @@ fn current_round(ctx: &StageCtx<'_>) -> u32 {
         .prior_runs
         .iter()
         .filter(|r| {
-            r.stage_id == StageId::SpecReview && r.outcome == Some(crate::lifecycle::fsm::Outcome::Done)
+            r.stage_id == StageId::SpecReview
+                && r.outcome == Some(crate::lifecycle::fsm::Outcome::Done)
         })
         .map(|r| r.round)
         .max();
@@ -33,7 +34,7 @@ fn current_round(ctx: &StageCtx<'_>) -> u32 {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SpecReviewStage;
 
-impl Stage for SpecReviewStage {
+impl StageDriver for SpecReviewStage {
     fn id(&self) -> StageId {
         StageId::SpecReview
     }
@@ -71,15 +72,15 @@ impl Stage for SpecReviewStage {
         }
     }
 
-    fn phase_when_running(&self) -> Phase {
-        Phase::Spec
+    fn stage_when_running(&self) -> Stage {
+        Stage::Spec
     }
 
-    fn next_phase_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Phase {
-        // Spec approval is now a PendingDecision, not a Phase variant; the
+    fn next_stage_on_success(&self, _ctx: &StageCtx<'_>, _outcome: &SuccessOutcome) -> Stage {
+        // Spec approval is now a PendingDecision, not a Stage variant; the
         // FSM consults it to either re-run another spec-review round or
         // move on to planning.
-        Phase::Plan
+        Stage::Plan
     }
 
     fn artifact_paths(&self, round: u32) -> Vec<PathBuf> {
@@ -106,7 +107,7 @@ mod tests {
         StageCtx {
             session_id: "s",
             session_dir: Path::new("/tmp"),
-            phase: Phase::Spec,
+            stage: Stage::Spec,
             prior_runs: prior,
             pending_task_ids: pending,
             yolo: false,
@@ -118,13 +119,13 @@ mod tests {
     }
 
     #[test]
-    fn identity_and_window_match_legacy_launch() {
+    fn identity_and_window_match_persisted_launch() {
         let s = SpecReviewStage;
         assert_eq!(s.id(), StageId::SpecReview);
         assert_eq!(s.label(), "Spec Review");
         assert_eq!(s.window_name(1, None), "[Spec Review 1]");
         assert_eq!(s.window_name(2, None), "[Spec Review 2]");
-        assert_eq!(s.phase_when_running(), Phase::Spec);
+        assert_eq!(s.stage_when_running(), Stage::Spec);
     }
 
     #[test]

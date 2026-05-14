@@ -4,7 +4,7 @@ use crate::app::prompts::{
 };
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, Phase};
+use crate::state::{self as session_state, Stage};
 use anyhow::Result;
 impl App {
     pub(crate) fn launch_coder_with_model(&mut self, override_model: Option<CachedModel>) -> bool {
@@ -12,7 +12,7 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Phase::ImplementationRound(r) = self.state.current_phase else {
+        let Stage::ImplementationRound(r) = self.state.current_stage else {
             return false;
         };
         let Some(task_id) = self.ensure_builder_task_for_round(r) else {
@@ -36,13 +36,13 @@ impl App {
         let modes = self.state.launch_modes();
         self.record_dirty_worktree_yolo_gate(dirty_before_coder, modes);
         let requested_effort = self.task_effort_for_round(&session_dir, task_id, r);
-        let phase = Self::phase_for_stage("coder");
-        let effort = modes.effort_for(requested_effort, phase);
+        let stage = Self::selection_stage_for_stage("coder");
+        let effort = modes.effort_for(requested_effort, stage);
         // Override-model bypass: an explicit operator pick wins over the
         // tough-eligibility filter (spec §3.7). The adapter still emits the
         // launch-snapshot effort flag derived from `task.tough`.
         let Some(chosen) =
-            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+            self.choose_primary_model(override_model.as_ref(), stage, effort, modes.cheap)
         else {
             self.record_agent_error("no model available with quota".to_string());
             self.save_state();
@@ -146,7 +146,7 @@ impl App {
             }
         }
     }
-    /// Co-located success-finalization for `Phase::ImplementationRound(round)`.
+    /// Co-located success-finalization for `Stage::ImplementationRound(round)`.
     pub(crate) fn finalize_coder_success(
         &mut self,
         run: &crate::state::RunRecord,
@@ -161,7 +161,7 @@ impl App {
         if round == 1 && self.state.skip_to_impl_rationale.is_some() {
             self.enter_simplification_or_done(1, run.modes.yolo)?;
         } else {
-            self.transition_to_phase(Phase::ReviewRound(round))?;
+            self.transition_to_stage(Stage::ReviewRound(round))?;
         }
         Ok(())
     }

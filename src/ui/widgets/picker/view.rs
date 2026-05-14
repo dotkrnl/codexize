@@ -108,7 +108,7 @@ impl SessionPicker {
         let mut selected_top_idx = 0;
         let mut selected_bottom_idx = 0;
         for (idx, entry) in visible.iter().enumerate() {
-            let (badge, color, prefix) = phase_badge(entry.current_phase);
+            let (badge, color, prefix) = stage_badge(entry.current_stage);
             let time = format_relative_time(entry.last_modified, now);
             let is_selected = idx == self.selected;
             let is_expanded = self.expanded.as_ref() == Some(&entry.session_id) && !degenerate;
@@ -150,20 +150,20 @@ impl SessionPicker {
                 let mut details = Vec::new();
                 let dim = Style::default().fg(Color::DarkGray);
                 let default_style = Style::default().fg(Color::White);
-                let phase_status = if entry.current_phase == Phase::Done {
+                let stage_status = if entry.current_stage == Stage::Done {
                     "done"
-                } else if entry.current_phase == Phase::BlockedNeedsUser {
+                } else if entry.current_stage == Stage::BlockedNeedsUser {
                     "blocked"
-                } else if entry.current_phase == Phase::IdeaInput {
+                } else if entry.current_stage == Stage::IdeaInput {
                     "awaiting input"
                 } else {
                     "running"
                 };
                 details.push(Line::from(vec![
                     Span::raw("      "),
-                    Span::styled("Phase: ", dim),
+                    Span::styled("Stage: ", dim),
                     Span::styled(
-                        format!("{} ({})", entry.current_phase.label(), phase_status),
+                        format!("{} ({})", entry.current_stage.label(), stage_status),
                         default_style,
                     ),
                 ]));

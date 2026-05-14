@@ -1,12 +1,12 @@
 //! Stage trait and registry.
 //!
-//! The [`Stage`] trait defines the per-stage lifecycle contract. Concrete impls
+//! The `StageDriver` trait defines the per-stage lifecycle contract. Concrete impls
 //! live under [`super::stages`]. The [`StageRegistry`] maps [`StageId`] to
-//! implementations and provides phase-advancement queries.
+//! implementations and provides stage-advancement queries.
 use super::fsm::Outcome;
-use super::phase::Phase;
 use super::spec::{ActiveRun, StageSpec};
 use super::stage_id::StageId;
+use super::stage_state::Stage;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 /// Only the fields stage scheduling actually reads land here — the full
 /// [`crate::state::RunRecord`] carries more (model selection, effort, timestamps).
 /// Keeping this projection lean makes it trivial to construct in unit tests
-/// for the Stage impls without dragging in the persistence layer.
+/// for the stage-driver impls without dragging in the persistence layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunHistoryEntry {
     pub stage_id: StageId,
@@ -29,7 +29,7 @@ pub struct RunHistoryEntry {
 /// Slim read-only view of session state passed to a [`Stage`].
 ///
 /// Every borrow here is read-only and narrowly scoped — a Stage may inspect
-/// session paths, the current phase, the prior-run projection, and operator
+/// session paths, the current stage, the prior-run projection, and operator
 /// modes, but it never sees the runner supervisor, agent registry, or
 /// anything that lets it spawn a process. The FSM owns side effects; the
 /// trait describes intent.
@@ -41,8 +41,8 @@ pub struct StageCtx<'a> {
     /// return paths *relative* to this directory; the rewinder turns them
     /// absolute by joining here.
     pub session_dir: &'a Path,
-    /// Active lifecycle [`Phase`].
-    pub phase: Phase,
+    /// Active lifecycle [`Stage`].
+    pub stage: Stage,
     /// Slim projection of prior runs the stage may inspect for
     /// `next_pending_work`, attempt counts, or "has this stage succeeded
     /// yet" checks.
@@ -61,18 +61,18 @@ pub struct StageCtx<'a> {
     /// True when the Recovery / RecoveryPlanReview / RecoverySharding chain
     /// has been activated for the current implementation round (i.e. a
     /// reviewer failure escalated the round into recovery). Populated from
-    /// session state. Used by [`StageRegistry::next_stage_for_phase`] to gate
+    /// session state. Used by [`StageRegistry::next_stage_for_stage`] to gate
     /// recovery stages so they aren't auto-scheduled in a healthy round.
     pub recovery_active: bool,
     /// True when the reviewer's approval verdict for the current round
     /// requested a simplification pass. Populated from session state. Used by
-    /// [`StageRegistry::next_stage_for_phase`] to gate [`StageId::Simplification`]
-    /// on the `Phase::Review(r)` candidate list.
+    /// [`StageRegistry::next_stage_for_stage`] to gate [`StageId::Simplification`]
+    /// on the `Stage::Review(r)` candidate list.
     pub simplification_requested: bool,
     /// True when the operator accepted the dreaming-decision modal after
     /// final validation. Populated from session state. Used by
-    /// [`StageRegistry::next_stage_for_phase`] to gate [`StageId::Dreaming`]
-    /// on the `Phase::Finalization` candidate list.
+    /// [`StageRegistry::next_stage_for_stage`] to gate [`StageId::Dreaming`]
+    /// on the `Stage::Finalization` candidate list.
     pub dreaming_accepted: bool,
 }
 
@@ -84,7 +84,7 @@ pub struct WorkUnit {
     pub attempt: u32,
 }
 
-/// Successful run payload handed to [`Stage::next_phase_on_success`].
+/// Successful run payload handed to [`StageDriver::next_stage_on_success`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuccessOutcome {
     pub run: ActiveRun,
@@ -97,7 +97,7 @@ pub struct SuccessOutcome {
 /// stage's launch flow differs in nontrivial ways today. `build_spec`
 /// describes *what* the FSM should launch; actual process spawning lives
 /// outside the stage so impls remain testable.
-pub trait Stage: Send + Sync {
+pub trait StageDriver: Send + Sync {
     /// Identifier the registry uses to look this stage up.
     fn id(&self) -> StageId;
 
@@ -117,7 +117,7 @@ pub trait Stage: Send + Sync {
 
     /// Next pending work unit, if any. `None` means the stage has nothing
     /// queued at this moment (typically because it has already succeeded
-    /// at the current phase, or — for multi-shot stages — every task for
+    /// at the current stage, or — for multi-shot stages — every task for
     /// the round is Done).
     fn next_pending_work(&self, ctx: &StageCtx<'_>) -> Option<WorkUnit>;
 
@@ -128,11 +128,11 @@ pub trait Stage: Send + Sync {
         true
     }
 
-    /// The [`Phase`] the session sits in while a run of this stage is live.
-    fn phase_when_running(&self) -> Phase;
+    /// The [`Stage`] the session sits in while a run of this stage is live.
+    fn stage_when_running(&self) -> Stage;
 
-    /// Phase to transition to when a run of this stage finishes successfully.
-    fn next_phase_on_success(&self, ctx: &StageCtx<'_>, outcome: &SuccessOutcome) -> Phase;
+    /// Stage to transition to when a run of this stage finishes successfully.
+    fn next_stage_on_success(&self, ctx: &StageCtx<'_>, outcome: &SuccessOutcome) -> Stage;
 
     /// Artifact paths produced by this stage at the given round, **relative
     /// to the session directory**. The rewinder turns each path absolute by
@@ -149,10 +149,10 @@ pub trait Stage: Send + Sync {
     fn prompt_paths(&self, round: u32) -> Vec<PathBuf>;
 }
 
-/// Lookup table of [`Stage`] implementations keyed by [`StageId`].
+/// Lookup table of `StageDriver` implementations keyed by [`StageId`].
 #[derive(Default)]
 pub struct StageRegistry {
-    stages: HashMap<StageId, Box<dyn Stage>>,
+    stages: HashMap<StageId, Box<dyn StageDriver>>,
 }
 
 impl std::fmt::Debug for StageRegistry {
@@ -174,20 +174,20 @@ impl StageRegistry {
     /// Register a stage. The last registration for a given [`StageId`] wins;
     /// callers wanting strict no-overwrite semantics should check
     /// [`StageRegistry::get`] first.
-    pub fn register(&mut self, stage: Box<dyn Stage>) {
+    pub fn register(&mut self, stage: Box<dyn StageDriver>) {
         let id = stage.id();
         self.stages.insert(id, stage);
     }
 
     /// Look up the stage for `id`, if registered.
-    pub fn get(&self, id: StageId) -> Option<&dyn Stage> {
+    pub fn get(&self, id: StageId) -> Option<&dyn StageDriver> {
         self.stages.get(&id).map(|s| s.as_ref())
     }
 
-    /// Resolve the next stage to launch given the current session [`Phase`]
+    /// Resolve the next stage to launch given the current session [`Stage`]
     /// and a read-only [`StageCtx`] projection.
     ///
-    /// The function walks a per-phase ordered list of candidate
+    /// The function walks a per-stage ordered list of candidate
     /// [`StageId`]s and returns the first whose
     /// [`Stage::next_pending_work`] surfaces work. Recovery and
     /// simplification candidates are gated on
@@ -197,41 +197,41 @@ impl StageRegistry {
     /// pending-decision and reviewer-verdict state.
     ///
     /// Returns `None` when:
-    /// - the phase has no candidates ([`Phase::Done`], [`Phase::Cancelled`]),
-    /// - every candidate at this phase reports "no pending work" (the phase
+    /// - the stage has no candidates ([`Stage::Done`], [`Stage::Cancelled`]),
+    /// - every candidate at this stage reports "no pending work" (the stage
     ///   should advance — the scheduler reaches this state transiently
-    ///   between a successful run and the FSM bumping the phase), or
+    ///   between a successful run and the FSM bumping the stage), or
     /// - the candidate stage isn't registered (callers should treat that as
     ///   a configuration error, but `None` keeps the API total).
-    pub fn next_stage_for_phase(&self, phase: Phase, ctx: &StageCtx<'_>) -> Option<StageId> {
-        // Hardcoded per-phase candidate order. The ordering is the canonical
-        // pipeline sequence within each phase — first candidate "with pending
-        // work" wins. Stage impls' `phase_when_running()` confirms the
+    pub fn next_stage_for_stage(&self, stage: Stage, ctx: &StageCtx<'_>) -> Option<StageId> {
+        // Hardcoded per-stage candidate order. The ordering is the canonical
+        // pipeline sequence within each stage — first candidate "with pending
+        // work" wins. stage-driver impls' `stage_when_running()` confirms the
         // mappings here.
-        let candidates: &[(StageId, GateFn)] = match phase {
-            Phase::Idea => &[(StageId::Brainstorm, gate_always)],
-            Phase::Spec => &[(StageId::SpecReview, gate_always)],
-            Phase::Plan => &[
+        let candidates: &[(StageId, GateFn)] = match stage {
+            Stage::Idea => &[(StageId::Brainstorm, gate_always)],
+            Stage::Spec => &[(StageId::SpecReview, gate_always)],
+            Stage::Plan => &[
                 (StageId::Planning, gate_always),
                 (StageId::PlanReview, gate_always),
                 (StageId::RepoStateUpdate, gate_always),
                 (StageId::Sharding, gate_always),
             ],
-            Phase::Implementation(_) => &[
+            Stage::Implementation(_) => &[
                 (StageId::Coder, gate_always),
                 (StageId::Recovery, gate_recovery_active),
                 (StageId::RecoveryPlanReview, gate_recovery_active),
                 (StageId::RecoverySharding, gate_recovery_active),
             ],
-            Phase::Review(_) => &[
+            Stage::Review(_) => &[
                 (StageId::Reviewer, gate_always),
                 (StageId::Simplification, gate_simplification_requested),
             ],
-            Phase::Finalization => &[
+            Stage::Finalization => &[
                 (StageId::FinalValidation, gate_always),
                 (StageId::Dreaming, gate_dreaming_accepted),
             ],
-            Phase::Done | Phase::Cancelled => &[],
+            Stage::Done | Stage::Cancelled => &[],
         };
 
         for (id, gate) in candidates {
@@ -246,30 +246,30 @@ impl StageRegistry {
         None
     }
 
-    /// Stages whose `phase_when_running` is strictly later than `phase` —
+    /// Stages whose `stage_when_running` is strictly later than `stage` —
     /// used by `:rewind` to know which artifacts and prompts to clean up.
     ///
-    /// Compares each registered stage's [`Stage::phase_when_running`]
-    /// (a canonical phase key — `Implementation(1)` and `Review(1)` stand in
-    /// for every round of their respective lanes) against `phase` using
-    /// [`Phase`]'s [`PartialOrd`]. Returns stages with strictly-greater
-    /// phases, sorted by phase descending (later phases first) so callers
+    /// Compares each registered stage's [`Stage::stage_when_running`]
+    /// (a canonical stage key — `Implementation(1)` and `Review(1)` stand in
+    /// for every round of their respective lanes) against `stage` using
+    /// [`Stage`]'s [`PartialOrd`]. Returns stages with strictly-greater
+    /// stages, sorted by stage descending (later stages first) so callers
     /// can iterate latest-stage-first while cleaning up artifacts.
-    /// [`Phase::Cancelled`] is incomparable with every other phase; this
+    /// [`Stage::Cancelled`] is incomparable with every other stage; this
     /// function returns an empty vector when called with it.
-    pub fn stages_after(&self, phase: Phase) -> Vec<StageId> {
-        let mut hits: Vec<(StageId, Phase)> = self
+    pub fn stages_after(&self, target_stage: Stage) -> Vec<StageId> {
+        let mut hits: Vec<(StageId, Stage)> = self
             .stages
             .iter()
-            .filter_map(|(id, stage)| {
-                let s_phase = stage.phase_when_running();
-                match s_phase.partial_cmp(&phase) {
-                    Some(std::cmp::Ordering::Greater) => Some((*id, s_phase)),
+            .filter_map(|(id, driver)| {
+                let s_stage = driver.stage_when_running();
+                match s_stage.partial_cmp(&target_stage) {
+                    Some(std::cmp::Ordering::Greater) => Some((*id, s_stage)),
                     _ => None,
                 }
             })
             .collect();
-        // Sort by phase descending; ties broken by StageId discriminant so
+        // Sort by stage descending; ties broken by StageId discriminant so
         // the result is deterministic across runs. The tie-break order is
         // intentionally not part of the public contract.
         hits.sort_by(|a, b| {
@@ -282,15 +282,15 @@ impl StageRegistry {
         hits.into_iter().map(|(id, _)| id).collect()
     }
 
-    /// Stages whose `phase_when_running` equals `phase`, sorted by
+    /// Stages whose `stage_when_running` equals `stage`, sorted by
     /// [`StageId`] discriminant for deterministic cleanup planning.
-    pub fn stages_at_phase(&self, phase: Phase) -> Vec<StageId> {
+    pub fn stages_at_stage(&self, target_stage: Stage) -> Vec<StageId> {
         let mut hits: Vec<StageId> = self
             .stages
             .iter()
-            .filter_map(|(id, stage)| {
+            .filter_map(|(id, driver)| {
                 matches!(
-                    stage.phase_when_running().partial_cmp(&phase),
+                    driver.stage_when_running().partial_cmp(&target_stage),
                     Some(std::cmp::Ordering::Equal)
                 )
                 .then_some(*id)
@@ -323,11 +323,11 @@ fn gate_dreaming_accepted(ctx: &StageCtx<'_>) -> bool {
 mod tests {
     use super::*;
 
-    fn empty_ctx<'a>(phase: Phase) -> StageCtx<'a> {
+    fn empty_ctx<'a>(stage: Stage) -> StageCtx<'a> {
         StageCtx {
             session_id: "s",
             session_dir: Path::new("/tmp"),
-            phase,
+            stage,
             prior_runs: &[],
             pending_task_ids: &[],
             yolo: false,
@@ -343,31 +343,31 @@ mod tests {
         let reg = StageRegistry::new();
         assert!(reg.get(StageId::Brainstorm).is_none());
         assert_eq!(
-            reg.next_stage_for_phase(Phase::Idea, &empty_ctx(Phase::Idea)),
+            reg.next_stage_for_stage(Stage::Idea, &empty_ctx(Stage::Idea)),
             None
         );
-        assert!(reg.stages_after(Phase::Idea).is_empty());
+        assert!(reg.stages_after(Stage::Idea).is_empty());
     }
 
     #[test]
-    fn empty_registry_returns_none_for_every_phase() {
+    fn empty_registry_returns_none_for_every_stage() {
         let reg = StageRegistry::new();
-        for phase in [
-            Phase::Idea,
-            Phase::Spec,
-            Phase::Plan,
-            Phase::Implementation(1),
-            Phase::Implementation(5),
-            Phase::Review(1),
-            Phase::Review(5),
-            Phase::Finalization,
-            Phase::Done,
-            Phase::Cancelled,
+        for stage in [
+            Stage::Idea,
+            Stage::Spec,
+            Stage::Plan,
+            Stage::Implementation(1),
+            Stage::Implementation(5),
+            Stage::Review(1),
+            Stage::Review(5),
+            Stage::Finalization,
+            Stage::Done,
+            Stage::Cancelled,
         ] {
             assert_eq!(
-                reg.next_stage_for_phase(phase, &empty_ctx(phase)),
+                reg.next_stage_for_stage(stage, &empty_ctx(stage)),
                 None,
-                "empty registry must return None for {phase:?}"
+                "empty registry must return None for {stage:?}"
             );
         }
     }

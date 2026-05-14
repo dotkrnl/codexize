@@ -27,8 +27,7 @@ fn parse_reset_time_carries_fractional_nanosecond_rounding() {
 
 #[test]
 fn home_dir_returns_path_from_env() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
 
     let original = std::env::var_os("HOME");
     let dir = tempfile::TempDir::new().unwrap();
@@ -50,8 +49,7 @@ fn home_dir_returns_path_from_env() {
 
 #[test]
 fn home_dir_errors_when_unset() {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
 
     let original = std::env::var_os("HOME");
     // SAFETY: serialized via test_fs_lock above; restored unconditionally.

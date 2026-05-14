@@ -1,7 +1,7 @@
 //! Mtime-cached read model for `sessions/<id>/session.toml` files.
 //!
 //! The shell scheduler tick and (eventually) the sidebar model both ask
-//! "what sessions exist on disk, what phase are they in, are they archived?".
+//! "what sessions exist on disk, what stage are they in, are they archived?".
 //! Today every caller answers that by walking the sessions directory and
 //! calling [`SessionState::load`] for every entry — which parses the full
 //! TOML, including fields the scheduler does not need. With N sessions and
@@ -24,7 +24,7 @@
 
 use crate::picker::SessionEntry;
 use crate::scheduler::{ScannedSession, SchedulerSession};
-use crate::state::{Modes, Phase, SessionState};
+use crate::state::{Modes, SessionState, Stage};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -37,7 +37,7 @@ use std::time::SystemTime;
 #[derive(Debug, Clone)]
 pub struct IndexedSession {
     pub session_id: String,
-    pub phase: Phase,
+    pub stage: Stage,
     pub archived: bool,
     pub last_modified: SystemTime,
     pub title: String,
@@ -171,7 +171,7 @@ impl SessionIndex {
                 Entry::Loaded { indexed, .. } if indexed.archived => None,
                 Entry::Loaded { indexed, .. } => Some(ScannedSession::Loaded(SchedulerSession {
                     session_id: id.clone(),
-                    current_phase: indexed.phase,
+                    current_stage: indexed.stage,
                 })),
                 Entry::Corrupt { error, .. } => Some(ScannedSession::Corrupt {
                     session_id: id.clone(),
@@ -195,7 +195,7 @@ impl SessionIndex {
                 Entry::Loaded { indexed, .. } => Some(SessionEntry {
                     session_id: indexed.session_id.clone(),
                     idea_summary: indexed.idea_summary.clone(),
-                    current_phase: indexed.phase,
+                    current_stage: indexed.stage,
                     modes: indexed.modes,
                     last_modified: indexed.last_modified,
                     archived: indexed.archived,
@@ -252,7 +252,7 @@ fn indexed_session_from_state(
     };
     IndexedSession {
         session_id: session_id.to_string(),
-        phase: state.current_phase,
+        stage: state.current_stage,
         archived: state.archived,
         last_modified,
         title,
@@ -300,7 +300,7 @@ fn entries_same_for_dirty(
 
 fn indexed_same(left: &IndexedSession, right: &IndexedSession) -> bool {
     left.session_id == right.session_id
-        && left.phase == right.phase
+        && left.stage == right.stage
         && left.archived == right.archived
         && left.last_modified == right.last_modified
         && left.title == right.title
@@ -356,12 +356,11 @@ pub fn snapshot_for_scheduler(sessions_root: &Path) -> Result<Vec<ScannedSession
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{self, Phase, SessionState, test_fs_lock};
+    use crate::state::{self, SessionState, Stage, test_fs_lock};
     use serial_test::serial;
 
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = test_fs_lock()
-            .lock();
+        let _guard = test_fs_lock().lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         // Safety: tests are serialised by `test_fs_lock`, so the env var is
         // not touched by another thread concurrently.
@@ -376,15 +375,15 @@ mod tests {
         out
     }
 
-    fn save_session(id: &str, phase: Phase) {
+    fn save_session(id: &str, stage: Stage) {
         let mut state = SessionState::new(id.to_string());
-        state.current_phase = phase;
+        state.current_stage = stage;
         state.save().expect("save session");
     }
 
-    fn save_session_with_sidebar_fields(id: &str, phase: Phase) {
+    fn save_session_with_sidebar_fields(id: &str, stage: Stage) {
         let mut state = SessionState::new(id.to_string());
-        state.current_phase = phase;
+        state.current_stage = stage;
         state.title = Some("Sidebar title".to_string());
         state.idea_text = Some("Longer idea body".to_string());
         state.modes = Modes {
@@ -418,9 +417,9 @@ mod tests {
     #[serial]
     fn refresh_loads_every_session_on_first_call() {
         with_temp_root(|| {
-            save_session("20260511-080000-000000001", Phase::BrainstormRunning);
-            save_session("20260511-090000-000000001", Phase::WaitingToImplement);
-            save_session("20260511-100000-000000001", Phase::Done);
+            save_session("20260511-080000-000000001", Stage::BrainstormRunning);
+            save_session("20260511-090000-000000001", Stage::WaitingToImplement);
+            save_session("20260511-100000-000000001", Stage::Done);
 
             let mut index = SessionIndex::new(sessions_root());
             index.refresh().expect("refresh");
@@ -435,9 +434,9 @@ mod tests {
     #[serial]
     fn refresh_reparses_only_changed_entries() {
         with_temp_root(|| {
-            save_session("20260511-080000-000000001", Phase::BrainstormRunning);
-            save_session("20260511-090000-000000001", Phase::WaitingToImplement);
-            save_session("20260511-100000-000000001", Phase::Done);
+            save_session("20260511-080000-000000001", Stage::BrainstormRunning);
+            save_session("20260511-090000-000000001", Stage::WaitingToImplement);
+            save_session("20260511-100000-000000001", Stage::Done);
 
             let mut index = SessionIndex::new(sessions_root());
             index.refresh().expect("first refresh");
@@ -456,8 +455,8 @@ mod tests {
     #[serial]
     fn refresh_is_steady_state_when_nothing_changed() {
         with_temp_root(|| {
-            save_session("20260511-080000-000000001", Phase::BrainstormRunning);
-            save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+            save_session("20260511-080000-000000001", Stage::BrainstormRunning);
+            save_session("20260511-090000-000000001", Stage::WaitingToImplement);
 
             let mut index = SessionIndex::new(sessions_root());
             index.refresh().expect("first refresh");
@@ -478,8 +477,8 @@ mod tests {
     #[serial]
     fn refresh_evicts_deleted_sessions() {
         with_temp_root(|| {
-            save_session("20260511-080000-000000001", Phase::BrainstormRunning);
-            save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+            save_session("20260511-080000-000000001", Stage::BrainstormRunning);
+            save_session("20260511-090000-000000001", Stage::WaitingToImplement);
 
             let mut index = SessionIndex::new(sessions_root());
             index.refresh().expect("first refresh");
@@ -500,7 +499,7 @@ mod tests {
     #[serial]
     fn refresh_surfaces_invalid_session_toml_as_corrupt() {
         with_temp_root(|| {
-            save_session("20260511-080000-000000001", Phase::BrainstormRunning);
+            save_session("20260511-080000-000000001", Stage::BrainstormRunning);
             // Truncate the second session's toml to invalid bytes — load
             // will fail with a parse error.
             let bad_id = "20260511-090000-000000001";
@@ -531,10 +530,10 @@ mod tests {
     fn refresh_filters_archived_from_scheduler_snapshot() {
         with_temp_root(|| {
             let mut state = SessionState::new("20260511-080000-000000001".to_string());
-            state.current_phase = Phase::Done;
+            state.current_stage = Stage::Done;
             state.archived = true;
             state.save().expect("save archived");
-            save_session("20260511-090000-000000001", Phase::BrainstormRunning);
+            save_session("20260511-090000-000000001", Stage::BrainstormRunning);
 
             let mut index = SessionIndex::new(sessions_root());
             index.refresh().expect("refresh");
@@ -550,7 +549,7 @@ mod tests {
     fn refresh_indexes_sidebar_projection_fields() {
         with_temp_root(|| {
             let id = "20260511-080000-000000001";
-            save_session_with_sidebar_fields(id, Phase::Done);
+            save_session_with_sidebar_fields(id, Stage::Done);
 
             let mut index = SessionIndex::new(sessions_root());
             index.refresh().expect("refresh");

@@ -2,7 +2,7 @@ use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::plan_review_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, MessageKind, Phase, RunStatus};
+use crate::state::{self as session_state, MessageKind, RunStatus, Stage};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use std::path::Path;
@@ -34,8 +34,8 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let round = match self.state.current_phase {
-            Phase::PlanReviewPaused => self.completed_rounds("plan-review") + 1,
+        let round = match self.state.current_stage {
+            Stage::PlanReviewPaused => self.completed_rounds("plan-review") + 1,
             _ => self.completed_rounds("plan-review").max(1),
         };
         let session_dir = session_state::session_dir(&self.state.session_id);
@@ -48,8 +48,8 @@ impl App {
             .join("prompts")
             .join(format!("plan-review-{round}.md"));
         let modes = self.state.launch_modes();
-        let phase = Self::phase_for_stage("plan-review");
-        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let stage = Self::selection_stage_for_stage("plan-review");
+        let effort = modes.effort_for(EffortLevel::Normal, stage);
         let runs: Vec<_> = self
             .state
             .agent_runs
@@ -190,11 +190,11 @@ impl App {
                 // `WaitingToImplement` before sharding. The scheduler /
                 // repo-state-update dispatch out of `WaitingToImplement`
                 // owns the actual launch into `ShardingRunning`.
-                self.transition_to_phase_logged(Phase::WaitingToImplement);
+                self.transition_to_stage_logged(Stage::WaitingToImplement);
                 false
             }
             KeyCode::Char('n') => {
-                self.transition_to_phase_logged(Phase::PlanReviewRunning);
+                self.transition_to_stage_logged(Stage::PlanReviewRunning);
                 self.launch_plan_review();
                 false
             }
@@ -202,14 +202,14 @@ impl App {
             _ => false,
         }
     }
-    /// Co-located success-finalization for `Phase::PlanReviewRunning`.
+    /// Co-located success-finalization for `Stage::PlanReviewRunning`.
     pub(crate) fn finalize_plan_review_success(
         &mut self,
         run: &crate::state::RunRecord,
     ) -> Result<()> {
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
-        self.transition_to_phase(Phase::PlanReviewPaused)?;
+        self.transition_to_stage(Stage::PlanReviewPaused)?;
         self.append_system_message(
             run.id,
             MessageKind::Summary,
@@ -227,7 +227,7 @@ mod tests {
     use super::App;
     use crate::acp::AcpLaunchPolicy;
     use crate::app::test_support::{mk_app, with_temp_root};
-    use crate::state::{LaunchModes, Phase, RunRecord, RunStatus, SessionState};
+    use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState, Stage};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::path::PathBuf;
 
@@ -263,7 +263,7 @@ mod tests {
         with_temp_root(|| {
             let session_id = "20260511-091500-000000001";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::PlanReviewPaused;
+            state.current_stage = Stage::PlanReviewPaused;
             state.agent_runs.push(plan_review_run());
             state.save().unwrap();
             let mut app = mk_app(state);
@@ -272,7 +272,7 @@ mod tests {
                 KeyModifiers::NONE,
             ));
             assert!(!consumed, "Enter must dismiss the modal (returns false)");
-            assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+            assert_eq!(app.state.current_stage, Stage::WaitingToImplement);
         });
     }
 
@@ -281,7 +281,7 @@ mod tests {
         with_temp_root(|| {
             let session_id = "20260511-091500-000000002";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::PlanReviewPaused;
+            state.current_stage = Stage::PlanReviewPaused;
             state.agent_runs.push(plan_review_run());
             state.save().unwrap();
             let mut app = mk_app(state);
@@ -289,7 +289,7 @@ mod tests {
                 KeyCode::Char('y'),
                 KeyModifiers::NONE,
             ));
-            assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+            assert_eq!(app.state.current_stage, Stage::WaitingToImplement);
         });
     }
 
@@ -302,13 +302,13 @@ mod tests {
         with_temp_root(|| {
             let session_id = "20260511-091500-000000003";
             let mut state = SessionState::new(session_id.to_string());
-            state.current_phase = Phase::PlanReviewPaused;
+            state.current_stage = Stage::PlanReviewPaused;
             state.modes.yolo = true;
             state.agent_runs.push(plan_review_run());
             state.save().unwrap();
             let mut app = mk_app(state);
             app.auto_approve_plan_review_pause("plan_approval");
-            assert_eq!(app.state.current_phase, Phase::WaitingToImplement);
+            assert_eq!(app.state.current_stage, Stage::WaitingToImplement);
         });
     }
 

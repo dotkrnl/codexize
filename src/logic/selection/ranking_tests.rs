@@ -5,7 +5,7 @@ fn sample_cached_model() -> CachedModel {
     CachedModel {
         subscription: SubscriptionKind::Codex,
         name: "gpt-5.5".to_string(),
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+        ipbr_stage_scores: crate::selection::IpbrStageScores::default(),
         score_source: crate::selection::ScoreSource::None,
         candidates: Vec::new(),
         selected_candidate: None,
@@ -35,7 +35,7 @@ fn ipbr_model(name: &str, score: f64, quota_percent: Option<u8>) -> CachedModel 
     };
     CachedModel {
         name: name.to_string(),
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+        ipbr_stage_scores: crate::selection::IpbrStageScores {
             idea: Some(score + 1.0),
             planning: Some(score + 2.0),
             build: Some(score),
@@ -50,9 +50,9 @@ fn ipbr_model(name: &str, score: f64, quota_percent: Option<u8>) -> CachedModel 
 }
 
 #[test]
-fn phase_rank_score_maps_each_phase_to_ipbr_field() {
+fn stage_rank_score_maps_each_stage_to_ipbr_field() {
     let model = CachedModel {
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+        ipbr_stage_scores: crate::selection::IpbrStageScores {
             idea: Some(11.0),
             planning: Some(22.0),
             build: Some(33.0),
@@ -62,39 +62,39 @@ fn phase_rank_score_maps_each_phase_to_ipbr_field() {
         ..sample_cached_model()
     };
 
-    assert_eq!(phase_rank_score(&model, SelectionPhase::Idea), Some(11.0));
+    assert_eq!(stage_rank_score(&model, SelectionStage::Idea), Some(11.0));
     assert_eq!(
-        phase_rank_score(&model, SelectionPhase::Planning),
+        stage_rank_score(&model, SelectionStage::Planning),
         Some(22.0)
     );
-    assert_eq!(phase_rank_score(&model, SelectionPhase::Build), Some(33.0));
-    assert_eq!(phase_rank_score(&model, SelectionPhase::Review), Some(44.0));
+    assert_eq!(stage_rank_score(&model, SelectionStage::Build), Some(33.0));
+    assert_eq!(stage_rank_score(&model, SelectionStage::Review), Some(44.0));
 }
 
 #[test]
-fn phase_rank_score_returns_none_when_phase_score_or_ipbr_source_missing() {
-    let missing_phase = CachedModel {
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+fn stage_rank_score_returns_none_when_stage_score_or_ipbr_source_missing() {
+    let missing_stage = CachedModel {
+        ipbr_stage_scores: crate::selection::IpbrStageScores {
             build: None,
-            ..crate::selection::IpbrPhaseScores::default()
+            ..crate::selection::IpbrStageScores::default()
         },
         score_source: crate::selection::ScoreSource::Ipbr,
         ..sample_cached_model()
     };
     let unranked = CachedModel {
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+        ipbr_stage_scores: crate::selection::IpbrStageScores {
             build: Some(99.0),
-            ..crate::selection::IpbrPhaseScores::default()
+            ..crate::selection::IpbrStageScores::default()
         },
         score_source: crate::selection::ScoreSource::None,
         ..sample_cached_model()
     };
 
     assert_eq!(
-        phase_rank_score(&missing_phase, SelectionPhase::Build),
+        stage_rank_score(&missing_stage, SelectionStage::Build),
         None
     );
-    assert_eq!(phase_rank_score(&unranked, SelectionPhase::Build), None);
+    assert_eq!(stage_rank_score(&unranked, SelectionStage::Build), None);
 }
 
 #[test]
@@ -103,14 +103,14 @@ fn candidate_pool_weights_softmax_matches_pairwise_calibration() {
     let gap_5_low = ipbr_model("gap-5-low", 85.0, Some(80));
     let gap_15_low = ipbr_model("gap-15-low", 75.0, Some(80));
 
-    let gap_5_weights = candidate_pool_weights(&[&high, &gap_5_low], SelectionPhase::Build);
+    let gap_5_weights = candidate_pool_weights(&[&high, &gap_5_low], SelectionStage::Build);
     let gap_5_low_share = gap_5_weights[1] / gap_5_weights.iter().sum::<f64>();
     assert!(
         (0.25..=0.30).contains(&gap_5_low_share),
         "5-point gap lower-score share should be 25-30%, got {gap_5_low_share}"
     );
 
-    let gap_15_weights = candidate_pool_weights(&[&high, &gap_15_low], SelectionPhase::Build);
+    let gap_15_weights = candidate_pool_weights(&[&high, &gap_15_low], SelectionStage::Build);
     let gap_15_low_share = gap_15_weights[1] / gap_15_weights.iter().sum::<f64>();
     assert!(
         (0.06..=0.08).contains(&gap_15_low_share),
@@ -133,7 +133,7 @@ fn candidate_pool_weights_keeps_unknown_quota_selectable_as_effective_30() {
     let exhausted = ipbr_model("exhausted", 90.0, Some(0));
 
     let weights =
-        candidate_pool_weights(&[&known_best, &unknown, &exhausted], SelectionPhase::Build);
+        candidate_pool_weights(&[&known_best, &unknown, &exhausted], SelectionStage::Build);
 
     assert!(weights[0] > 0.0);
     assert!(weights[1] > 0.0);
@@ -145,7 +145,7 @@ fn candidate_pool_weights_keeps_unknown_quota_selectable_as_effective_30() {
 fn candidate_pool_weights_all_unknown_quota_has_uniform_quota_factor() {
     let a = ipbr_model("a", 90.0, None);
     let b = ipbr_model("b", 90.0, None);
-    let weights = candidate_pool_weights(&[&a, &b], SelectionPhase::Build);
+    let weights = candidate_pool_weights(&[&a, &b], SelectionStage::Build);
 
     assert!((weights[0] - weights[1]).abs() < 1e-9);
     assert!(weights.iter().all(|weight| *weight > 0.0));

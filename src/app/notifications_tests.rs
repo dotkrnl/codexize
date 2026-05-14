@@ -5,34 +5,34 @@ use crate::data::notifications::{
     NotificationEventKind, NotificationParams, NotificationReason, NotificationRuntime,
 };
 use crate::state::{
-    BlockOrigin, LaunchModes, Message, MessageKind, MessageSender, Phase, RunRecord, RunStatus,
-    SessionState,
+    BlockOrigin, LaunchModes, Message, MessageKind, MessageSender, RunRecord, RunStatus,
+    SessionState, Stage,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-fn state_in_phase(phase: Phase) -> SessionState {
+fn state_in_stage(stage: Stage) -> SessionState {
     static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
     let id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
     let mut state = SessionState::new(format!("notify-session-{id}"));
-    state.current_phase = phase;
+    state.current_stage = stage;
     state.title = Some("Readable Session".to_string());
     state
 }
 
-fn unique_state_in_phase(phase: Phase, label: &str) -> SessionState {
+fn unique_state_in_stage(stage: Stage, label: &str) -> SessionState {
     let mut state = SessionState::new(format!(
         "notify-{label}-{}",
         chrono::Utc::now().timestamp_nanos_opt().expect("timestamp")
     ));
-    state.current_phase = phase;
+    state.current_stage = stage;
     state.title = Some("Readable Session".to_string());
     state
 }
 
-fn app_in_phase(phase: Phase) -> crate::app::App {
-    let mut app = mk_app(state_in_phase(phase));
+fn app_in_stage(stage: Stage) -> crate::app::App {
+    let mut app = mk_app(state_in_stage(stage));
     app.enable_notifications_for_test();
     app
 }
@@ -65,58 +65,58 @@ fn running_run(id: u64, stage: &str, interactive: bool) -> RunRecord {
 }
 
 #[test]
-fn waiting_phase_transitions_emit_input_needed_events() {
+fn waiting_stage_transitions_emit_input_needed_events() {
     with_temp_root(|| {
         let cases = [
             (
-                Phase::BrainstormRunning,
-                Phase::BlockedNeedsUser,
+                Stage::BrainstormRunning,
+                Stage::BlockedNeedsUser,
                 Some(BlockOrigin::Brainstorm),
                 "brainstorm",
             ),
             (
-                Phase::SpecReviewRunning,
-                Phase::SpecReviewPaused,
+                Stage::SpecReviewRunning,
+                Stage::SpecReviewPaused,
                 None,
                 "spec-review",
             ),
             (
-                Phase::PlanReviewRunning,
-                Phase::PlanReviewPaused,
+                Stage::PlanReviewRunning,
+                Stage::PlanReviewPaused,
                 None,
                 "plan-review",
             ),
             (
-                Phase::BrainstormRunning,
-                Phase::SkipToImplPending,
+                Stage::BrainstormRunning,
+                Stage::SkipToImplPending,
                 None,
                 "skip-to-impl",
             ),
             (
-                Phase::BrainstormRunning,
-                Phase::GitGuardPending,
+                Stage::BrainstormRunning,
+                Stage::GitGuardPending,
                 None,
                 "git-guard",
             ),
             (
-                Phase::FinalValidation(1),
-                Phase::DreamingPending,
+                Stage::FinalValidation(1),
+                Stage::DreamingPending,
                 None,
                 "dreaming",
             ),
         ];
 
         for (from, to, block_origin, expected_stage) in cases {
-            let mut app = app_in_phase(from);
+            let mut app = app_in_stage(from);
             app.state.block_origin = block_origin;
 
-            app.transition_to_phase(to).expect("transition succeeds");
+            app.transition_to_stage(to).expect("transition succeeds");
 
             let events = app.notification_events_for_test();
             assert_eq!(events.len(), 1, "{to:?} should emit once");
             assert_eq!(events[0].kind, NotificationEventKind::InputNeeded);
-            assert_eq!(events[0].reason, NotificationReason::PhaseWait);
-            assert_eq!(events[0].phase, to);
+            assert_eq!(events[0].reason, NotificationReason::StageWait);
+            assert_eq!(events[0].stage, to);
             assert_eq!(events[0].context.stage, expected_stage);
             assert_eq!(events[0].context.session_label, "Readable Session");
         }
@@ -126,24 +126,24 @@ fn waiting_phase_transitions_emit_input_needed_events() {
 #[test]
 fn done_transition_emits_pipeline_done_event() {
     with_temp_root(|| {
-        let mut app = app_in_phase(Phase::FinalValidation(1));
+        let mut app = app_in_stage(Stage::FinalValidation(1));
 
-        app.transition_to_phase(Phase::Done)
+        app.transition_to_stage(Stage::Done)
             .expect("done transition succeeds");
 
         let events = app.notification_events_for_test();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, NotificationEventKind::PipelineDone);
-        assert_eq!(events[0].phase, Phase::Done);
+        assert_eq!(events[0].stage, Stage::Done);
         assert_eq!(events[0].context.stage, "pipeline");
     });
 }
 
 #[test]
-fn repeated_ticks_in_same_waiting_phase_do_not_emit_duplicates() {
+fn repeated_ticks_in_same_waiting_stage_do_not_emit_duplicates() {
     with_temp_root(|| {
-        let mut app = app_in_phase(Phase::SpecReviewRunning);
-        app.transition_to_phase(Phase::SpecReviewPaused)
+        let mut app = app_in_stage(Stage::SpecReviewRunning);
+        app.transition_to_stage(Stage::SpecReviewPaused)
             .expect("pause transition succeeds");
 
         app.runtime_tick_after_data_drain();
@@ -154,15 +154,15 @@ fn repeated_ticks_in_same_waiting_phase_do_not_emit_duplicates() {
 }
 
 #[test]
-fn re_entering_waiting_phase_emits_a_new_event() {
+fn re_entering_waiting_stage_emits_a_new_event() {
     with_temp_root(|| {
-        let mut app = app_in_phase(Phase::SpecReviewRunning);
+        let mut app = app_in_stage(Stage::SpecReviewRunning);
 
-        app.transition_to_phase(Phase::SpecReviewPaused)
+        app.transition_to_stage(Stage::SpecReviewPaused)
             .expect("first pause succeeds");
-        app.transition_to_phase(Phase::SpecReviewRunning)
+        app.transition_to_stage(Stage::SpecReviewRunning)
             .expect("resume succeeds");
-        app.transition_to_phase(Phase::SpecReviewPaused)
+        app.transition_to_stage(Stage::SpecReviewPaused)
             .expect("second pause succeeds");
 
         let events = app.notification_events_for_test();
@@ -172,17 +172,17 @@ fn re_entering_waiting_phase_emits_a_new_event() {
 }
 
 #[test]
-fn same_wait_phase_in_later_stage_is_not_suppressed() {
+fn same_wait_stage_in_later_stage_is_not_suppressed() {
     with_temp_root(|| {
-        let mut app = app_in_phase(Phase::BrainstormRunning);
+        let mut app = app_in_stage(Stage::BrainstormRunning);
         app.state.block_origin = Some(BlockOrigin::Brainstorm);
 
-        app.transition_to_phase(Phase::BlockedNeedsUser)
+        app.transition_to_stage(Stage::BlockedNeedsUser)
             .expect("brainstorm block succeeds");
-        app.transition_to_phase(Phase::PlanningRunning)
+        app.transition_to_stage(Stage::PlanningRunning)
             .expect("resume into planning succeeds");
         app.state.block_origin = Some(BlockOrigin::Planning);
-        app.transition_to_phase(Phase::BlockedNeedsUser)
+        app.transition_to_stage(Stage::BlockedNeedsUser)
             .expect("planning block succeeds");
 
         let stages: Vec<&str> = app
@@ -197,7 +197,7 @@ fn same_wait_phase_in_later_stage_is_not_suppressed() {
 #[test]
 fn interactive_wait_rising_edge_emits_once_until_next_prompt() {
     with_temp_root(|| {
-        let mut state = state_in_phase(Phase::BrainstormRunning);
+        let mut state = state_in_stage(Stage::BrainstormRunning);
         state.agent_runs.push(running_run(7, "brainstorm", true));
         let mut app = mk_app(state);
         app.enable_notifications_for_test();
@@ -236,7 +236,7 @@ fn interactive_wait_only_notifies_first_prompt_in_same_run() {
     const RUN_ID: u64 = 72;
     const WINDOW: &str = "[brainstorm-first-wait-only]";
     with_temp_root(|| {
-        let mut state = state_in_phase(Phase::BrainstormRunning);
+        let mut state = state_in_stage(Stage::BrainstormRunning);
         let mut run = running_run(RUN_ID, "brainstorm", true);
         run.window_name = WINDOW.to_string();
         state.agent_runs.push(run);
@@ -288,12 +288,12 @@ fn interactive_wait_only_notifies_first_prompt_in_same_run() {
 }
 
 #[test]
-fn phase_wait_event_carries_last_live_summary() {
+fn stage_wait_event_carries_last_live_summary() {
     with_temp_root(|| {
-        let mut app = app_in_phase(Phase::SpecReviewRunning);
+        let mut app = app_in_stage(Stage::SpecReviewRunning);
         app.live_summary_cached_text = "drafted §3 about caching layer invariants".to_string();
 
-        app.transition_to_phase(Phase::SpecReviewPaused)
+        app.transition_to_stage(Stage::SpecReviewPaused)
             .expect("transition succeeds");
 
         let events = app.notification_events_for_test();
@@ -301,32 +301,32 @@ fn phase_wait_event_carries_last_live_summary() {
         assert_eq!(
             events[0].context.last_live_summary.as_deref(),
             Some("drafted §3 about caching layer invariants"),
-            "phase-wait notifications should surface the live summary"
+            "stage-wait notifications should surface the live summary"
         );
         assert!(
             events[0].context.last_agent_response.is_none(),
-            "phase-wait notifications must not carry an agent response"
+            "stage-wait notifications must not carry an agent response"
         );
     });
 }
 
 #[test]
-fn modal_decision_phases_skip_live_summary() {
+fn modal_decision_stages_skip_live_summary() {
     // Skip-to-impl and git-guard prompts are modal decisions where the
     // live summary would just echo the prompt; the App should leave the
     // field empty so the body stays a single sentence.
     with_temp_root(|| {
-        for phase in [Phase::SkipToImplPending, Phase::GitGuardPending] {
-            let mut app = app_in_phase(Phase::BrainstormRunning);
+        for stage in [Stage::SkipToImplPending, Stage::GitGuardPending] {
+            let mut app = app_in_stage(Stage::BrainstormRunning);
             app.live_summary_cached_text = "should not surface here".to_string();
 
-            app.transition_to_phase(phase).expect("transition succeeds");
+            app.transition_to_stage(stage).expect("transition succeeds");
 
             let events = app.notification_events_for_test();
             assert_eq!(events.len(), 1);
             assert!(
                 events[0].context.last_live_summary.is_none(),
-                "{phase:?} should not carry a live summary"
+                "{stage:?} should not carry a live summary"
             );
         }
     });
@@ -335,10 +335,10 @@ fn modal_decision_phases_skip_live_summary() {
 #[test]
 fn pipeline_done_event_carries_last_live_summary() {
     with_temp_root(|| {
-        let mut app = app_in_phase(Phase::FinalValidation(1));
+        let mut app = app_in_stage(Stage::FinalValidation(1));
         app.live_summary_cached_text = "ran final validation, all green".to_string();
 
-        app.transition_to_phase(Phase::Done)
+        app.transition_to_stage(Stage::Done)
             .expect("done transition succeeds");
 
         let events = app.notification_events_for_test();
@@ -359,7 +359,7 @@ fn interactive_wait_event_carries_last_agent_response() {
     const RUN_ID: u64 = 71;
     const WINDOW: &str = "[brainstorm-context]";
     with_temp_root(|| {
-        let mut state = state_in_phase(Phase::BrainstormRunning);
+        let mut state = state_in_stage(Stage::BrainstormRunning);
         let mut run = running_run(RUN_ID, "brainstorm", true);
         run.window_name = WINDOW.to_string();
         state.agent_runs.push(run);
@@ -412,9 +412,9 @@ fn interactive_wait_event_carries_last_agent_response() {
 #[test]
 fn stage_starts_retries_and_mid_run_errors_do_not_emit_events() {
     with_temp_root(|| {
-        let mut app = app_in_phase(Phase::IdeaInput);
+        let mut app = app_in_stage(Stage::IdeaInput);
 
-        app.transition_to_phase(Phase::BrainstormRunning)
+        app.transition_to_stage(Stage::BrainstormRunning)
             .expect("stage start succeeds");
         app.record_agent_error("mid-run warning");
         app.runtime_tick_after_data_drain();
@@ -424,15 +424,15 @@ fn stage_starts_retries_and_mid_run_errors_do_not_emit_events() {
 }
 
 #[test]
-fn notification_publish_failures_surface_warning_without_changing_phase() {
+fn notification_publish_failures_surface_warning_without_changing_stage() {
     with_temp_root(|| {
-        let mut app = app_in_phase(Phase::SpecReviewPaused);
+        let mut app = app_in_stage(Stage::SpecReviewPaused);
         app.notification_runtime
             .push_publish_failure_for_test("ntfy publish failed after 3 attempts: 503");
 
         app.poll_notification_reports();
 
-        assert_eq!(app.state.current_phase, Phase::SpecReviewPaused);
+        assert_eq!(app.state.current_stage, Stage::SpecReviewPaused);
         let events_path = crate::state::session_dir(&app.state.session_id).join("events.toml");
         let events = std::fs::read_to_string(events_path).expect("events log");
         assert!(events.contains("notification_publish_failed"));
@@ -448,25 +448,25 @@ fn notification_publish_failures_surface_warning_without_changing_phase() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn shutdown_drain_surfaces_pending_publish_failures_without_changing_phase() {
+async fn shutdown_drain_surfaces_pending_publish_failures_without_changing_stage() {
     // The tokio runtime forces this test to run on its own; we still need
     // a temp `CODEXIZE_ROOT` so events.toml lands in scratch, not the host
     // repo. with_temp_root takes the same fs lock as the sync siblings, so
     // ordering with them is preserved.
     let server = FailingNtfyServer::spawn(500).await;
     with_temp_root(|| {
-        let mut app = mk_app(unique_state_in_phase(
-            Phase::FinalValidation(1),
+        let mut app = mk_app(unique_state_in_stage(
+            Stage::FinalValidation(1),
             "shutdown-drain",
         ));
         app.notification_runtime =
             NotificationRuntime::from_params_for_test(test_ntfy_params(&server.url()));
 
-        app.transition_to_phase(Phase::Done)
+        app.transition_to_stage(Stage::Done)
             .expect("done transition succeeds");
         app.drain_notifications_for_shutdown();
 
-        assert_eq!(app.state.current_phase, Phase::Done);
+        assert_eq!(app.state.current_stage, Stage::Done);
         let events_path = crate::state::session_dir(&app.state.session_id).join("events.toml");
         let events = std::fs::read_to_string(events_path).expect("events log");
         assert!(events.contains("notification_publish_failed"));
@@ -493,7 +493,7 @@ fn test_ntfy_params(server: &str) -> NotificationParams {
         retry_delay_ms: 0,
         http_timeout_secs: 5,
         events: NtfyEventsView {
-            phase_wait: true,
+            stage_wait: true,
             interactive_wait: true,
             pipeline_done: true,
         },

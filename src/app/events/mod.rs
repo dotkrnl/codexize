@@ -31,7 +31,7 @@ impl App {
         }
     }
     pub(crate) fn stop_running_agent(&mut self) {
-        // Synchronize the FSM with the legacy state before invoking the
+        // Synchronize the FSM with the persisted state before invoking the
         // op. The mirroring shim normally runs at run launch time
         // (start_run_tracking) and run finalization, but resume-path
         // sessions can hit `:stop` before any new run launches in this

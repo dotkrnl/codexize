@@ -60,7 +60,7 @@ Commit message (reviewer rejects violations):
     docs/chore/perf/style/build). E.g. `fix(db): close pool on shutdown`.
   - No `Co-Authored-By:` trailers or co-author attribution.
   - No orchestrator vocabulary ("task N", "round N", "plan", "shard",
-    "phase") or references to this prompt; write as a standalone human would.
+    "stage") or references to this prompt; write as a standalone human would.
 
 Delegate bulk chores to subagents (renames, audits, sweeps, dependency
 tracing) — never the implementation itself or the call on whether code is

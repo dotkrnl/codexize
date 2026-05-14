@@ -4,7 +4,7 @@ fn sample_cached_model() -> CachedModel {
     CachedModel {
         subscription: SubscriptionKind::Codex,
         name: "gpt-5.5".to_string(),
-        ipbr_phase_scores: IpbrPhaseScores::default(),
+        ipbr_stage_scores: IpbrStageScores::default(),
         score_source: ScoreSource::None,
         quota_percent: Some(73),
         quota_resets_at: None,
@@ -18,11 +18,11 @@ fn sample_cached_model() -> CachedModel {
 fn new_ipbr_fields_default_to_unscored() {
     let model = sample_cached_model();
 
-    assert_eq!(model.ipbr_phase_scores, IpbrPhaseScores::default());
-    assert_eq!(model.ipbr_phase_scores.idea, None);
-    assert_eq!(model.ipbr_phase_scores.planning, None);
-    assert_eq!(model.ipbr_phase_scores.build, None);
-    assert_eq!(model.ipbr_phase_scores.review, None);
+    assert_eq!(model.ipbr_stage_scores, IpbrStageScores::default());
+    assert_eq!(model.ipbr_stage_scores.idea, None);
+    assert_eq!(model.ipbr_stage_scores.planning, None);
+    assert_eq!(model.ipbr_stage_scores.build, None);
+    assert_eq!(model.ipbr_stage_scores.review, None);
     assert_eq!(model.score_source, ScoreSource::None);
 }
 

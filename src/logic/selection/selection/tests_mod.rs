@@ -1,5 +1,5 @@
 use super::*;
-use crate::selection::types::{Candidate, CliKind, IpbrPhaseScores, ScoreSource};
+use crate::selection::types::{Candidate, CliKind, IpbrStageScores, ScoreSource};
 
 /// Derive cheap/tough/effort eligibility flags from a model name, used
 /// by the `sample_model` fixture to seed a single Candidate that
@@ -30,7 +30,7 @@ fn sample_model(vendor: SubscriptionKind, name: &str, quota: u8) -> CachedModel 
     sample_model_with_score(vendor, name, quota, 85.0)
 }
 
-/// Like [`sample_model`] but lets the caller pin the ipbr phase score.
+/// Like [`sample_model`] but lets the caller pin the ipbr stage score.
 /// Useful for tests that want to differentiate models by rank without
 /// touching quota.
 fn sample_model_with_score(
@@ -61,7 +61,7 @@ fn sample_model_with_score(
     CachedModel {
         subscription: vendor,
         name: name.to_string(),
-        ipbr_phase_scores: IpbrPhaseScores {
+        ipbr_stage_scores: IpbrStageScores {
             idea: Some(score),
             planning: Some(score),
             build: Some(score),
@@ -77,13 +77,13 @@ fn sample_model_with_score(
 }
 
 #[test]
-fn pick_for_phase_returns_none_for_empty() {
-    let result = pick_for_phase(&[], SelectionPhase::Build, None);
+fn pick_for_stage_returns_none_for_empty() {
+    let result = pick_for_stage(&[], SelectionStage::Build, None);
     assert!(result.is_none());
 }
 
 #[test]
-fn pick_for_phase_low_quota_loses_to_high_quota_via_pool_factor() {
+fn pick_for_stage_low_quota_loses_to_high_quota_via_pool_factor() {
     // High-quota model has quota_factor 1.0; low-quota has factor 0.10
     // (deficit 79 → ≥40 floor). Both have the same ipbr score, so the
     // weighted sample with seed=1 deterministically chooses "high".
@@ -93,43 +93,43 @@ fn pick_for_phase_low_quota_loses_to_high_quota_via_pool_factor() {
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen =
-        pick_for_phase(&models, SelectionPhase::Build, None).expect("should pick high-quota model");
+        pick_for_stage(&models, SelectionStage::Build, None).expect("should pick high-quota model");
     assert_eq!(chosen.name, "high");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
 #[test]
-fn pick_for_phase_excludes_known_zero_quota() {
+fn pick_for_stage_excludes_known_zero_quota() {
     let models = vec![
         sample_model(SubscriptionKind::Claude, "exhausted", 0),
         sample_model(SubscriptionKind::Codex, "available", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase(&models, SelectionPhase::Build, None)
+    let chosen = pick_for_stage(&models, SelectionStage::Build, None)
         .expect("non-exhausted candidate exists");
     assert_eq!(chosen.name, "available");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
 #[test]
-fn pick_for_phase_excludes_models_missing_phase_score() {
+fn pick_for_stage_excludes_models_missing_stage_score() {
     let mut models = vec![
         sample_model(SubscriptionKind::Claude, "ranked", 80),
         sample_model(SubscriptionKind::Codex, "missing-build", 80),
     ];
-    // Strip the Build phase score from the second model — it should be
+    // Strip the Build stage score from the second model — it should be
     // unselectable for Build but its presence in the slice must not
     // poison the pool.
-    models[1].ipbr_phase_scores.build = None;
+    models[1].ipbr_stage_scores.build = None;
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen =
-        pick_for_phase(&models, SelectionPhase::Build, None).expect("ranked candidate exists");
+        pick_for_stage(&models, SelectionStage::Build, None).expect("ranked candidate exists");
     assert_eq!(chosen.name, "ranked");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
 #[test]
-fn pick_for_phase_unknown_quota_remains_selectable() {
+fn pick_for_stage_unknown_quota_remains_selectable() {
     // None quota → effective 30 inside the pool scorer. With only one
     // candidate the effective-30 baseline still produces a non-zero weight.
     let mut model = sample_model(SubscriptionKind::Claude, "unknown-quota", 0);
@@ -141,7 +141,7 @@ fn pick_for_phase_unknown_quota_remains_selectable() {
     model.candidates[0].quota_percent = None;
     let models = vec![model];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase(&models, SelectionPhase::Build, None)
+    let chosen = pick_for_stage(&models, SelectionStage::Build, None)
         .expect("unknown quota stays selectable");
     assert_eq!(chosen.name, "unknown-quota");
     assert_eq!(chosen.quota_percent, None);
@@ -149,31 +149,31 @@ fn pick_for_phase_unknown_quota_remains_selectable() {
 }
 
 #[test]
-fn pick_for_phase_returns_none_when_pool_empty_after_exclusions() {
-    // Every candidate is either exhausted or unranked for the phase;
+fn pick_for_stage_returns_none_when_pool_empty_after_exclusions() {
+    // Every candidate is either exhausted or unranked for the stage;
     // the function must surface the no-eligible-model condition rather
     // than fall back to unscored data.
     let mut unranked = sample_model(SubscriptionKind::Claude, "unranked", 80);
-    unranked.ipbr_phase_scores = IpbrPhaseScores::default();
+    unranked.ipbr_stage_scores = IpbrStageScores::default();
     unranked.score_source = ScoreSource::None;
     let models = vec![
         sample_model(SubscriptionKind::Claude, "exhausted", 0),
         unranked,
     ];
-    let chosen = pick_for_phase(&models, SelectionPhase::Build, None);
+    let chosen = pick_for_stage(&models, SelectionStage::Build, None);
     assert!(chosen.is_none());
 }
 
 #[test]
-fn pick_for_phase_respects_vendor_filter() {
+fn pick_for_stage_respects_vendor_filter() {
     let models = vec![
         sample_model(SubscriptionKind::Claude, "claude-model", 80),
         sample_model(SubscriptionKind::Codex, "codex-model", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase(
+    let chosen = pick_for_stage(
         &models,
-        SelectionPhase::Build,
+        SelectionStage::Build,
         Some(SubscriptionKind::Claude),
     )
     .expect("should pick claude");
@@ -232,7 +232,7 @@ fn select_excluding_excludes_listed_models() {
     let excluded = vec![(SubscriptionKind::Claude, "excluded".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = select_excluding(&models, SelectionPhase::Build, &excluded, None)
+    let chosen = select_excluding(&models, SelectionStage::Build, &excluded, None)
         .expect("should pick non-excluded");
     assert_eq!(chosen.name, "included");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
@@ -243,7 +243,7 @@ fn select_excluding_returns_none_when_all_excluded() {
     let models = vec![sample_model(SubscriptionKind::Claude, "model-1", 80)];
     let excluded = vec![(SubscriptionKind::Claude, "model-1".to_string())];
 
-    let chosen = select_excluding(&models, SelectionPhase::Build, &excluded, None);
+    let chosen = select_excluding(&models, SelectionStage::Build, &excluded, None);
     assert!(chosen.is_none());
 }
 
@@ -300,7 +300,7 @@ fn pool_pick_sampler_dominates_for_free_row_over_lower_fetched_quota() {
     let mut free_count = 0;
     for seed in 1..200_u64 {
         TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
-        let chosen = pick_for_phase(&models, SelectionPhase::Build, None).expect("non-empty pool");
+        let chosen = pick_for_stage(&models, SelectionStage::Build, None).expect("non-empty pool");
         if chosen.name == "free-row" {
             free_count += 1;
         }
@@ -329,7 +329,7 @@ fn pool_pick_sampler_dominates_for_quota_disabled_row_over_lower_fetched_quota()
     let mut disabled_count = 0;
     for seed in 1..200_u64 {
         TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
-        let chosen = pick_for_phase(&models, SelectionPhase::Build, None).expect("non-empty pool");
+        let chosen = pick_for_stage(&models, SelectionStage::Build, None).expect("non-empty pool");
         if chosen.name == "disabled-row" {
             disabled_count += 1;
         }
@@ -359,9 +359,9 @@ fn pick_with_effort_normal_does_not_filter_ineligible_models() {
         sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
         sample_model(SubscriptionKind::Gemini, "gemini-2.5", 80),
     ];
-    let chosen = pick_for_phase_with_effort(
+    let chosen = pick_for_stage_with_effort(
         &models,
-        SelectionPhase::Build,
+        SelectionStage::Build,
         None,
         EffortLevel::Normal,
         false,
@@ -379,9 +379,9 @@ fn pick_with_effort_low_does_not_use_tough_filter() {
         sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
         sample_model(SubscriptionKind::Gemini, "gemini-2.5", 80),
     ];
-    let chosen = pick_for_phase_with_effort(
+    let chosen = pick_for_stage_with_effort(
         &models,
-        SelectionPhase::Build,
+        SelectionStage::Build,
         None,
         EffortLevel::Low,
         false,
@@ -403,9 +403,9 @@ fn pick_with_effort_cheap_filters_to_budget_subset() {
     ];
     for seed in 1..100_u64 {
         TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
-        let chosen = pick_for_phase_with_effort(
+        let chosen = pick_for_stage_with_effort(
             &models,
-            SelectionPhase::Build,
+            SelectionStage::Build,
             None,
             EffortLevel::Tough,
             true,
@@ -434,13 +434,13 @@ fn pick_with_effort_cheap_fallback_warns_when_eligible_quota_empty() {
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen =
-        pick_for_phase_with_effort(&models, SelectionPhase::Build, None, EffortLevel::Low, true)
+        pick_for_stage_with_effort(&models, SelectionStage::Build, None, EffortLevel::Low, true)
             .expect("full-pool fallback must yield a candidate");
     assert_eq!(chosen.model.name, "claude-opus-4.7");
     assert_eq!(
         chosen.warning,
         Some(SelectionWarning::CheapFallback {
-            phase: SelectionPhase::Build,
+            stage: SelectionStage::Build,
             reason: "no_eligible_with_quota",
         })
     );
@@ -452,9 +452,9 @@ fn pick_with_effort_tough_only_picks_eligible() {
     let models = opus_sonnet_codex_kimi();
     for seed in 1..200_u64 {
         TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
-        let chosen = pick_for_phase_with_effort(
+        let chosen = pick_for_stage_with_effort(
             &models,
-            SelectionPhase::Build,
+            SelectionStage::Build,
             None,
             EffortLevel::Tough,
             false,
@@ -478,9 +478,9 @@ fn pick_with_effort_tough_falls_back_to_kimi_gemini() {
         sample_model(SubscriptionKind::Gemini, "gemini-2.5", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase_with_effort(
+    let chosen = pick_for_stage_with_effort(
         &models,
-        SelectionPhase::Build,
+        SelectionStage::Build,
         None,
         EffortLevel::Tough,
         false,
@@ -500,9 +500,9 @@ fn pick_with_effort_tough_falls_back_to_sonnet_haiku() {
         sample_model(SubscriptionKind::Claude, "claude-haiku-4-5", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase_with_effort(
+    let chosen = pick_for_stage_with_effort(
         &models,
-        SelectionPhase::Build,
+        SelectionStage::Build,
         None,
         EffortLevel::Tough,
         false,
@@ -589,7 +589,7 @@ fn select_for_review_cheap_fallback_warns_when_eligible_quota_empty() {
     assert_eq!(
         chosen.warning,
         Some(SelectionWarning::CheapFallback {
-            phase: SelectionPhase::Review,
+            stage: SelectionStage::Review,
             reason: "no_eligible_with_quota",
         })
     );

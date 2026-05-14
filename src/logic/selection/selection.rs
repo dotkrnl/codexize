@@ -1,4 +1,4 @@
-use super::config::SelectionPhase;
+use super::config::SelectionStage;
 use super::ranking::candidate_pool_weights;
 use super::subscription::{is_cheap_eligible, is_tough_eligible};
 use super::types::{CachedModel, SubscriptionKind};
@@ -12,7 +12,7 @@ static TEST_SAMPLE_SEED: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionWarning {
     CheapFallback {
-        phase: SelectionPhase,
+        stage: SelectionStage,
         reason: &'static str,
     },
 }
@@ -44,26 +44,26 @@ impl Deref for SelectionOutcome<'_> {
 /// Score `candidates` with the candidate-pool sampler and weighted-sample
 /// the result. Hard pre-filters (vendor, eligibility tier, retry exclusion,
 /// diversity tier) MUST already be applied to the slice. The pool scorer
-/// drops `quota_percent == Some(0)` and rows missing the ipbr phase score
-/// for `phase`; if every candidate is dropped this returns `None`, which
+/// drops `quota_percent == Some(0)` and rows missing the ipbr stage score
+/// for `stage`; if every candidate is dropped this returns `None`, which
 /// callers surface as the existing no-eligible-model condition.
 ///
 /// Per spec §"Selection algorithm" (operator decision, 2026-05-09): step
 /// 1 is a *weighted sampler*, not a deterministic max-by. The dashboard
-/// phase score and the row's effective quota across enabled providers feed
+/// stage score and the row's effective quota across enabled providers feed
 /// `candidate_pool_weights` together — free / quota_disabled providers
 /// therefore dominate the sampler probability at full headroom, while a
 /// low-quota row keeps a small but non-zero chance of being explored. See
 /// `ranking::effective_row_quota` for the quota lookup that backs this.
 fn pool_pick<'a>(
     candidates: &[&'a CachedModel],
-    phase: SelectionPhase,
+    stage: SelectionStage,
     sample_seed: u64,
 ) -> Option<&'a CachedModel> {
     if candidates.is_empty() {
         return None;
     }
-    let weights = candidate_pool_weights(candidates, phase);
+    let weights = candidate_pool_weights(candidates, stage);
     let mut weighted: Vec<(&'a CachedModel, f64)> = candidates
         .iter()
         .copied()
@@ -81,21 +81,21 @@ fn pool_pick<'a>(
     });
     weighted_sample(&weighted, sample_seed)
 }
-/// Select a model for the given phase using the candidate-pool scorer.
+/// Select a model for the given stage using the candidate-pool scorer.
 ///
 /// `vendor_filter`: hard inclusion filter applied before the pool scorer —
 /// vendor preferences are not multiplied into the post-softmax weights.
 #[cfg(test)]
-pub fn pick_for_phase(
+pub fn pick_for_stage(
     models: &[CachedModel],
-    phase: SelectionPhase,
+    stage: SelectionStage,
     vendor_filter: Option<SubscriptionKind>,
 ) -> Option<&CachedModel> {
-    pick_for_phase_with_seed(models, phase, vendor_filter, test_sample_seed())
+    pick_for_stage_with_seed(models, stage, vendor_filter, test_sample_seed())
 }
-pub fn pick_for_phase_with_seed<'a>(
+pub fn pick_for_stage_with_seed<'a>(
     models: &'a [CachedModel],
-    phase: SelectionPhase,
+    stage: SelectionStage,
     vendor_filter: Option<SubscriptionKind>,
     sample_seed: u64,
 ) -> Option<&'a CachedModel> {
@@ -103,38 +103,38 @@ pub fn pick_for_phase_with_seed<'a>(
         .iter()
         .filter(|model| vendor_filter.is_none_or(|v| v == model.subscription))
         .collect();
-    pool_pick(&candidates, phase, sample_seed)
+    pool_pick(&candidates, stage, sample_seed)
 }
-/// Effort-aware variant of [`pick_for_phase`].
+/// Effort-aware variant of [`pick_for_stage`].
 ///
 /// For [`EffortLevel::Tough`], samples over the tough-eligible subset
 /// (Claude-opus and all Codex models) using the candidate-pool scorer.
 /// Falls back to the full slice only when the tough-eligible pool collapses
 /// — for example, every tough-eligible model is exhausted (`quota_percent
-/// == Some(0)`) or unranked for the phase — so the run still launches.
+/// == Some(0)`) or unranked for the stage — so the run still launches.
 ///
 /// For [`EffortLevel::Low`] and [`EffortLevel::Normal`], delegates straight
-/// to [`pick_for_phase`].
+/// to [`pick_for_stage`].
 #[cfg(test)]
-pub fn pick_for_phase_with_effort<'a>(
+pub fn pick_for_stage_with_effort<'a>(
     models: &'a [CachedModel],
-    phase: SelectionPhase,
+    stage: SelectionStage,
     vendor_filter: Option<SubscriptionKind>,
     effort: EffortLevel,
     cheap: bool,
 ) -> Option<SelectionOutcome<'a>> {
-    pick_for_phase_with_effort_and_seed(
+    pick_for_stage_with_effort_and_seed(
         models,
-        phase,
+        stage,
         vendor_filter,
         effort,
         cheap,
         test_sample_seed(),
     )
 }
-pub fn pick_for_phase_with_effort_and_seed<'a>(
+pub fn pick_for_stage_with_effort_and_seed<'a>(
     models: &'a [CachedModel],
-    phase: SelectionPhase,
+    stage: SelectionStage,
     vendor_filter: Option<SubscriptionKind>,
     effort: EffortLevel,
     cheap: bool,
@@ -146,14 +146,14 @@ pub fn pick_for_phase_with_effort_and_seed<'a>(
             .filter(|model| is_cheap_eligible(model))
             .filter(|model| vendor_filter.is_none_or(|v| v == model.subscription))
             .collect();
-        if let Some(chosen) = pool_pick(&eligible, phase, sample_seed) {
+        if let Some(chosen) = pool_pick(&eligible, stage, sample_seed) {
             return Some(SelectionOutcome::ok(chosen));
         }
-        return pick_for_phase_with_seed(models, phase, vendor_filter, sample_seed).map(|model| {
+        return pick_for_stage_with_seed(models, stage, vendor_filter, sample_seed).map(|model| {
             SelectionOutcome::with_warning(
                 model,
                 SelectionWarning::CheapFallback {
-                    phase,
+                    stage,
                     reason: "no_eligible_with_quota",
                 },
             )
@@ -161,7 +161,7 @@ pub fn pick_for_phase_with_effort_and_seed<'a>(
     }
     match effort {
         EffortLevel::Low | EffortLevel::Normal => {
-            return pick_for_phase_with_seed(models, phase, vendor_filter, sample_seed)
+            return pick_for_stage_with_seed(models, stage, vendor_filter, sample_seed)
                 .map(SelectionOutcome::ok);
         }
         EffortLevel::Tough => {}
@@ -171,13 +171,13 @@ pub fn pick_for_phase_with_effort_and_seed<'a>(
         .filter(|model| is_tough_eligible(model))
         .filter(|model| vendor_filter.is_none_or(|v| v == model.subscription))
         .collect();
-    if let Some(chosen) = pool_pick(&eligible, phase, sample_seed) {
+    if let Some(chosen) = pool_pick(&eligible, stage, sample_seed) {
         return Some(SelectionOutcome::ok(chosen));
     }
     // Degraded fallback: no tough-eligible model has any pool weight at all
     // (all exhausted or unranked). Fall back to the full slice so the run
     // still launches.
-    pick_for_phase_with_seed(models, phase, vendor_filter, sample_seed).map(SelectionOutcome::ok)
+    pick_for_stage_with_seed(models, stage, vendor_filter, sample_seed).map(SelectionOutcome::ok)
 }
 /// Select a model for review with unused-vendor preference.
 ///
@@ -205,14 +205,14 @@ pub fn select_for_review_with_seed<'a>(
                 && !used_models.contains(&(model.subscription, model.name.clone()))
         })
         .collect();
-    if let Some(chosen) = pool_pick(&tier_1, SelectionPhase::Review, sample_seed) {
+    if let Some(chosen) = pool_pick(&tier_1, SelectionStage::Review, sample_seed) {
         return Some(chosen);
     }
     let tier_2: Vec<&'a CachedModel> = models
         .iter()
         .filter(|model| !used_models.contains(&(model.subscription, model.name.clone())))
         .collect();
-    pool_pick(&tier_2, SelectionPhase::Review, sample_seed)
+    pool_pick(&tier_2, SelectionStage::Review, sample_seed)
 }
 /// Effort-aware variant of [`select_for_review`].
 ///
@@ -266,7 +266,7 @@ pub fn select_for_review_with_effort_and_seed<'a>(
                 SelectionOutcome::with_warning(
                     model,
                     SelectionWarning::CheapFallback {
-                        phase: SelectionPhase::Review,
+                        stage: SelectionStage::Review,
                         reason: "no_eligible_with_quota",
                     },
                 )
@@ -306,7 +306,7 @@ fn select_for_review_from_eligible<'a>(
                 && !used_models.contains(&(model.subscription, model.name.clone()))
         })
         .collect();
-    if let Some(chosen) = pool_pick(&tier_1, SelectionPhase::Review, sample_seed) {
+    if let Some(chosen) = pool_pick(&tier_1, SelectionStage::Review, sample_seed) {
         return Some(chosen);
     }
     // Tier 2: eligible AND fresh-model (any vendor).
@@ -315,28 +315,28 @@ fn select_for_review_from_eligible<'a>(
         .copied()
         .filter(|model| !used_models.contains(&(model.subscription, model.name.clone())))
         .collect();
-    if let Some(chosen) = pool_pick(&tier_2, SelectionPhase::Review, sample_seed) {
+    if let Some(chosen) = pool_pick(&tier_2, SelectionStage::Review, sample_seed) {
         return Some(chosen);
     }
     // Tier 3: any eligible model, even if used by the coder.
     // This is "eligibility dominates diversity": prefer reusing Claude-opus
     // over a fresh sonnet/Kimi when no fresh eligible model is available.
-    pool_pick(eligible, SelectionPhase::Review, sample_seed)
+    pool_pick(eligible, SelectionStage::Review, sample_seed)
 }
 /// Select a model excluding a list of models. `last_failed_vendor` does not
 /// affect weights: spec §5.3 / §6 forbid post-softmax policy multipliers.
 #[cfg(test)]
 pub fn select_excluding<'a>(
     models: &'a [CachedModel],
-    phase: SelectionPhase,
+    stage: SelectionStage,
     excluded: &[(SubscriptionKind, String)],
     _last_failed_vendor: Option<SubscriptionKind>,
 ) -> Option<&'a CachedModel> {
-    select_excluding_with_seed(models, phase, excluded, None, test_sample_seed())
+    select_excluding_with_seed(models, stage, excluded, None, test_sample_seed())
 }
 pub fn select_excluding_with_seed<'a>(
     models: &'a [CachedModel],
-    phase: SelectionPhase,
+    stage: SelectionStage,
     excluded: &[(SubscriptionKind, String)],
     _last_failed_vendor: Option<SubscriptionKind>,
     sample_seed: u64,
@@ -348,7 +348,7 @@ pub fn select_excluding_with_seed<'a>(
         .iter()
         .filter(|model| !excluded.contains(&(model.subscription, model.name.clone())))
         .collect();
-    pool_pick(&candidates, phase, sample_seed)
+    pool_pick(&candidates, stage, sample_seed)
 }
 /// Weighted random sampling from candidates.
 /// Returns None if candidates is empty or all weights are zero.

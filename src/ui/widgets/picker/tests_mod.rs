@@ -31,8 +31,7 @@ fn test_idea_summary_truncates() {
 }
 
 fn with_temp_codexize_root<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     // SAFETY: serialized via test_fs_lock; restored unconditionally.
@@ -321,7 +320,7 @@ fn palette_new_with_args_creates_session_immediately() {
 
         let state = SessionState::load(&selection.session_id).expect("load new session");
         assert_eq!(state.idea_text.as_deref(), Some("ship cheap mode"));
-        assert_eq!(state.current_phase, Phase::BrainstormRunning);
+        assert_eq!(state.current_stage, Stage::BrainstormRunning);
         assert!(
             state.agent_runs.is_empty(),
             "picker create should persist selection state only"
@@ -344,7 +343,7 @@ fn create_session_helper_persists_brainstorm_running_with_modes() {
 
         let state = SessionState::load(&session_id).expect("load new session");
         assert_eq!(state.idea_text.as_deref(), Some("ship the dashboard"));
-        assert_eq!(state.current_phase, Phase::BrainstormRunning);
+        assert_eq!(state.current_stage, Stage::BrainstormRunning);
         assert!(state.modes.yolo);
         assert!(state.modes.cheap);
     });
@@ -392,7 +391,7 @@ fn palette_idea_alias_creates_session_immediately() {
 
         let state = SessionState::load(&selection.session_id).expect("load new session");
         assert_eq!(state.idea_text.as_deref(), Some("ship cheap mode"));
-        assert_eq!(state.current_phase, Phase::BrainstormRunning);
+        assert_eq!(state.current_stage, Stage::BrainstormRunning);
         assert!(
             state.agent_runs.is_empty(),
             "picker create should not launch or track brainstorm"
@@ -451,7 +450,7 @@ fn dummy_entry(id: &str, summary: &str) -> SessionEntry {
     SessionEntry {
         session_id: id.to_string(),
         idea_summary: summary.to_string(),
-        current_phase: Phase::IdeaInput,
+        current_stage: Stage::IdeaInput,
         modes: crate::state::Modes::default(),
         last_modified: SystemTime::now(),
         archived: false,
@@ -754,8 +753,8 @@ fn expanded_session_renders_detail_lines() {
         );
 
     assert!(
-        text.contains("Phase:"),
-        "expanded session must show phase: {text}"
+        text.contains("Stage:"),
+        "expanded session must show stage: {text}"
     );
     assert!(
         text.contains("Idea:"),
@@ -792,7 +791,7 @@ fn degenerate_terminal_omits_expansion() {
         );
 
     assert!(
-        !text.contains("Phase:"),
+        !text.contains("Stage:"),
         "degenerate terminal must omit detail expansion: {text}"
     );
 }
@@ -962,7 +961,7 @@ fn create_session_sets_planned_after_session_id_to_newest_earlier_done() {
         let earlier_id = create_session("earlier idea", crate::state::Modes::default(), None)
             .expect("create earlier session");
         let mut earlier = SessionState::load(&earlier_id).unwrap();
-        earlier.current_phase = Phase::Done;
+        earlier.current_stage = Stage::Done;
         earlier.save().unwrap();
 
         // Create a later session — it should baseline to the earlier Done one.
@@ -984,7 +983,7 @@ fn create_session_ignores_archived_done_sessions_for_baseline() {
         let archived_id = create_session("archived idea", crate::state::Modes::default(), None)
             .expect("create archived session");
         let mut archived = SessionState::load(&archived_id).unwrap();
-        archived.current_phase = Phase::Done;
+        archived.current_stage = Stage::Done;
         archived.archived = true;
         archived.save().unwrap();
 
@@ -1027,7 +1026,7 @@ fn newest_earlier_done_baseline_selects_newest_earlier_done() {
         SessionEntry {
             session_id: "20250101-000000-000000000".to_string(),
             idea_summary: "a".to_string(),
-            current_phase: Phase::Done,
+            current_stage: Stage::Done,
             modes: crate::state::Modes::default(),
             last_modified: SystemTime::now(),
             archived: false,
@@ -1035,7 +1034,7 @@ fn newest_earlier_done_baseline_selects_newest_earlier_done() {
         SessionEntry {
             session_id: "20250601-000000-000000000".to_string(),
             idea_summary: "b".to_string(),
-            current_phase: Phase::BrainstormRunning,
+            current_stage: Stage::BrainstormRunning,
             modes: crate::state::Modes::default(),
             last_modified: SystemTime::now(),
             archived: false,
@@ -1043,7 +1042,7 @@ fn newest_earlier_done_baseline_selects_newest_earlier_done() {
         SessionEntry {
             session_id: "20250801-000000-000000000".to_string(),
             idea_summary: "c".to_string(),
-            current_phase: Phase::Done,
+            current_stage: Stage::Done,
             modes: crate::state::Modes::default(),
             last_modified: SystemTime::now(),
             archived: false,
@@ -1066,7 +1065,7 @@ fn newest_earlier_done_baseline_returns_none_when_no_earlier_done() {
     let sessions = vec![SessionEntry {
         session_id: "20250101-000000-000000000".to_string(),
         idea_summary: "a".to_string(),
-        current_phase: Phase::BrainstormRunning,
+        current_stage: Stage::BrainstormRunning,
         modes: crate::state::Modes::default(),
         last_modified: SystemTime::now(),
         archived: false,
@@ -1085,7 +1084,7 @@ fn newest_earlier_done_baseline_ignores_later_sessions() {
         SessionEntry {
             session_id: "20250101-000000-000000000".to_string(),
             idea_summary: "a".to_string(),
-            current_phase: Phase::Done,
+            current_stage: Stage::Done,
             modes: crate::state::Modes::default(),
             last_modified: SystemTime::now(),
             archived: false,
@@ -1093,7 +1092,7 @@ fn newest_earlier_done_baseline_ignores_later_sessions() {
         SessionEntry {
             session_id: "20251201-000000-000000000".to_string(),
             idea_summary: "b".to_string(),
-            current_phase: Phase::Done,
+            current_stage: Stage::Done,
             modes: crate::state::Modes::default(),
             last_modified: SystemTime::now(),
             archived: false,
@@ -1112,24 +1111,24 @@ fn newest_earlier_done_baseline_ignores_later_sessions() {
 }
 
 #[test]
-fn phase_badge_for_waiting_to_implement() {
-    let (text, color, symbol) = phase_badge(Phase::WaitingToImplement);
+fn stage_badge_for_waiting_to_implement() {
+    let (text, color, symbol) = stage_badge(Stage::WaitingToImplement);
     assert_eq!(text, "waiting");
     assert_eq!(color, Color::Yellow);
     assert_eq!(symbol, "○");
 }
 
 #[test]
-fn phase_badge_for_repo_state_update_running() {
-    let (text, color, symbol) = phase_badge(Phase::RepoStateUpdateRunning);
+fn stage_badge_for_repo_state_update_running() {
+    let (text, color, symbol) = stage_badge(Stage::RepoStateUpdateRunning);
     assert_eq!(text, "updating plan");
     assert_eq!(color, Color::Cyan);
     assert_eq!(symbol, "●");
 }
 
 #[test]
-fn phase_badge_for_cancelled() {
-    let (text, color, symbol) = phase_badge(Phase::Cancelled);
+fn stage_badge_for_cancelled() {
+    let (text, color, symbol) = stage_badge(Stage::Cancelled);
     assert_eq!(text, "cancelled");
     assert_eq!(color, Color::DarkGray);
     assert_eq!(symbol, "✗");

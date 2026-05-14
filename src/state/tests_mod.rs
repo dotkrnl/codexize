@@ -7,7 +7,7 @@ fn pending_guard_decision_defaults_to_none_when_absent() {
     let toml_text = r#"
 session_id = "abc"
 schema_version = 4
-current_phase = "IdeaInput"
+current_stage = "IdeaInput"
 "#;
     let state: SessionState = toml::from_str(toml_text).expect("session state should deserialize");
     assert!(state.pending_guard_decision.is_none());
@@ -48,12 +48,12 @@ fn effort_for_promotes_idea_and_planning_to_tough_when_not_cheap() {
         };
 
         assert_eq!(
-            modes.effort_for(EffortLevel::Normal, crate::selection::SelectionPhase::Idea),
+            modes.effort_for(EffortLevel::Normal, crate::selection::SelectionStage::Idea),
             EffortLevel::Tough,
             "Idea must be Tough when !cheap (yolo={yolo})"
         );
         assert_eq!(
-            modes.effort_for(EffortLevel::Low, crate::selection::SelectionPhase::Planning),
+            modes.effort_for(EffortLevel::Low, crate::selection::SelectionStage::Planning),
             EffortLevel::Tough,
             "Planning must be Tough when !cheap (yolo={yolo})"
         );
@@ -71,12 +71,12 @@ fn effort_for_preserves_requested_effort_for_build_and_review() {
 
         for requested in [EffortLevel::Low, EffortLevel::Normal, EffortLevel::Tough] {
             assert_eq!(
-                modes.effort_for(requested, crate::selection::SelectionPhase::Build),
+                modes.effort_for(requested, crate::selection::SelectionStage::Build),
                 requested,
                 "Build must pass through requested effort (yolo={yolo})"
             );
             assert_eq!(
-                modes.effort_for(requested, crate::selection::SelectionPhase::Review),
+                modes.effort_for(requested, crate::selection::SelectionStage::Review),
                 requested,
                 "Review must pass through requested effort (yolo={yolo})"
             );
@@ -85,7 +85,7 @@ fn effort_for_preserves_requested_effort_for_build_and_review() {
 }
 
 #[test]
-fn effort_for_cheap_mode_short_circuits_to_low_for_every_phase() {
+fn effort_for_cheap_mode_short_circuits_to_low_for_every_stage() {
     for yolo in [false, true] {
         let modes = LaunchModes {
             yolo,
@@ -93,16 +93,16 @@ fn effort_for_cheap_mode_short_circuits_to_low_for_every_phase() {
             interactive: false,
         };
 
-        for phase in crate::selection::SelectionPhase::ALL {
+        for stage in crate::selection::SelectionStage::ALL {
             assert_eq!(
-                modes.effort_for(EffortLevel::Tough, phase),
+                modes.effort_for(EffortLevel::Tough, stage),
                 EffortLevel::Low,
-                "cheap mode must collapse Tough → Low (phase={phase:?}, yolo={yolo})"
+                "cheap mode must collapse Tough → Low (stage={stage:?}, yolo={yolo})"
             );
             assert_eq!(
-                modes.effort_for(EffortLevel::Normal, phase),
+                modes.effort_for(EffortLevel::Normal, stage),
                 EffortLevel::Low,
-                "cheap mode must collapse Normal → Low (phase={phase:?}, yolo={yolo})"
+                "cheap mode must collapse Normal → Low (stage={stage:?}, yolo={yolo})"
             );
         }
     }

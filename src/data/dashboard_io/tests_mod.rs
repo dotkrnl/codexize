@@ -39,10 +39,10 @@ fn parse_ipbr_uses_display_name_as_canonical_model_name() {
         .find(|e| e.name == "claude-opus-4.7")
         .unwrap();
     assert_eq!(opus.score_source, ScoreSource::Ipbr);
-    assert_eq!(opus.ipbr_phase_scores.idea, Some(92.5));
-    assert_eq!(opus.ipbr_phase_scores.planning, Some(91.0));
-    assert_eq!(opus.ipbr_phase_scores.build, Some(90.0));
-    assert_eq!(opus.ipbr_phase_scores.review, Some(89.5));
+    assert_eq!(opus.ipbr_stage_scores.idea, Some(92.5));
+    assert_eq!(opus.ipbr_stage_scores.planning, Some(91.0));
+    assert_eq!(opus.ipbr_stage_scores.build, Some(90.0));
+    assert_eq!(opus.ipbr_stage_scores.review, Some(89.5));
 }
 
 #[test]
@@ -55,26 +55,26 @@ fn parse_ipbr_name_is_lowercase_only_without_punctuation_normalization() {
 }
 
 #[test]
-fn parse_ipbr_row_missing_one_phase_marks_only_that_phase_absent() {
+fn parse_ipbr_row_missing_one_stage_marks_only_that_stage_absent() {
     let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("fixture should parse");
     let gpt = entries.iter().find(|e| e.name == "gpt-5.4").unwrap();
 
-    // Only the omitted field is None; remaining phases stay present.
-    assert_eq!(gpt.ipbr_phase_scores.idea, Some(80.0));
-    assert_eq!(gpt.ipbr_phase_scores.planning, None);
-    assert_eq!(gpt.ipbr_phase_scores.build, Some(78.0));
-    assert_eq!(gpt.ipbr_phase_scores.review, Some(77.0));
+    // Only the omitted field is None; remaining stages stay present.
+    assert_eq!(gpt.ipbr_stage_scores.idea, Some(80.0));
+    assert_eq!(gpt.ipbr_stage_scores.planning, None);
+    assert_eq!(gpt.ipbr_stage_scores.build, Some(78.0));
+    assert_eq!(gpt.ipbr_stage_scores.review, Some(77.0));
     assert_eq!(gpt.score_source, ScoreSource::Ipbr);
 }
 
 #[test]
-fn parse_ipbr_row_missing_all_phases_is_parseable_but_carries_no_ranking_authority() {
+fn parse_ipbr_row_missing_all_stages_is_parseable_but_carries_no_ranking_authority() {
     let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("fixture should parse");
     let gemini = entries.iter().find(|e| e.name == "gemini-2.5-pro").unwrap();
 
-    assert_eq!(gemini.ipbr_phase_scores, IpbrPhaseScores::default());
+    assert_eq!(gemini.ipbr_stage_scores, IpbrStageScores::default());
     // Provenance is still ipbr because the row itself came from ipbr;
-    // selection layers must consult ipbr_phase_scores, not provenance.
+    // selection layers must consult ipbr_stage_scores, not provenance.
     assert_eq!(gemini.score_source, ScoreSource::Ipbr);
 }
 

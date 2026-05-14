@@ -1,5 +1,5 @@
 use crate::dashboard::DashboardModel;
-use crate::selection::{IpbrPhaseScores, ScoreSource};
+use crate::selection::{IpbrStageScores, ScoreSource};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Canonical score record produced by ipbr ingestion. `name` is the
@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) struct ScoreEntry {
     pub(crate) name: String,
     pub(crate) display_order: usize,
-    pub(crate) ipbr_phase_scores: IpbrPhaseScores,
+    pub(crate) ipbr_stage_scores: IpbrStageScores,
     pub(crate) score_source: ScoreSource,
 }
 
@@ -50,7 +50,7 @@ pub(crate) fn models_from_scores(scores: Vec<ScoreEntry>) -> MergeResult {
 fn dashboard_model_from_score(score: ScoreEntry) -> DashboardModel {
     DashboardModel {
         name: score.name,
-        ipbr_phase_scores: score.ipbr_phase_scores,
+        ipbr_stage_scores: score.ipbr_stage_scores,
         score_source: score.score_source,
         display_order: score.display_order,
     }

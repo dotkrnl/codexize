@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 fn make_entry(name: &str, _vendor: &str) -> DashboardEntry {
     DashboardEntry {
         name: name.to_string(),
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+        ipbr_stage_scores: crate::selection::IpbrStageScores::default(),
         score_source: crate::selection::ScoreSource::None,
         display_order: 0,
     }
@@ -296,8 +296,7 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
             ("openai", "gpt-5.5", Some(70)),
         ]),
     );
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let original_available = std::env::var_os("CODEXIZE_TEST_AVAILABLE_VENDORS");
     let original_claude = std::env::var_os("CODEXIZE_TEST_ACP_CLAUDE_PROGRAM");
     let original_codex = std::env::var_os("CODEXIZE_TEST_ACP_CODEX_PROGRAM");
@@ -375,8 +374,7 @@ fn with_temp_home_cache<T>(
     quotas: QuotaPayload,
     f: impl FnOnce(&std::path::Path) -> T,
 ) -> T {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let original = std::env::var_os("HOME");
     let original_claude = std::env::var_os("CODEXIZE_TEST_ACP_CLAUDE_PROGRAM");

@@ -366,7 +366,7 @@ fn non_interactive_finished_resubmits_queued_interrupt_text() {
 fn cancel_ack_timeout_resends_then_terminates() {
     // A vendor ignores session/cancel entirely (returns None forever, no
     // dead_reason). The cancel-ack watchdog must resend cancel after 60 s
-    // (phase 1) and signal Terminate after another 60 s (phase 2),
+    // (stage 1) and signal Terminate after another 60 s (stage 2),
     // producing exit_code 143.
     let handle = FakeSessionHandle::new(Vec::new());
     let session_handle = handle.clone();
@@ -399,7 +399,7 @@ fn cancel_ack_timeout_resends_then_terminates() {
     // 60-second resend driven by the cancel-ack watchdog.
     assert_eq!(session_handle.cancel_calls(), 2);
     assert!(session_handle.closed());
-    // Both phases persisted SummaryWarn dashboard messages.
+    // Both stages persisted SummaryWarn dashboard messages.
     let warnings = diagnostics.warnings();
     assert_eq!(warnings.len(), 2, "expected 60s + 120s warnings");
     assert!(warnings[0].contains("60s"));
@@ -459,7 +459,7 @@ fn second_interrupt_while_pending_does_not_reset_cancel_ack_timer() {
     // Two interrupts arrive: the first arms the cancel-ack timer, the
     // second only appends to pending_input without resetting the timer.
     // The vendor never emits a terminal event, so the timer must still
-    // fire phase 1 (resend) and phase 2 (terminate) even though a second
+    // fire stage 1 (resend) and stage 2 (terminate) even though a second
     // :interrupt was queued well after the initial cancel.
     let handle = FakeSessionHandle::new(Vec::new());
     let session_handle = handle.clone();
@@ -493,7 +493,7 @@ fn second_interrupt_while_pending_does_not_reset_cancel_ack_timer() {
     // Exactly two cancel calls: the initial cancel (armed by the first
     // :interrupt) and the cancel-ack watchdog's 60s resend. The second
     // :interrupt did not arm a fresh cancel and did not reset the timer,
-    // so phase 2 still terminates after the original 120s budget.
+    // so stage 2 still terminates after the original 120s budget.
     assert_eq!(session_handle.cancel_calls(), 2);
     // SummaryWarn fired twice — once at 60s, once at 120s.
     assert_eq!(diagnostics.warnings().len(), 2);

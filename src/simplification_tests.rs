@@ -70,4 +70,3 @@ summary = "wrong status name"
     let err = validate(&path).unwrap_err();
     assert!(format!("{err:#}").contains("malformed simplification TOML"));
 }
-

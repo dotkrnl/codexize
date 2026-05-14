@@ -91,4 +91,3 @@ impl Clock for TestClock {
         dt.format("%H:%M:%S").to_string()
     }
 }
-

@@ -13,9 +13,9 @@ use crate::data::config::Config;
 use crate::data::session_index::SessionIndex;
 use crate::scheduler::{
     ImplementationDecision, ScannedSession, SchedulerTick, evaluate_tick,
-    is_implementation_lane_phase,
+    is_implementation_lane_stage,
 };
-use crate::state::{Phase, RunStatus, SessionState};
+use crate::state::{RunStatus, SessionState, Stage};
 use anyhow::Result;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -39,7 +39,7 @@ pub struct SidebarRow {
     pub session_id: String,
     pub date_label: String,
     pub title: String,
-    pub phase: Phase,
+    pub stage: Stage,
     pub focused: bool,
     pub open: bool,
     pub running: bool,
@@ -92,7 +92,7 @@ impl SidebarModel {
         self.rows = index
             .snapshot_for_sidebar()
             .into_iter()
-            .filter(|entry| entry.current_phase != Phase::Cancelled)
+            .filter(|entry| entry.current_stage != Stage::Cancelled)
             .map(|entry| {
                 let session_id = entry.session_id;
                 SidebarRow {
@@ -102,7 +102,7 @@ impl SidebarModel {
                     date_label: sidebar_date_label(&session_id),
                     title: entry.idea_summary,
                     session_id,
-                    phase: entry.current_phase,
+                    stage: entry.current_stage,
                 }
             })
             .collect();
@@ -116,10 +116,10 @@ impl SidebarModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellImplementationAction {
-    LaneOccupied { session_id: String, phase: Phase },
+    LaneOccupied { session_id: String, stage: Stage },
     BlockedByHead { session_id: String },
-    PlanningHead { session_id: String, phase: Phase },
-    DispatchedWaiting { session_id: String, phase: Phase },
+    PlanningHead { session_id: String, stage: Stage },
+    DispatchedWaiting { session_id: String, stage: Stage },
     BlockedByCorruptEarlierSession { session_id: String, error: String },
     NothingToDo,
 }
@@ -226,8 +226,8 @@ impl SessionSupervisor {
         &self.app().state.session_id
     }
 
-    pub fn phase(&self) -> Phase {
-        self.app().state.current_phase
+    pub fn stage(&self) -> Stage {
+        self.app().state.current_stage
     }
 
     pub fn current_run_id(&self) -> Option<u64> {
@@ -323,7 +323,7 @@ pub struct AppShell {
     // The shell refreshes it on each scheduler tick so per-tick load cost
     // is bounded to entries whose file actually changed since the last
     // refresh. The scheduler input itself is still derived from the
-    // in-memory open workspaces (so the focused App's live phase wins),
+    // in-memory open workspaces (so the focused App's live stage wins),
     // but the cache underpins steady-state load-count guarantees and the
     // upcoming index-driven sidebar work.
     session_index: SessionIndex,
@@ -376,7 +376,7 @@ impl AppShell {
                 continue;
             }
             first_running.get_or_insert_with(|| supervisor.session_id());
-            if is_implementation_lane_phase(supervisor.phase()) {
+            if is_implementation_lane_stage(supervisor.stage()) {
                 return Some(supervisor.session_id());
             }
         }
@@ -788,7 +788,7 @@ impl AppShell {
                             // (see `run_focused_terminal_app`), so the
                             // focused session is observed alongside the
                             // background ones without a special case.
-                            session.current_phase = supervisor.phase();
+                            session.current_stage = supervisor.stage();
                         }
                         Some(ScannedSession::Loaded(session))
                     }
@@ -803,11 +803,11 @@ impl AppShell {
         tick: &SchedulerTick,
     ) -> Result<ShellImplementationAction> {
         match &tick.implementation {
-            ImplementationDecision::LaneOccupied { session_id, phase } => {
+            ImplementationDecision::LaneOccupied { session_id, stage } => {
                 let _ = self.drive_scheduler_session(session_id, SchedulerDrive::AutoLaunch)?;
                 Ok(ShellImplementationAction::LaneOccupied {
                     session_id: session_id.clone(),
-                    phase: *phase,
+                    stage: *stage,
                 })
             }
             ImplementationDecision::BlockedByHead { session_id } => {
@@ -815,10 +815,10 @@ impl AppShell {
                     session_id: session_id.clone(),
                 })
             }
-            ImplementationDecision::PlanningHead { session_id, phase } => {
+            ImplementationDecision::PlanningHead { session_id, stage } => {
                 Ok(ShellImplementationAction::PlanningHead {
                     session_id: session_id.clone(),
-                    phase: *phase,
+                    stage: *stage,
                 })
             }
             ImplementationDecision::DispatchWaiting { session_id } => {
@@ -826,7 +826,7 @@ impl AppShell {
                     self.drive_scheduler_session(session_id, SchedulerDrive::DispatchWaiting)?;
                 Ok(ShellImplementationAction::DispatchedWaiting {
                     session_id: session_id.clone(),
-                    phase: state.current_phase,
+                    stage: state.current_stage,
                 })
             }
             ImplementationDecision::BlockedByCorruptEarlierSession { session_id, error } => {
@@ -903,10 +903,7 @@ impl AppShell {
         self.refresh_sidebar_rows_with_running(running_session_id.as_deref());
     }
 
-    fn refresh_sidebar_rows_with_running(
-        &mut self,
-        running_session_id: Option<&str>,
-    ) {
+    fn refresh_sidebar_rows_with_running(&mut self, running_session_id: Option<&str>) {
         self.sidebar.refresh_if_dirty(
             &self.session_index,
             &self.focused_session_id,
@@ -962,14 +959,13 @@ mod tests {
     use crate::app::{TestLaunchHarness, TestLaunchOutcome};
     use crate::app_runtime::{AppCommand, UiKey, UiKeyCode};
     use crate::logic::selection::{
-        CachedModel, Candidate, CliKind, IpbrPhaseScores, ScoreSource, SubscriptionKind,
+        CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind,
     };
     use serial_test::serial;
     use std::collections::VecDeque;
 
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = crate::state::test_fs_lock()
-            .lock();
+        let _guard = crate::state::test_fs_lock().lock();
         let temp = tempfile::TempDir::new().expect("tempdir");
         let prev = std::env::var_os("CODEXIZE_ROOT");
         unsafe {
@@ -985,19 +981,19 @@ mod tests {
         result.expect("test panicked")
     }
 
-    fn save_session(id: &str, phase: Phase) -> SessionState {
+    fn save_session(id: &str, stage: Stage) -> SessionState {
         let mut state = SessionState::new(id.to_string());
         state.idea_text = Some(format!("idea for {id}"));
-        state.current_phase = phase;
+        state.current_stage = stage;
         state.save().expect("save session");
         state
     }
 
-    fn save_session_with_title(id: &str, phase: Phase, title: &str) -> SessionState {
+    fn save_session_with_title(id: &str, stage: Stage, title: &str) -> SessionState {
         let mut state = SessionState::new(id.to_string());
         state.idea_text = Some(format!("idea for {id}"));
         state.title = Some(title.to_string());
-        state.current_phase = phase;
+        state.current_stage = stage;
         state.save().expect("save titled session");
         state
     }
@@ -1027,7 +1023,7 @@ mod tests {
         CachedModel {
             subscription: SubscriptionKind::Codex,
             name: "test-build-model".to_string(),
-            ipbr_phase_scores: IpbrPhaseScores {
+            ipbr_stage_scores: IpbrStageScores {
                 idea: Some(80.0),
                 planning: Some(80.0),
                 build: Some(80.0),
@@ -1109,10 +1105,10 @@ estimated_tokens = 100
     #[serial]
     fn sidebar_enter_swaps_focused_app_and_keeps_running_session_marked() {
         with_temp_root(|| {
-            let mut first = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            let mut first = save_session("20260511-090000-000000001", Stage::ShardingRunning);
             first.agent_runs.push(running_sharding_run(7));
             first.save().expect("save running first");
-            save_session("20260511-091000-000000001", Phase::WaitingToImplement);
+            save_session("20260511-091000-000000001", Stage::WaitingToImplement);
             let mut shell = AppShell::new(
                 first.clone(),
                 AppStartupOrigin::Default,
@@ -1167,7 +1163,7 @@ estimated_tokens = 100
     #[serial]
     fn scheduler_tick_auto_launches_idle_implementation_occupant() {
         with_temp_root(|| {
-            let mut state = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            let mut state = save_session("20260511-090000-000000001", Stage::ShardingRunning);
             state.agent_runs.clear();
             state.save().expect("save without runs");
             let mut shell = AppShell::new(
@@ -1192,7 +1188,7 @@ estimated_tokens = 100
                 planning: Vec::new(),
                 implementation: ImplementationDecision::LaneOccupied {
                     session_id: "20260511-090000-000000001".to_string(),
-                    phase: Phase::ShardingRunning,
+                    stage: Stage::ShardingRunning,
                 },
                 skipped_corrupt_later_sessions: Vec::new(),
             };
@@ -1213,14 +1209,14 @@ estimated_tokens = 100
                 action,
                 ShellImplementationAction::LaneOccupied {
                     session_id,
-                    phase: Phase::ShardingRunning,
+                    stage: Stage::ShardingRunning,
                 } if session_id == "20260511-090000-000000001"
             ));
             let driven = shell
                 .workspace("20260511-090000-000000001")
                 .expect("workspace")
                 .app();
-            assert!(driven.run_launched, "idle sharding phase should launch");
+            assert!(driven.run_launched, "idle sharding stage should launch");
             assert_eq!(driven.current_run_id, Some(1));
         });
     }
@@ -1229,8 +1225,8 @@ estimated_tokens = 100
     #[serial]
     fn repeated_background_ticks_keep_one_session_supervisor_app() {
         with_temp_root(|| {
-            let focused = save_session("20260511-080000-000000001", Phase::Done);
-            let mut running = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            let focused = save_session("20260511-080000-000000001", Stage::Done);
+            let mut running = save_session("20260511-090000-000000001", Stage::ShardingRunning);
             running.agent_runs.push(running_sharding_run(7));
             running.save().expect("save running candidate");
             let mut shell = AppShell::new(
@@ -1272,8 +1268,8 @@ estimated_tokens = 100
     #[serial]
     fn background_waiting_dispatch_reuses_existing_supervisor_app() {
         with_temp_root(|| {
-            let focused = save_session("20260511-080000-000000001", Phase::Done);
-            save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+            let focused = save_session("20260511-080000-000000001", Stage::Done);
+            save_session("20260511-090000-000000001", Stage::WaitingToImplement);
             let mut shell = AppShell::new(
                 focused,
                 AppStartupOrigin::Default,
@@ -1315,8 +1311,8 @@ estimated_tokens = 100
     #[serial]
     fn scheduler_tick_ignores_closed_stale_sessions_when_open_session_waits() {
         with_temp_root(|| {
-            save_session("20260511-080000-000000001", Phase::BrainstormRunning);
-            let waiting = save_session("20260511-090000-000000001", Phase::WaitingToImplement);
+            save_session("20260511-080000-000000001", Stage::BrainstormRunning);
+            let waiting = save_session("20260511-090000-000000001", Stage::WaitingToImplement);
             let mut shell = AppShell::new(
                 waiting,
                 AppStartupOrigin::Default,
@@ -1330,11 +1326,11 @@ estimated_tokens = 100
                 report.implementation,
                 ShellImplementationAction::DispatchedWaiting {
                     session_id,
-                    phase: Phase::ShardingRunning,
+                    stage: Stage::ShardingRunning,
                 } if session_id == "20260511-090000-000000001"
             ));
             let stale = SessionState::load("20260511-080000-000000001").expect("load stale");
-            assert_eq!(stale.current_phase, Phase::BrainstormRunning);
+            assert_eq!(stale.current_stage, Stage::BrainstormRunning);
         });
     }
 
@@ -1345,9 +1341,9 @@ estimated_tokens = 100
             // Three on-disk sessions, none of them changing across ticks.
             // The shell only opens one workspace (the focused one); the
             // other two exercise the index's "seen but unchanged" path.
-            let focused = save_session("20260511-080000-000000001", Phase::Done);
-            let _ = save_session("20260511-090000-000000001", Phase::Done);
-            let _ = save_session("20260511-100000-000000001", Phase::WaitingToImplement);
+            let focused = save_session("20260511-080000-000000001", Stage::Done);
+            let _ = save_session("20260511-090000-000000001", Stage::Done);
+            let _ = save_session("20260511-100000-000000001", Stage::WaitingToImplement);
 
             let mut shell = AppShell::new(
                 focused,
@@ -1382,7 +1378,7 @@ estimated_tokens = 100
     fn sidebar_event_refresh_uses_cached_index_not_disk_scan() {
         with_temp_root(|| {
             let first =
-                save_session_with_title("20260511-080000-000000001", Phase::Done, "cached title");
+                save_session_with_title("20260511-080000-000000001", Stage::Done, "cached title");
             let mut shell = AppShell::new(
                 first.clone(),
                 AppStartupOrigin::Default,
@@ -1430,8 +1426,8 @@ estimated_tokens = 100
     #[serial]
     fn sidebar_rebuilds_only_when_dirty_inputs_change() {
         with_temp_root(|| {
-            let first = save_session_with_title("20260511-080000-000000001", Phase::Done, "first");
-            save_session_with_title("20260511-090000-000000001", Phase::Done, "second");
+            let first = save_session_with_title("20260511-080000-000000001", Stage::Done, "first");
+            save_session_with_title("20260511-090000-000000001", Stage::Done, "second");
             let mut shell = AppShell::new(
                 first,
                 AppStartupOrigin::Default,
@@ -1495,8 +1491,8 @@ estimated_tokens = 100
     #[serial]
     fn scheduler_tick_finalizes_finished_background_sharding_run() {
         with_temp_root(|| {
-            let focused = save_session("20260511-085000-000000001", Phase::Done);
-            let mut sharding = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            let focused = save_session("20260511-085000-000000001", Stage::Done);
+            let mut sharding = save_session("20260511-090000-000000001", Stage::ShardingRunning);
             sharding.agent_runs.push(running_sharding_run(7));
             sharding.save().expect("save running sharding");
             write_tasks("20260511-090000-000000001");
@@ -1525,15 +1521,15 @@ estimated_tokens = 100
                 report.implementation,
                 ShellImplementationAction::LaneOccupied {
                     session_id,
-                    phase: Phase::ShardingRunning,
+                    stage: Stage::ShardingRunning,
                 } if session_id == "20260511-090000-000000001"
             ));
             let reloaded =
                 SessionState::load("20260511-090000-000000001").expect("load sharding session");
-            // The phase stays at `ShardingRunning` (no auto-advance from a
+            // The stage stays at `ShardingRunning` (no auto-advance from a
             // backfilled finish stamp), and run 7 carries the backfill's
             // Failed status with the "aborted" error.
-            assert_eq!(reloaded.current_phase, Phase::ShardingRunning);
+            assert_eq!(reloaded.current_stage, Stage::ShardingRunning);
             let run_7 = reloaded
                 .agent_runs
                 .iter()
@@ -1551,7 +1547,7 @@ estimated_tokens = 100
     #[serial]
     fn focused_run_lifecycle_publishes_run_started_and_finished() {
         with_temp_root(|| {
-            let mut state = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            let mut state = save_session("20260511-090000-000000001", Stage::ShardingRunning);
             state.agent_runs.clear();
             state.save().expect("save without runs");
             let mut shell = AppShell::new(
@@ -1595,7 +1591,7 @@ estimated_tokens = 100
                 planning: Vec::new(),
                 implementation: ImplementationDecision::LaneOccupied {
                     session_id: "20260511-090000-000000001".to_string(),
-                    phase: Phase::ShardingRunning,
+                    stage: Stage::ShardingRunning,
                 },
                 skipped_corrupt_later_sessions: Vec::new(),
             };
@@ -1647,8 +1643,8 @@ estimated_tokens = 100
     #[serial]
     fn running_session_id_is_derived_not_mirrored() {
         with_temp_root(|| {
-            let focused = save_session("20260511-080000-000000001", Phase::Done);
-            let mut running = save_session("20260511-090000-000000001", Phase::ShardingRunning);
+            let focused = save_session("20260511-080000-000000001", Stage::Done);
+            let mut running = save_session("20260511-090000-000000001", Stage::ShardingRunning);
             running.agent_runs.push(running_sharding_run(7));
             running.save().expect("save running");
 

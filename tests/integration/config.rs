@@ -198,11 +198,11 @@ fn list_section_returns_only_that_subtree() {
 fn reset_section_normalizes_to_sparse() {
     let fx = EnvFixture::install();
     cli::run_set("ntfy.detail_mode", "minimal", &mut buf()).unwrap();
-    cli::run_set("ntfy.events.phase_wait", "false", &mut buf()).unwrap();
+    cli::run_set("ntfy.events.stage_wait", "false", &mut buf()).unwrap();
     cli::run_reset(Some("ntfy"), true, true, &mut buf()).unwrap();
     let on_disk = std::fs::read_to_string(fx.path()).unwrap();
     assert!(!on_disk.contains("detail_mode"));
-    assert!(!on_disk.contains("phase_wait"));
+    assert!(!on_disk.contains("stage_wait"));
 }
 
 #[test]

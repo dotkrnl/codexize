@@ -76,7 +76,7 @@ pub fn get_value(config: &Config, key: &str) -> Result<String, MutationError> {
         ["ntfy", "http_timeout_secs"] => config.ntfy.http_timeout_secs.value().to_string(),
         ["ntfy", "body_max_bytes"] => config.ntfy.body_max_bytes.value().to_string(),
         ["ntfy", "excerpt_max_chars"] => config.ntfy.excerpt_max_chars.value().to_string(),
-        ["ntfy", "events", "phase_wait"] => config.ntfy.events.phase_wait.value().to_string(),
+        ["ntfy", "events", "stage_wait"] => config.ntfy.events.stage_wait.value().to_string(),
         ["ntfy", "events", "interactive_wait"] => {
             config.ntfy.events.interactive_wait.value().to_string()
         }
@@ -211,8 +211,8 @@ pub fn set_value(config: &mut Config, key: &str, raw_value: &str) -> Result<(), 
                 .excerpt_max_chars
                 .set(parse_u32(key, raw_value)?);
         }
-        ["ntfy", "events", "phase_wait"] => {
-            set_bool(&mut config.ntfy.events.phase_wait, key, raw_value)?
+        ["ntfy", "events", "stage_wait"] => {
+            set_bool(&mut config.ntfy.events.stage_wait, key, raw_value)?
         }
         ["ntfy", "events", "interactive_wait"] => {
             set_bool(&mut config.ntfy.events.interactive_wait, key, raw_value)?
@@ -386,11 +386,11 @@ pub fn unset_value(config: &mut Config, key: &str) -> Result<(), MutationError> 
             .ntfy
             .excerpt_max_chars
             .reset_to(*baked.ntfy.excerpt_max_chars.value()),
-        ["ntfy", "events", "phase_wait"] => config
+        ["ntfy", "events", "stage_wait"] => config
             .ntfy
             .events
-            .phase_wait
-            .reset_to(*baked.ntfy.events.phase_wait.value()),
+            .stage_wait
+            .reset_to(*baked.ntfy.events.stage_wait.value()),
         ["ntfy", "events", "interactive_wait"] => config
             .ntfy
             .events
@@ -762,7 +762,7 @@ fn all_settable_keys() -> Vec<&'static str> {
         "ntfy.http_timeout_secs",
         "ntfy.body_max_bytes",
         "ntfy.excerpt_max_chars",
-        "ntfy.events.phase_wait",
+        "ntfy.events.stage_wait",
         "ntfy.events.interactive_wait",
         "ntfy.events.pipeline_done",
         "acp.policy.shell_policy",
@@ -911,10 +911,10 @@ mod tests {
     fn reset_section_clears_all_overrides_under_section() {
         let mut cfg = Config::baked_defaults();
         set_value(&mut cfg, "ntfy.detail_mode", "minimal").unwrap();
-        set_value(&mut cfg, "ntfy.events.phase_wait", "false").unwrap();
+        set_value(&mut cfg, "ntfy.events.stage_wait", "false").unwrap();
         reset_section(&mut cfg, "ntfy").unwrap();
         assert!(!cfg.ntfy.detail_mode.is_explicit());
-        assert!(!cfg.ntfy.events.phase_wait.is_explicit());
+        assert!(!cfg.ntfy.events.stage_wait.is_explicit());
     }
 
     #[test]

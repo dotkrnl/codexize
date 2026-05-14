@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 
 use crate::data::config::schema::NtfyDetailMode;
 use crate::data::config::view::{NtfyEventsView, NtfyView};
-use crate::state::Phase;
+use crate::state::Stage;
 
 const TOPIC_BYTES: usize = 16;
 const NTFY_TITLE_MAX_CHARS: usize = 80;
@@ -22,7 +22,7 @@ pub enum NotificationEventKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotificationReason {
-    PhaseWait,
+    StageWait,
     InteractiveRunWait,
 }
 
@@ -43,17 +43,17 @@ pub struct NotificationContext {
 pub struct NotificationEvent {
     pub kind: NotificationEventKind,
     pub reason: NotificationReason,
-    pub phase: Phase,
+    pub stage: Stage,
     pub context: NotificationContext,
     pub dedupe_key: NotificationDedupeKey,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NotificationDedupeKey {
-    PhaseWait {
+    StageWait {
         session_id: String,
-        stage: String,
-        phase: Phase,
+        stage_name: String,
+        stage: Stage,
         occurrence: u64,
     },
     InteractiveRunWait {
@@ -162,7 +162,7 @@ impl NotificationRuntime {
             retry_delay_ms: 0,
             http_timeout_secs: 0,
             events: NtfyEventsView {
-                phase_wait: true,
+                stage_wait: true,
                 interactive_wait: true,
                 pipeline_done: true,
             },
@@ -183,7 +183,7 @@ impl NotificationRuntime {
                 body_max_bytes: 4096,
                 excerpt_max_chars: 600,
                 events: NtfyEventsView {
-                    phase_wait: true,
+                    stage_wait: true,
                     interactive_wait: true,
                     pipeline_done: true,
                 },
@@ -201,24 +201,24 @@ impl NotificationRuntime {
         &self.events
     }
 
-    pub fn emit_phase_wait(&mut self, phase: Phase, context: NotificationContext) {
+    pub fn emit_stage_wait(&mut self, stage: Stage, context: NotificationContext) {
         if !self.params.enabled {
             return;
         }
-        if !self.params.events.phase_wait {
+        if !self.params.events.stage_wait {
             return;
         }
         self.occurrence = self.occurrence.saturating_add(1);
-        let dedupe_key = NotificationDedupeKey::PhaseWait {
+        let dedupe_key = NotificationDedupeKey::StageWait {
             session_id: context.session_id.clone(),
-            stage: context.stage.clone(),
-            phase,
+            stage_name: context.stage.clone(),
+            stage,
             occurrence: self.occurrence,
         };
         self.push(NotificationEvent {
             kind: NotificationEventKind::InputNeeded,
-            reason: NotificationReason::PhaseWait,
-            phase,
+            reason: NotificationReason::StageWait,
+            stage,
             context,
             dedupe_key,
         });
@@ -226,7 +226,7 @@ impl NotificationRuntime {
 
     pub fn emit_interactive_wait(
         &mut self,
-        phase: Phase,
+        stage: Stage,
         context: NotificationContext,
         marker: InteractiveWaitMarker,
     ) {
@@ -244,13 +244,13 @@ impl NotificationRuntime {
         self.push(NotificationEvent {
             kind: NotificationEventKind::InputNeeded,
             reason: NotificationReason::InteractiveRunWait,
-            phase,
+            stage,
             context,
             dedupe_key,
         });
     }
 
-    pub fn emit_pipeline_done(&mut self, phase: Phase, context: NotificationContext) {
+    pub fn emit_pipeline_done(&mut self, stage: Stage, context: NotificationContext) {
         if !self.params.enabled {
             return;
         }
@@ -264,8 +264,8 @@ impl NotificationRuntime {
         };
         self.push(NotificationEvent {
             kind: NotificationEventKind::PipelineDone,
-            reason: NotificationReason::PhaseWait,
-            phase,
+            reason: NotificationReason::StageWait,
+            stage,
             context,
             dedupe_key,
         });
@@ -361,15 +361,15 @@ impl NotificationRuntime {
     }
 }
 
-pub fn phase_needs_input(phase: Phase) -> bool {
+pub fn stage_needs_input(stage: Stage) -> bool {
     matches!(
-        phase,
-        Phase::BlockedNeedsUser
-            | Phase::SpecReviewPaused
-            | Phase::PlanReviewPaused
-            | Phase::SkipToImplPending
-            | Phase::GitGuardPending
-            | Phase::DreamingPending
+        stage,
+        Stage::BlockedNeedsUser
+            | Stage::SpecReviewPaused
+            | Stage::PlanReviewPaused
+            | Stage::SkipToImplPending
+            | Stage::GitGuardPending
+            | Stage::DreamingPending
     )
 }
 
@@ -407,42 +407,42 @@ pub(crate) fn generate_topic() -> Result<String> {
 }
 
 fn prose_title(event: &NotificationEvent) -> String {
-    let label = match (event.kind, event.reason, event.phase) {
+    let label = match (event.kind, event.reason, event.stage) {
         (NotificationEventKind::PipelineDone, _, _) => "pipeline finished",
         (NotificationEventKind::InputNeeded, NotificationReason::InteractiveRunWait, _) => {
             "agent is waiting on you"
         }
         (
             NotificationEventKind::InputNeeded,
-            NotificationReason::PhaseWait,
-            Phase::SpecReviewPaused,
+            NotificationReason::StageWait,
+            Stage::SpecReviewPaused,
         ) => "spec ready for review",
         (
             NotificationEventKind::InputNeeded,
-            NotificationReason::PhaseWait,
-            Phase::PlanReviewPaused,
+            NotificationReason::StageWait,
+            Stage::PlanReviewPaused,
         ) => "plan ready for review",
         (
             NotificationEventKind::InputNeeded,
-            NotificationReason::PhaseWait,
-            Phase::SkipToImplPending,
+            NotificationReason::StageWait,
+            Stage::SkipToImplPending,
         ) => "skip planning?",
         (
             NotificationEventKind::InputNeeded,
-            NotificationReason::PhaseWait,
-            Phase::GitGuardPending,
+            NotificationReason::StageWait,
+            Stage::GitGuardPending,
         ) => "review unauthorized commits",
         (
             NotificationEventKind::InputNeeded,
-            NotificationReason::PhaseWait,
-            Phase::DreamingPending,
+            NotificationReason::StageWait,
+            Stage::DreamingPending,
         ) => "dreaming decision",
         (
             NotificationEventKind::InputNeeded,
-            NotificationReason::PhaseWait,
-            Phase::BlockedNeedsUser,
+            NotificationReason::StageWait,
+            Stage::BlockedNeedsUser,
         ) => "blocked, needs you",
-        (NotificationEventKind::InputNeeded, NotificationReason::PhaseWait, _) => "input needed",
+        (NotificationEventKind::InputNeeded, NotificationReason::StageWait, _) => "input needed",
     };
     format!("codexize: {label}")
 }
@@ -474,7 +474,7 @@ fn format_ntfy_message(
 
 fn lead_sentence(event: &NotificationEvent) -> String {
     let session = quoted_session(&event.context.session_label);
-    match (event.kind, event.reason, event.phase) {
+    match (event.kind, event.reason, event.stage) {
         (NotificationEventKind::PipelineDone, _, _) => {
             format!("Pipeline finished on {session}.")
         }
@@ -484,39 +484,39 @@ fn lead_sentence(event: &NotificationEvent) -> String {
         }
         (
             NotificationEventKind::InputNeeded,
-            NotificationReason::PhaseWait,
-            Phase::SpecReviewPaused,
+            NotificationReason::StageWait,
+            Stage::SpecReviewPaused,
         ) => format!("Spec review is paused on {session}. Take a look and decide what's next."),
         (
             NotificationEventKind::InputNeeded,
-            NotificationReason::PhaseWait,
-            Phase::PlanReviewPaused,
+            NotificationReason::StageWait,
+            Stage::PlanReviewPaused,
         ) => format!("Plan review is paused on {session}. Take a look and decide what's next."),
         (
             NotificationEventKind::InputNeeded,
-            NotificationReason::PhaseWait,
-            Phase::SkipToImplPending,
+            NotificationReason::StageWait,
+            Stage::SkipToImplPending,
         ) => format!(
             "Codexize thinks the spec for {session} is solid enough to skip planning. Confirm to skip directly to coding."
         ),
         (
             NotificationEventKind::InputNeeded,
-            NotificationReason::PhaseWait,
-            Phase::GitGuardPending,
+            NotificationReason::StageWait,
+            Stage::GitGuardPending,
         ) => format!(
             "The interactive run on {session} made commits without permission. Decide whether to keep them or reset."
         ),
         (
             NotificationEventKind::InputNeeded,
-            NotificationReason::PhaseWait,
-            Phase::DreamingPending,
+            NotificationReason::StageWait,
+            Stage::DreamingPending,
         ) => format!("Dreaming is queued on {session}. Approve to run it, or skip and finish."),
         (
             NotificationEventKind::InputNeeded,
-            NotificationReason::PhaseWait,
-            Phase::BlockedNeedsUser,
+            NotificationReason::StageWait,
+            Stage::BlockedNeedsUser,
         ) => format!("Final validation is blocked on {session}. You'll need to step in."),
-        (NotificationEventKind::InputNeeded, NotificationReason::PhaseWait, _) => {
+        (NotificationEventKind::InputNeeded, NotificationReason::StageWait, _) => {
             let stage = humanize_stage(&event.context.stage);
             format!("Codexize on {session} needs your input at the {stage} stage.")
         }
@@ -531,7 +531,7 @@ fn context_line(event: &NotificationEvent, excerpt_max_chars: u32) -> Option<Str
             .as_deref()
             .and_then(|text| non_empty_excerpt(text, excerpt_max_chars))
             .map(|excerpt| format!("Last response: {excerpt}")),
-        NotificationReason::PhaseWait => event
+        NotificationReason::StageWait => event
             .context
             .last_live_summary
             .as_deref()

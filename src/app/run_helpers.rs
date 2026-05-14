@@ -1,7 +1,7 @@
 use super::{App, DEFAULT_STAMP_TIMEOUT_MS, ENV_STAMP_TIMEOUT_MS, guard, status_line};
 use crate::{
-    selection::{SubscriptionKind, config::SelectionPhase, selection::SelectionWarning},
-    state::{self as session_state, Message, MessageKind, MessageSender, Phase, RunStatus},
+    selection::{SubscriptionKind, config::SelectionStage, selection::SelectionWarning},
+    state::{self as session_state, Message, MessageKind, MessageSender, RunStatus, Stage},
     tasks,
 };
 use anyhow::Result;
@@ -86,7 +86,7 @@ impl App {
             + 1
     }
     /// 1-based ordinal of `round` within this task's coder-round
-    /// history. The orchestrator's `Phase::ImplementationRound` round
+    /// history. The orchestrator's `Stage::ImplementationRound` round
     /// counter is global — it ticks across tasks — so a task that
     /// starts at global round 4 (because earlier tasks consumed rounds
     /// 1-3) is on its 1st task-round, not its 4th. Used as the input
@@ -175,12 +175,12 @@ impl App {
         }
         (vendors, models)
     }
-    pub(crate) fn phase_for_stage(stage: &str) -> SelectionPhase {
+    pub(crate) fn selection_stage_for_stage(stage: &str) -> SelectionStage {
         match stage {
-            "brainstorm" => SelectionPhase::Idea,
-            "spec-review" | "plan-review" | "reviewer" => SelectionPhase::Review,
-            "planning" | "sharding" | "recovery" | "repo-state-update" => SelectionPhase::Planning,
-            _ => SelectionPhase::Build,
+            "brainstorm" => SelectionStage::Idea,
+            "spec-review" | "plan-review" | "reviewer" => SelectionStage::Review,
+            "planning" | "sharding" | "recovery" | "repo-state-update" => SelectionStage::Planning,
+            _ => SelectionStage::Build,
         }
     }
     pub(crate) fn run_key_for(
@@ -340,10 +340,10 @@ impl App {
         }
     }
     pub(crate) fn emit_selection_warning(&mut self, warning: Option<SelectionWarning>) {
-        let Some(SelectionWarning::CheapFallback { phase, reason }) = warning else {
+        let Some(SelectionWarning::CheapFallback { stage, reason }) = warning else {
             return;
         };
-        let message = format!("cheap_fallback: phase={} reason={reason}", phase.name());
+        let message = format!("cheap_fallback: stage={} reason={reason}", stage.name());
         let _ = self.state.log_event(message.clone());
         self.push_status(message, status_line::Severity::Warn, Duration::from_secs(8));
     }
@@ -387,13 +387,16 @@ impl App {
     ) {
         self.watchdog.remove(run_id);
         // Mirror the finalize into the lifecycle FSM. We capture the outcome
-        // first so the mirror call has a stable view of the legacy result;
+        // first so the mirror call has a stable view of the persisted result;
         // the actual `finish_run_record` call below mutates session state.
         // Mirroring runs unconditionally — failures (Misordered, FSM still
         // Idle) log a warning and continue.
         let fsm_outcome = if success {
             crate::lifecycle::Outcome::Done
-        } else if matches!(error.as_deref(), Some("Operator Killed" | "preempted by operator retry")) {
+        } else if matches!(
+            error.as_deref(),
+            Some("Operator Killed" | "preempted by operator retry")
+        ) {
             crate::lifecycle::Outcome::Cancelled {
                 by: crate::lifecycle::CancelledBy::Operator,
                 reason: error.clone().unwrap_or_default(),
@@ -404,10 +407,11 @@ impl App {
         // Bridge: the FSM only accepts confirm_dead from Stopping. If we're
         // mid-Running (most finalize paths), push it to Stopping with
         // GoIdle so confirm_dead succeeds.
-        if matches!(self.fsm.view(), crate::lifecycle::AgentState::Running { .. }) {
-            let _ = self
-                .fsm
-                .request_stop(crate::lifecycle::AfterStop::GoIdle);
+        if matches!(
+            self.fsm.view(),
+            crate::lifecycle::AgentState::Running { .. }
+        ) {
+            let _ = self.fsm.request_stop(crate::lifecycle::AfterStop::GoIdle);
         }
         let resolution = self.fsm_confirm_dead_mirroring(fsm_outcome).ok();
         // If the operator queued a rewind via LifecycleOps::rewind on a live
@@ -438,7 +442,7 @@ impl App {
         }
         // FSM-driven Cancel runs through `complete_run_finalization`, which
         // reads the FSM's `Stopping(Cancel)` state and drives the
-        // Phase::Cancelled transition. No handling needed here.
+        // Stage::Cancelled transition. No handling needed here.
         let _ = resolution;
         let Some(finished) =
             session_state::finish_run_record(&mut self.state, run_id, success, error)
@@ -501,7 +505,7 @@ impl App {
                 .as_ref()
                 .is_some_and(|d| d.run_id == run.id)
         {
-            self.transition_to_phase(Phase::GitGuardPending)?;
+            self.transition_to_stage(Stage::GitGuardPending)?;
             self.save_state();
             return Ok(());
         }
@@ -509,7 +513,7 @@ impl App {
     }
     pub(crate) fn enter_simplification_or_done(&mut self, round: u32, yolo: bool) -> Result<()> {
         if yolo {
-            self.transition_to_phase(Phase::Done)?;
+            self.transition_to_stage(Stage::Done)?;
             return Ok(());
         }
         let _ = session_state::enter_simplification(&mut self.state, round)?;

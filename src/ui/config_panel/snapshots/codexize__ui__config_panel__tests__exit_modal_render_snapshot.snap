@@ -1,6 +1,5 @@
 ---
 source: src/ui/config_panel/mod.rs
-assertion_line: 4737
 expression: "render_to_text(&state, 90, 22)"
 ---
 "⚙ Settings────────────────────────────────────────────────────────/tmp/example/config.toml"
@@ -16,7 +15,7 @@ expression: "render_to_text(&state, 90, 22)"
 "   HT│   [d] Discard & close                                                        │     "
 "   Bo│ ▌ [c] Cancel  · keep editing without saving or closing                       │     "
 "   Ex│                                                                              │     "
-"   Ph│ ↑↓ select · Enter confirm · s/d/c shortcut · Esc cancel                      │     "
+"   St│ ↑↓ select · Enter confirm · s/d/c shortcut · Esc cancel                      │     "
 "   In└──────────────────────────────────────────────────────────────────────────────┘     "
 "   Done alerts                  │ ✓ on                                                    "
 "                                                                                          "

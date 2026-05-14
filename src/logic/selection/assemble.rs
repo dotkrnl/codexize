@@ -125,7 +125,7 @@ fn row_from_entry(name: String, entry: &DashboardEntry) -> CachedModel {
     CachedModel {
         subscription: SubscriptionKind::Direct,
         name,
-        ipbr_phase_scores: entry.ipbr_phase_scores,
+        ipbr_stage_scores: entry.ipbr_stage_scores,
         score_source: entry.score_source,
         candidates: Vec::new(),
         selected_candidate: None,
@@ -413,7 +413,7 @@ pub fn dashboard_models_to_entries(models: &[DashboardModel]) -> Vec<DashboardEn
         .iter()
         .map(|m| DashboardEntry {
             name: m.name.clone(),
-            ipbr_phase_scores: m.ipbr_phase_scores,
+            ipbr_stage_scores: m.ipbr_stage_scores,
             score_source: m.score_source,
             display_order: m.display_order,
         })

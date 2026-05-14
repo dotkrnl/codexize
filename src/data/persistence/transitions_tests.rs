@@ -5,7 +5,7 @@ use crate::state::{LaunchModes, PipelineItem, PipelineItemStatus, SectionPart};
 #[test]
 fn coder_run_captures_iteration_loop_task_round_stage_path() {
     let mut state = SessionState::new("path-capture".to_string());
-    state.current_phase = Phase::ImplementationRound(9);
+    state.current_stage = Stage::ImplementationRound(9);
     state.builder.pipeline_items.push(PipelineItem {
         id: 1,
         stage: "coder".to_string(),
@@ -52,7 +52,7 @@ fn coder_run_captures_iteration_loop_task_round_stage_path() {
 #[test]
 fn simplifier_run_captures_iteration_simplification_round_stage_path() {
     let mut state = SessionState::new("simpl-capture".to_string());
-    state.current_phase = Phase::Simplification(9);
+    state.current_stage = Stage::Simplification(9);
     state.builder.pipeline_items.push(PipelineItem {
         id: 1,
         stage: "coder".to_string(),
@@ -98,7 +98,7 @@ fn simplifier_run_captures_iteration_simplification_round_stage_path() {
 #[test]
 fn brainstorm_run_captures_brainstorm_stage_path() {
     let mut state = SessionState::new("brainstorm".to_string());
-    state.current_phase = Phase::BrainstormRunning;
+    state.current_stage = Stage::BrainstormRunning;
     let run_id = state.next_agent_run_id();
     let id = start_agent_run_with_id(
         &mut state,
@@ -131,8 +131,7 @@ fn brainstorm_run_captures_brainstorm_stage_path() {
 /// implicit `SessionState::save` writes into a temp directory that gets
 /// cleaned up.
 fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = crate::state::test_fs_lock()
-        .lock();
+    let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
     let prev = std::env::var_os("CODEXIZE_ROOT");
     // SAFETY: `set_var`/`remove_var` are not thread-safe on *nix; the
@@ -154,15 +153,15 @@ fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
 fn force_ship_rejected_without_final_validation_origin() {
     with_temp_root(|| {
         let mut state = SessionState::new("force-ship-recovery".to_string());
-        state.current_phase = Phase::BlockedNeedsUser;
+        state.current_stage = Stage::BlockedNeedsUser;
         state.block_origin = Some(BlockOrigin::BuilderRecovery);
-        let err = execute_transition(&mut state, Phase::Done).expect_err("expected guard failure");
+        let err = execute_transition(&mut state, Stage::Done).expect_err("expected guard failure");
         let msg = format!("{err:#}");
         assert!(
             msg.contains("force-ship"),
             "guard error must mention force-ship: {msg}"
         );
-        assert_eq!(state.current_phase, Phase::BlockedNeedsUser);
+        assert_eq!(state.current_stage, Stage::BlockedNeedsUser);
     });
 }
 
@@ -170,9 +169,9 @@ fn force_ship_rejected_without_final_validation_origin() {
 fn force_ship_rejected_when_block_origin_missing() {
     with_temp_root(|| {
         let mut state = SessionState::new("force-ship-missing".to_string());
-        state.current_phase = Phase::BlockedNeedsUser;
+        state.current_stage = Stage::BlockedNeedsUser;
         state.block_origin = None;
-        let err = execute_transition(&mut state, Phase::Done).expect_err("expected guard failure");
+        let err = execute_transition(&mut state, Stage::Done).expect_err("expected guard failure");
         assert!(format!("{err:#}").contains("force-ship"));
     });
 }
@@ -181,10 +180,10 @@ fn force_ship_rejected_when_block_origin_missing() {
 fn force_ship_allowed_with_final_validation_origin() {
     with_temp_root(|| {
         let mut state = SessionState::new("force-ship-ok".to_string());
-        state.current_phase = Phase::BlockedNeedsUser;
+        state.current_stage = Stage::BlockedNeedsUser;
         state.block_origin = Some(BlockOrigin::FinalValidation);
-        execute_transition(&mut state, Phase::Done).expect("force-ship must succeed");
-        assert_eq!(state.current_phase, Phase::Done);
+        execute_transition(&mut state, Stage::Done).expect("force-ship must succeed");
+        assert_eq!(state.current_stage, Stage::Done);
         assert!(state.block_origin.is_none());
     });
 }
@@ -193,9 +192,9 @@ fn force_ship_allowed_with_final_validation_origin() {
 fn block_with_origin_sets_field_and_transitions() {
     with_temp_root(|| {
         let mut state = SessionState::new("block-helper".to_string());
-        state.current_phase = Phase::PlanReviewRunning;
+        state.current_stage = Stage::PlanReviewRunning;
         block_with_origin(&mut state, BlockOrigin::PlanReview).expect("block transition succeeds");
-        assert_eq!(state.current_phase, Phase::BlockedNeedsUser);
+        assert_eq!(state.current_stage, Stage::BlockedNeedsUser);
         assert_eq!(state.block_origin, Some(BlockOrigin::PlanReview));
     });
 }
@@ -204,10 +203,10 @@ fn block_with_origin_sets_field_and_transitions() {
 fn leaving_block_clears_origin() {
     with_temp_root(|| {
         let mut state = SessionState::new("leave-block".to_string());
-        state.current_phase = Phase::BlockedNeedsUser;
+        state.current_stage = Stage::BlockedNeedsUser;
         state.block_origin = Some(BlockOrigin::Brainstorm);
-        execute_transition(&mut state, Phase::BrainstormRunning).expect("rewind succeeds");
-        assert_eq!(state.current_phase, Phase::BrainstormRunning);
+        execute_transition(&mut state, Stage::BrainstormRunning).expect("rewind succeeds");
+        assert_eq!(state.current_stage, Stage::BrainstormRunning);
         assert!(state.block_origin.is_none(), "origin must clear on leave");
     });
 }
@@ -216,12 +215,12 @@ fn leaving_block_clears_origin() {
 fn final_validation_round_trip_through_execute_transition() {
     with_temp_root(|| {
         let mut state = SessionState::new("fv-round-trip".to_string());
-        state.current_phase = Phase::ReviewRound(2);
-        execute_transition(&mut state, Phase::Simplification(2)).unwrap();
-        execute_transition(&mut state, Phase::FinalValidation(2)).unwrap();
-        assert_eq!(state.current_phase, Phase::FinalValidation(2));
-        execute_transition(&mut state, Phase::Done).unwrap();
-        assert_eq!(state.current_phase, Phase::Done);
+        state.current_stage = Stage::ReviewRound(2);
+        execute_transition(&mut state, Stage::Simplification(2)).unwrap();
+        execute_transition(&mut state, Stage::FinalValidation(2)).unwrap();
+        assert_eq!(state.current_stage, Stage::FinalValidation(2));
+        execute_transition(&mut state, Stage::Done).unwrap();
+        assert_eq!(state.current_stage, Stage::Done);
     });
 }
 
@@ -231,27 +230,27 @@ fn enter_final_validation_increments_attempts_for_first_three_entries() {
         let mut state = SessionState::new("fv-cap-increment".to_string());
         assert_eq!(state.validation_attempts, 0);
 
-        state.current_phase = Phase::ReviewRound(1);
-        execute_transition(&mut state, Phase::Simplification(1)).unwrap();
+        state.current_stage = Stage::ReviewRound(1);
+        execute_transition(&mut state, Stage::Simplification(1)).unwrap();
         let outcome = enter_final_validation(&mut state, 1).unwrap();
         assert_eq!(outcome, FinalValidationEntry::Entered { attempt: 1 });
-        assert_eq!(state.current_phase, Phase::FinalValidation(1));
+        assert_eq!(state.current_stage, Stage::FinalValidation(1));
         assert_eq!(state.validation_attempts, 1);
 
-        execute_transition(&mut state, Phase::ImplementationRound(2)).unwrap();
-        execute_transition(&mut state, Phase::ReviewRound(2)).unwrap();
-        execute_transition(&mut state, Phase::Simplification(2)).unwrap();
+        execute_transition(&mut state, Stage::ImplementationRound(2)).unwrap();
+        execute_transition(&mut state, Stage::ReviewRound(2)).unwrap();
+        execute_transition(&mut state, Stage::Simplification(2)).unwrap();
         let outcome = enter_final_validation(&mut state, 2).unwrap();
         assert_eq!(outcome, FinalValidationEntry::Entered { attempt: 2 });
         assert_eq!(state.validation_attempts, 2);
 
-        execute_transition(&mut state, Phase::ImplementationRound(3)).unwrap();
-        execute_transition(&mut state, Phase::ReviewRound(3)).unwrap();
-        execute_transition(&mut state, Phase::Simplification(3)).unwrap();
+        execute_transition(&mut state, Stage::ImplementationRound(3)).unwrap();
+        execute_transition(&mut state, Stage::ReviewRound(3)).unwrap();
+        execute_transition(&mut state, Stage::Simplification(3)).unwrap();
         let outcome = enter_final_validation(&mut state, 3).unwrap();
         assert_eq!(outcome, FinalValidationEntry::Entered { attempt: 3 });
         assert_eq!(state.validation_attempts, 3);
-        assert_eq!(state.current_phase, Phase::FinalValidation(3));
+        assert_eq!(state.current_stage, Stage::FinalValidation(3));
     });
 }
 
@@ -260,13 +259,13 @@ fn enter_final_validation_caps_fourth_entry_into_blocked() {
     with_temp_root(|| {
         let mut state = SessionState::new("fv-cap-block".to_string());
         state.validation_attempts = VALIDATION_ATTEMPT_CAP;
-        state.current_phase = Phase::Simplification(4);
+        state.current_stage = Stage::Simplification(4);
 
         let outcome = enter_final_validation(&mut state, 4).unwrap();
 
         assert_eq!(outcome, FinalValidationEntry::CapExceeded);
         assert_eq!(state.validation_attempts, VALIDATION_ATTEMPT_CAP);
-        assert_eq!(state.current_phase, Phase::BlockedNeedsUser);
+        assert_eq!(state.current_stage, Stage::BlockedNeedsUser);
         assert_eq!(state.block_origin, Some(BlockOrigin::FinalValidation));
     });
 }
@@ -275,11 +274,11 @@ fn enter_final_validation_caps_fourth_entry_into_blocked() {
 fn block_origin_simplification_does_not_unlock_force_ship() {
     with_temp_root(|| {
         let mut state = SessionState::new("force-ship-simplification".to_string());
-        state.current_phase = Phase::BlockedNeedsUser;
+        state.current_stage = Stage::BlockedNeedsUser;
         state.block_origin = Some(BlockOrigin::Simplification);
-        let err = execute_transition(&mut state, Phase::Done).expect_err("expected guard failure");
+        let err = execute_transition(&mut state, Stage::Done).expect_err("expected guard failure");
         assert!(format!("{err:#}").contains("force-ship"));
-        assert_eq!(state.current_phase, Phase::BlockedNeedsUser);
+        assert_eq!(state.current_stage, Stage::BlockedNeedsUser);
     });
 }
 
@@ -287,20 +286,20 @@ fn block_origin_simplification_does_not_unlock_force_ship() {
 fn enter_simplification_increments_per_round_counter() {
     with_temp_root(|| {
         let mut state = SessionState::new("simplify-counter".to_string());
-        state.current_phase = Phase::ReviewRound(1);
+        state.current_stage = Stage::ReviewRound(1);
         let outcome = enter_simplification(&mut state, 1).unwrap();
         assert_eq!(outcome, SimplificationEntry::Entered { attempt: 1 });
-        assert_eq!(state.current_phase, Phase::Simplification(1));
+        assert_eq!(state.current_stage, Stage::Simplification(1));
         assert_eq!(state.simplification_attempts.get(&1).copied(), Some(1));
 
-        execute_transition(&mut state, Phase::ReviewRound(1)).unwrap();
+        execute_transition(&mut state, Stage::ReviewRound(1)).unwrap();
         let outcome = enter_simplification(&mut state, 1).unwrap();
         assert_eq!(outcome, SimplificationEntry::Entered { attempt: 2 });
         assert_eq!(state.simplification_attempts.get(&1).copied(), Some(2));
 
-        execute_transition(&mut state, Phase::FinalValidation(1)).unwrap();
-        execute_transition(&mut state, Phase::ImplementationRound(2)).unwrap();
-        execute_transition(&mut state, Phase::ReviewRound(2)).unwrap();
+        execute_transition(&mut state, Stage::FinalValidation(1)).unwrap();
+        execute_transition(&mut state, Stage::ImplementationRound(2)).unwrap();
+        execute_transition(&mut state, Stage::ReviewRound(2)).unwrap();
         let outcome = enter_simplification(&mut state, 2).unwrap();
         assert_eq!(outcome, SimplificationEntry::Entered { attempt: 1 });
         assert_eq!(state.simplification_attempts.get(&2).copied(), Some(1));
@@ -314,7 +313,7 @@ fn enter_simplification_caps_fourth_entry_into_blocked() {
         state
             .simplification_attempts
             .insert(4, SIMPLIFICATION_ATTEMPT_CAP);
-        state.current_phase = Phase::ReviewRound(4);
+        state.current_stage = Stage::ReviewRound(4);
 
         let outcome = enter_simplification(&mut state, 4).unwrap();
 
@@ -323,33 +322,33 @@ fn enter_simplification_caps_fourth_entry_into_blocked() {
             state.simplification_attempts.get(&4).copied(),
             Some(SIMPLIFICATION_ATTEMPT_CAP)
         );
-        assert_eq!(state.current_phase, Phase::BlockedNeedsUser);
+        assert_eq!(state.current_stage, Stage::BlockedNeedsUser);
         assert_eq!(state.block_origin, Some(BlockOrigin::Simplification));
     });
 }
 
 #[test]
-fn enter_simplification_rejects_illegal_source_phase() {
+fn enter_simplification_rejects_illegal_source_stage() {
     with_temp_root(|| {
         let mut state = SessionState::new("simplify-illegal-source".to_string());
-        state.current_phase = Phase::PlanningRunning;
+        state.current_stage = Stage::PlanningRunning;
 
         let err = enter_simplification(&mut state, 1).expect_err("must reject");
         assert!(format!("{err:#}").contains("Cannot transition"));
         assert!(!state.simplification_attempts.contains_key(&1));
-        assert_eq!(state.current_phase, Phase::PlanningRunning);
+        assert_eq!(state.current_stage, Stage::PlanningRunning);
     });
 }
 
 #[test]
-fn enter_final_validation_rejects_illegal_source_phase() {
+fn enter_final_validation_rejects_illegal_source_stage() {
     with_temp_root(|| {
         let mut state = SessionState::new("fv-illegal-source".to_string());
-        state.current_phase = Phase::IdeaInput;
+        state.current_stage = Stage::IdeaInput;
 
         let err = enter_final_validation(&mut state, 1).expect_err("must reject");
         assert!(format!("{err:#}").contains("Cannot transition"));
         assert_eq!(state.validation_attempts, 0);
-        assert_eq!(state.current_phase, Phase::IdeaInput);
+        assert_eq!(state.current_stage, Stage::IdeaInput);
     });
 }

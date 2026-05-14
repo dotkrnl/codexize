@@ -421,11 +421,11 @@ mod tests {
         let p = dir.path().join("config.toml");
         let _g = EnvGuard::install(&p);
         run_set("ntfy.detail_mode", "minimal", &mut out_string()).unwrap();
-        run_set("ntfy.events.phase_wait", "false", &mut out_string()).unwrap();
+        run_set("ntfy.events.stage_wait", "false", &mut out_string()).unwrap();
         run_reset(Some("ntfy"), true, true, &mut out_string()).unwrap();
         let on_disk = std::fs::read_to_string(&p).unwrap();
         assert!(!on_disk.contains("detail_mode"));
-        assert!(!on_disk.contains("phase_wait"));
+        assert!(!on_disk.contains("stage_wait"));
     }
 
     #[test]

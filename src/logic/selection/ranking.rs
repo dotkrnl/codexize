@@ -1,36 +1,36 @@
-use super::config::SelectionPhase;
+use super::config::SelectionStage;
 #[cfg(test)]
 use super::types::SubscriptionKind;
 use super::types::{CachedModel, ScoreSource};
 const RANK_SOFTMAX_TEMPERATURE: f64 = 5.5;
 const UNKNOWN_QUOTA_PERCENT: u8 = 30;
 pub type CandidateRef<'a> = &'a CachedModel;
-/// Return the authoritative ipbr rank score for `phase`, if this model has one.
-pub fn phase_rank_score(model: &CachedModel, phase: SelectionPhase) -> Option<f64> {
+/// Return the authoritative ipbr rank score for `stage`, if this model has one.
+pub fn stage_rank_score(model: &CachedModel, stage: SelectionStage) -> Option<f64> {
     if model.score_source != ScoreSource::Ipbr {
         return None;
     }
-    match phase {
-        SelectionPhase::Idea => model.ipbr_phase_scores.idea,
-        SelectionPhase::Planning => model.ipbr_phase_scores.planning,
-        SelectionPhase::Build => model.ipbr_phase_scores.build,
-        SelectionPhase::Review => model.ipbr_phase_scores.review,
+    match stage {
+        SelectionStage::Idea => model.ipbr_stage_scores.idea,
+        SelectionStage::Planning => model.ipbr_stage_scores.planning,
+        SelectionStage::Build => model.ipbr_stage_scores.build,
+        SelectionStage::Review => model.ipbr_stage_scores.review,
     }
 }
 /// Return pool-scoped sampling weights in the same order as `candidates`.
 ///
 /// Per spec §"Selection algorithm" (operator decision, 2026-05-09): the
-/// sampler weights combine the dashboard ipbr phase score with the row's
+/// sampler weights combine the dashboard ipbr stage score with the row's
 /// effective quota across enabled providers. Free / quota_disabled providers
 /// therefore push the row to 100% headroom in the sampler even when no
 /// fetched quota exists, while a row with only fetched providers carries
 /// their actual remaining quota.
-pub fn candidate_pool_weights(candidates: &[CandidateRef<'_>], phase: SelectionPhase) -> Vec<f64> {
+pub fn candidate_pool_weights(candidates: &[CandidateRef<'_>], stage: SelectionStage) -> Vec<f64> {
     // Keep output parallel to the input slice; ineligible candidates are "dropped" as zero weights.
     let mut weights = vec![0.0; candidates.len()];
     let mut survivors = Vec::new();
     for (index, model) in candidates.iter().enumerate() {
-        let Some(score) = phase_rank_score(model, phase) else {
+        let Some(score) = stage_rank_score(model, stage) else {
             continue;
         };
         let Some(effective_quota) = effective_row_quota(model) else {

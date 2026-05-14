@@ -25,7 +25,7 @@ pub struct NtfyView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NtfyEventsView {
-    pub phase_wait: bool,
+    pub stage_wait: bool,
     pub interactive_wait: bool,
     pub pipeline_done: bool,
 }
@@ -108,7 +108,7 @@ impl Config {
             body_max_bytes: *n.body_max_bytes.value(),
             excerpt_max_chars: *n.excerpt_max_chars.value(),
             events: NtfyEventsView {
-                phase_wait: *n.events.phase_wait.value(),
+                stage_wait: *n.events.stage_wait.value(),
                 interactive_wait: *n.events.interactive_wait.value(),
                 pipeline_done: *n.events.pipeline_done.value(),
             },

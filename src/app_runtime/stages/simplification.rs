@@ -3,8 +3,8 @@ use crate::app::models::subscription_tag;
 use crate::app::prompts::{read_review_scope, simplifier_prompt};
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
-use crate::selection::config::SelectionPhase;
-use crate::state::{self as session_state, Phase};
+use crate::selection::config::SelectionStage;
+use crate::state::{self as session_state, Stage};
 use anyhow::Result;
 impl App {
     pub(crate) fn launch_simplifier_with_model(
@@ -15,7 +15,7 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Phase::Simplification(round) = self.state.current_phase else {
+        let Stage::Simplification(round) = self.state.current_stage else {
             return false;
         };
         let session_id = self.state.session_id.clone();
@@ -42,9 +42,9 @@ impl App {
             return false;
         }
         let modes = self.state.launch_modes();
-        // SelectionPhase::Build matches the coder's effort dial so
+        // SelectionStage::Build matches the coder's effort dial so
         // the simplifier inherits the same "normal vs. tough" wiring.
-        let effort = modes.effort_for(EffortLevel::Normal, SelectionPhase::Build);
+        let effort = modes.effort_for(EffortLevel::Normal, SelectionStage::Build);
         // Model selection precedence (spec §2.3, Q5/b):
         //   1. explicit operator override (retry from picker);
         //   2. an already-selected simplifier run for this round (retry
@@ -70,7 +70,7 @@ impl App {
             .or_else(|| self.round_stage_model("simplifier", round))
             .or_else(|| self.round_stage_model("coder", round))
             .or_else(|| {
-                self.choose_primary_model(None, SelectionPhase::Build, effort, modes.cheap)
+                self.choose_primary_model(None, SelectionStage::Build, effort, modes.cheap)
             });
         let Some((model, subscription_tag, cli, launch_name, effort_mapping, effort_eligible)) =
             chosen
@@ -183,7 +183,7 @@ impl App {
             }
         }
     }
-    /// Co-located success-finalization for `Phase::Simplification(round)`.
+    /// Co-located success-finalization for `Stage::Simplification(round)`.
     ///
     /// The artifact-validation gate above has already accepted the
     /// simplification TOML; on success we hand control to FinalValidation.

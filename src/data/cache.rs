@@ -1,5 +1,5 @@
 use crate::data::cache_lock;
-use crate::selection::{IpbrPhaseScores, ScoreSource, SubscriptionKind};
+use crate::selection::{IpbrStageScores, ScoreSource, SubscriptionKind};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -50,11 +50,11 @@ pub struct Section<T> {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DashboardEntry {
     pub name: String,
-    /// Per-phase ipbr rank scores. `None` per phase means the matched
-    /// ipbr row did not provide that phase score.
+    /// Per-stage ipbr rank scores. `None` per stage means the matched
+    /// ipbr row did not provide that stage score.
     #[serde(default)]
-    pub ipbr_phase_scores: IpbrPhaseScores,
-    /// Provenance marker for the per-phase scores. Defaults to
+    pub ipbr_stage_scores: IpbrStageScores,
+    /// Provenance marker for the per-stage scores. Defaults to
     /// `ScoreSource::None` so a missing field cannot be interpreted as
     /// `Ipbr` authority.
     #[serde(default)]
@@ -131,7 +131,8 @@ pub fn load(dir: &Path) -> LoadedCache {
     };
     // Dashboard and quota payloads are only trusted when the cache file is the
     // current schema version. Quota-reset shape is stable.
-    let dashboard_section = parse_if_current::<Section<Vec<DashboardEntry>>>(&parsed, parsed.dashboard.clone());
+    let dashboard_section =
+        parse_if_current::<Section<Vec<DashboardEntry>>>(&parsed, parsed.dashboard.clone());
     let quota_section = parse_if_current::<Section<QuotaPayload>>(&parsed, parsed.quotas.clone());
     let now = now_secs();
     LoadedCache {
@@ -206,7 +207,8 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
     };
     // Same per-section policy as `load`: only current-version dashboard and
     // quota payloads are trusted. Quota-reset shape is stable.
-    let dashboard = parse_if_current::<Section<Vec<DashboardEntry>>>(&parsed, parsed.dashboard.clone());
+    let dashboard =
+        parse_if_current::<Section<Vec<DashboardEntry>>>(&parsed, parsed.dashboard.clone());
     let quotas = parse_if_current::<Section<QuotaPayload>>(&parsed, parsed.quotas.clone());
     CacheFile {
         version: CACHE_VERSION,

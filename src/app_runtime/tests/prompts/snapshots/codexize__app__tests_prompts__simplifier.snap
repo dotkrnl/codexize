@@ -68,7 +68,7 @@ Workspace hygiene (same as the coder follows):
   - Never `git add -f`. `.gitignore`d paths stay out of the commit; if
     every candidate edit is ignored, skip the commit entirely.
   - Commit messages stand alone — no orchestrator vocabulary ("task N",
-    "round N", "plan", "shard", "phase", "simplifier") or prompt references.
+    "round N", "plan", "shard", "stage", "simplifier") or prompt references.
 
 Write `/tmp/codexize-prompt-fixture/session/rounds/001/simplification.toml` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
 

@@ -14,7 +14,7 @@ pub use crate::logic::selection::{config, display, ranking, subscription, types}
 pub use config::*;
 #[allow(clippy::module_inception)]
 pub mod selection {
-    use crate::adapters::EffortLevel;
+    use crate::data::adapters::EffortLevel;
     use crate::logic::selection::types::{CachedModel, SubscriptionKind};
     use crate::logic::selection::{SelectionStage, selection as pure};
     fn sample_seed() -> u64 {

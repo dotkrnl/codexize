@@ -86,8 +86,8 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         pending_yolo_toggle_gate: None,
         yolo_exit_issued: std::collections::HashSet::new(),
         yolo_exit_observations: HashMap::new(),
-        runner_supervisor: crate::runner::Supervisor::shared_for_test(),
-        runner_config: crate::runner::RunnerConfig::default(),
+        runner_supervisor: crate::data::runner::Supervisor::shared_for_test(),
+        runner_config: crate::data::runner::RunnerConfig::default(),
         notification_runtime: crate::data::notifications::NotificationRuntime::new_disabled(),
         interactive_wait_marker: None,
         config,
@@ -113,7 +113,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         .iter()
         .filter(|run| run.status == RunStatus::Running)
     {
-        crate::runner::register_test_run_id(&run.window_name, run.id);
+        crate::data::runner::register_test_run_id(&run.window_name, run.id);
     }
     app
 }
@@ -136,7 +136,7 @@ fn run_record(id: u64, status: RunStatus) -> RunRecord {
         },
         status,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -1775,7 +1775,7 @@ fn interactive_split_owned_input_still_renders_footer_sheet() {
     app.state.current_stage = crate::state::Stage::BrainstormRunning;
     app.split_target = Some(super::super::split::SplitTarget::Run(7));
     app.input_mode = true;
-    crate::runner::request_run_label_interactive_input_for_test("[Run 7]");
+    crate::data::runner::request_run_label_interactive_input_for_test("[Run 7]");
 
     let text = full_frame_text(&mut app, 80, 24);
 

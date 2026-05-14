@@ -2,12 +2,12 @@ use super::helpers as picker_view_model;
 use crate::app::palette::{self, PaletteCommand, PaletteState};
 use crate::app::{Capability, KeyBinding, Severity, StatusLine, bottom_sheet, render_keymap_line};
 use crate::state::{self as session_state, Modes, SessionState, Stage};
-use crate::tui::{AppTerminal, wrap_text};
 use crate::ui::chrome::{
     bottom_rule,
     modal::{render_modal_backdrop, render_modal_overlay},
     top_rule_with_left_spans,
 };
+use crate::ui::tui::{AppTerminal, wrap_text};
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
@@ -133,7 +133,7 @@ impl SessionPicker {
                             KeyAction::Quit => return Ok(None),
                         }
                     }
-                    Event::Paste(text) if self.input_mode => crate::input_editor::insert_str(
+                    Event::Paste(text) if self.input_mode => crate::ui::input_editor::insert_str(
                         &mut self.input_buffer,
                         &mut self.input_cursor,
                         &text,
@@ -471,7 +471,7 @@ impl SessionPicker {
             }
             _ => {}
         }
-        let _ = crate::input_editor::apply(&mut self.input_buffer, &mut self.input_cursor, key);
+        let _ = crate::ui::input_editor::apply(&mut self.input_buffer, &mut self.input_cursor, key);
         Ok(KeyAction::Continue)
     }
     fn handle_select(&self) -> KeyAction {

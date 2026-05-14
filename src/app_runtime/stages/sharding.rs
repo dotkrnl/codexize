@@ -1,6 +1,6 @@
-use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::sharding_prompt;
 use crate::app::{App, guard};
+use crate::data::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Stage};
 use crate::tasks;

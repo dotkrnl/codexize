@@ -148,7 +148,7 @@ fn retry_selected_target_for_task_row_rewinds_to_implementation_round() {
             ended_at: Some(started_at),
             status: crate::state::RunStatus::Failed,
             error: Some("boom".to_string()),
-            effort: crate::adapters::EffortLevel::Normal,
+            effort: crate::data::adapters::EffortLevel::Normal,
             effort_mapping: crate::data::config::schema::EffortMapping::default(),
             effort_eligible: false,
             modes: crate::state::LaunchModes::default(),

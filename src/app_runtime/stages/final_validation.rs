@@ -1,8 +1,9 @@
-use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::models::subscription_tag;
 use crate::app::prompts::final_validation_prompt;
 use crate::app::{App, guard};
-use crate::final_validation::{self, DreamRecommendation, ValidationStatus};
+use crate::data::adapters::{AgentRun, EffortLevel, run_label_with_model};
+use crate::data::validation as final_validation;
+use crate::data::validation::{DreamRecommendation, ValidationStatus};
 use crate::selection::CachedModel;
 use crate::selection::config::SelectionStage;
 use crate::state::{self as session_state, DreamingDecision, DreamingDecisionKind, Stage};
@@ -128,7 +129,10 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&verdict_path),
-                crate::acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
+                crate::data::acp::AcpLaunchPolicy::final_validation(
+                    &verdict_path,
+                    &live_summary_path,
+                ),
             )
         };
         match launch_result {
@@ -217,8 +221,8 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::EffortLevel;
     use crate::app::test_support::{key, mk_app};
+    use crate::data::adapters::EffortLevel;
     use crate::state::{
         DreamingDecision, DreamingDecisionKind, LaunchModes, RunRecord, RunStatus, SessionState,
     };

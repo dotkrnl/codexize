@@ -1,5 +1,5 @@
 use super::{LiveModel, build_http_client, fetch_json_response, home_dir, reset_time_from_object};
-use crate::runner::{ChildLaunch, run_child_with_timeout};
+use crate::data::runner::{ChildLaunch, run_child_with_timeout};
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use serde_json::Value;

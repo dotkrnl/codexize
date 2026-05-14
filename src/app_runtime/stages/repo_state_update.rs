@@ -15,13 +15,13 @@
 //!   session to `BlockedNeedsUser` with `BlockOrigin::RepoStateUpdate`.
 //!
 //! See spec § Repo-state update stage and AC-6.
-use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::{
     RepoStateUpdateCompletedSession, RepoStateUpdatePromptInputs, repo_state_update_prompt,
 };
 use crate::app::{App, guard};
-use crate::artifacts::ArtifactKind;
-use crate::repo_state_update::{RepoStateUpdateReport, RepoStateUpdateStatus};
+use crate::data::adapters::{AgentRun, EffortLevel, run_label_with_model};
+use crate::data::artifacts::ArtifactKind;
+use crate::data::repo_state_update::{RepoStateUpdateReport, RepoStateUpdateStatus};
 use crate::scheduler::{WaitingDispatch, decide_waiting_dispatch};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, BlockOrigin, Stage};
@@ -146,7 +146,7 @@ impl App {
         );
         let run_id = self.state.next_agent_run_id();
         let run_key = Self::run_key_for(STAGE, None, 1, attempt);
-        let policy = crate::acp::AcpLaunchPolicy::repo_state_update(
+        let policy = crate::data::acp::AcpLaunchPolicy::repo_state_update(
             &spec_path,
             &plan_path,
             &report_path,
@@ -269,7 +269,7 @@ impl App {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let artifacts = session_dir.join("artifacts");
         let report_path = artifacts.join(ArtifactKind::RepoStateUpdate.filename());
-        let report = crate::repo_state_update::validate(&report_path)
+        let report = crate::data::repo_state_update::validate(&report_path)
             .with_context(|| format!("invalid {}", report_path.display()))?;
         match report.status {
             RepoStateUpdateStatus::Implementable => {

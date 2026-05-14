@@ -1,7 +1,7 @@
-use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::models::subscription_tag;
 use crate::app::prompts::{read_review_scope, simplifier_prompt};
 use crate::app::{App, guard};
+use crate::data::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::selection::CachedModel;
 use crate::selection::config::SelectionStage;
 use crate::state::{self as session_state, Stage};
@@ -153,7 +153,10 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&simplification_path),
-                crate::acp::AcpLaunchPolicy::simplifier(&simplification_path, &live_summary_path),
+                crate::data::acp::AcpLaunchPolicy::simplifier(
+                    &simplification_path,
+                    &live_summary_path,
+                ),
             )
         };
         match launch_result {

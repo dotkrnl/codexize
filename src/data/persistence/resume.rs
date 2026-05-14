@@ -1,5 +1,5 @@
 //! Persisting resume flow that reads optional artifacts and logs progress.
-use crate::artifacts::{ArtifactKind, SkipToImplProposal};
+use crate::data::artifacts::{ArtifactKind, SkipToImplProposal};
 use crate::logic::pipeline::stage::Stage;
 use crate::state::{ResumeError, SessionState, can_resume, session_dir};
 /// Resume a session, logging the resumption event.

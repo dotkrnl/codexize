@@ -10,9 +10,9 @@
 use super::baked;
 use super::subscription;
 use super::types::{CachedModel, Candidate, CliKind, QuotaError, SubscriptionKind};
-use crate::cache::{DashboardEntry, QuotaPayload, ResetPayload};
-use crate::dashboard::DashboardModel;
+use crate::data::cache::{DashboardEntry, QuotaPayload, ResetPayload};
 use crate::data::config::schema::ProviderEntry;
+use crate::data::dashboard_io::DashboardModel;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 

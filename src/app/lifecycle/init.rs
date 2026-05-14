@@ -7,7 +7,7 @@ use super::super::{
     tree::{build_tree, current_node_index, node_key_at_path},
 };
 use crate::{
-    cache,
+    data::cache,
     state::{self as session_state, SessionState, Stage},
     tasks,
 };
@@ -53,7 +53,7 @@ impl App {
     ) -> Self {
         let ntfy_params =
             crate::data::notifications::NotificationParams::from_view(&config.ntfy_view());
-        let acp_config = crate::acp::AcpConfig::from_config_views(
+        let acp_config = crate::data::acp::AcpConfig::from_config_views(
             &config.acp.agents,
             &config.acp_install_view(),
         );
@@ -160,7 +160,7 @@ impl App {
             failed_models,
             next_run_model_override: None,
             runner_supervisor: app_runner_supervisor(&config),
-            runner_config: crate::runner::RunnerConfig {
+            runner_config: crate::data::runner::RunnerConfig {
                 full_review_interval: config.runner_view().full_review_interval,
             },
             pending_yolo_toggle_gate: None,
@@ -318,7 +318,7 @@ impl App {
                     if !name_str.ends_with(".toml") {
                         continue;
                     }
-                    if let Ok(stamp) = crate::runner::read_finish_stamp(&entry.path())
+                    if let Ok(stamp) = crate::data::runner::read_finish_stamp(&entry.path())
                         && let Ok(finished) =
                             chrono::DateTime::parse_from_rfc3339(&stamp.finished_at)
                     {
@@ -394,13 +394,13 @@ fn approximate_death_time(session_id: &str) -> chrono::DateTime<chrono::Utc> {
 #[cfg(test)]
 fn app_runner_supervisor(
     config: &std::sync::Arc<crate::data::config::Config>,
-) -> crate::runner::Supervisor {
+) -> crate::data::runner::Supervisor {
     let _ = config;
-    crate::runner::Supervisor::shared_for_test()
+    crate::data::runner::Supervisor::shared_for_test()
 }
 #[cfg(not(test))]
 fn app_runner_supervisor(
     config: &std::sync::Arc<crate::data::config::Config>,
-) -> crate::runner::Supervisor {
-    crate::runner::Supervisor::new(config.clone())
+) -> crate::data::runner::Supervisor {
+    crate::data::runner::Supervisor::new(config.clone())
 }

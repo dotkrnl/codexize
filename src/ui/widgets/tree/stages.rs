@@ -255,7 +255,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
             .iter()
             .filter(|r| r.task_id == Some(task_id))
             .chain(reviewer_runs.iter().filter(|r| r.task_id == Some(task_id)))
-            .any(|r| r.effort == crate::adapters::EffortLevel::Tough);
+            .any(|r| r.effort == crate::data::adapters::EffortLevel::Tough);
         let mut segments: Vec<RoundSegment<'_>> =
             segments_by_task.remove(&task_id).unwrap_or_default();
         if segments.is_empty() {

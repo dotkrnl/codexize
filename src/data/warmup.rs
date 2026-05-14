@@ -9,14 +9,14 @@ use std::{
     io::{Read, Write},
     time::{Duration, Instant},
 };
-pub struct WarmupSpec<'a> {
-    pub program: &'a str,
-    pub args: &'a [&'a str],
-    pub script: &'a str,
-    pub env: &'a [(&'a str, &'a str)],
-    pub settle_timeout: Duration,
+pub(crate) struct WarmupSpec<'a> {
+    pub(crate) program: &'a str,
+    pub(crate) args: &'a [&'a str],
+    pub(crate) script: &'a str,
+    pub(crate) env: &'a [(&'a str, &'a str)],
+    pub(crate) settle_timeout: Duration,
 }
-pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
+pub(crate) fn run(spec: WarmupSpec<'_>) -> Result<()> {
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {

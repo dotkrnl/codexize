@@ -30,6 +30,6 @@ pub mod snapshot;
 pub mod synthetic_artifacts;
 pub mod tmux;
 pub mod validation;
-pub mod warmup;
+pub(crate) mod warmup;
 pub use crate::data::events::{DataEvent, DataOutcome, DataRequest, dispatch};
 pub use crate::data::synthetic_artifacts as synthetic;

@@ -3,9 +3,8 @@ use clap::{Parser, Subcommand};
 use codexize::{
     app, app_shell,
     data::{app_lock, config::cli as config_cli},
-    picker, preflight,
     state::{self},
-    tui,
+    ui::{preflight, tui, widgets::picker::state as picker},
 };
 use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;

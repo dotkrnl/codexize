@@ -3,7 +3,7 @@
 //! accumulator that translates ACP `session/update` events into transcript
 //! writes. The supervisor in `runner::supervise` consumes these primitives;
 //! nothing here owns process lifecycle or finish-stamp policy.
-use crate::acp::{AcpResolvedLaunch, AcpTextAccumulator, AcpTextBoundary};
+use crate::data::acp::{AcpResolvedLaunch, AcpTextAccumulator, AcpTextBoundary};
 use crate::state::{Message, MessageKind, MessageSender, RunStatus, SessionState};
 #[cfg(test)]
 use std::cell::Cell;

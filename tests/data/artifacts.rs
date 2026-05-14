@@ -1,8 +1,8 @@
 use std::fs;
 use tempfile::tempdir;
 
-use codexize::artifacts::{ArtifactKind, SkipToImplProposal, Spec};
-use codexize::synthetic_artifacts::generate_synthetic_artifacts;
+use codexize::data::artifacts::{ArtifactKind, SkipToImplProposal, Spec};
+use codexize::data::synthetic_artifacts::generate_synthetic_artifacts;
 use codexize::tasks::TasksFile;
 
 #[test]

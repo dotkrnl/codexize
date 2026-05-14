@@ -15,7 +15,7 @@ fn run(id: u64, stage: &str, status: RunStatus) -> RunRecord {
         ended_at: None,
         status,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -191,7 +191,7 @@ fn test_collapse_review_single_round_multiple_attempts() {
         ended_at: Some(chrono::Utc::now()),
         status: RunStatus::Failed,
         error: Some("quota exceeded".to_string()),
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -212,7 +212,7 @@ fn test_collapse_review_single_round_multiple_attempts() {
         ended_at: Some(chrono::Utc::now()),
         status: RunStatus::Done,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -252,7 +252,7 @@ fn test_retry_success_collapses_to_done_for_simple_stage() {
         ended_at: Some(chrono::Utc::now()),
         status: RunStatus::Failed,
         error: Some("quota exceeded".to_string()),
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -273,7 +273,7 @@ fn test_retry_success_collapses_to_done_for_simple_stage() {
         ended_at: Some(chrono::Utc::now()),
         status: RunStatus::Done,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -305,7 +305,7 @@ fn test_retry_success_collapses_round_status_in_builder() {
         ended_at: Some(chrono::Utc::now()),
         status: RunStatus::Failed,
         error: Some("timeout".to_string()),
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -326,7 +326,7 @@ fn test_retry_success_collapses_round_status_in_builder() {
         ended_at: Some(chrono::Utc::now()),
         status: RunStatus::Done,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -377,7 +377,7 @@ fn failed_unverified_run_maps_to_distinct_node_status() {
             "failed_unverified: missing finish stamp at artifacts/run-finish/coder-t1-r1-a1.toml"
                 .to_string(),
         ),
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -427,7 +427,7 @@ fn builder_stage_orders_done_recovery_current_pending() {
         ended_at: None,
         status: RunStatus::Running,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -605,7 +605,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         ended_at: Some(chrono::Utc::now()),
         status: RunStatus::Done,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -626,7 +626,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         ended_at: Some(chrono::Utc::now()),
         status: RunStatus::Done,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -649,7 +649,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         ended_at: Some(chrono::Utc::now()),
         status: RunStatus::Done,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -670,7 +670,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         ended_at: Some(chrono::Utc::now()),
         status: RunStatus::Done,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -691,7 +691,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         ended_at: None,
         status: RunStatus::Running,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -1000,7 +1000,7 @@ fn node_keys_distinguish_duplicate_mode_labels_by_ancestry() {
         ended_at: Some(chrono::Utc::now()),
         status: RunStatus::Done,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -1021,7 +1021,7 @@ fn node_keys_distinguish_duplicate_mode_labels_by_ancestry() {
         ended_at: None,
         status: RunStatus::Running,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -1059,7 +1059,7 @@ fn flatten_visible_rows_hides_collapsed_descendants() {
         ended_at: None,
         status: RunStatus::Running,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -1110,7 +1110,7 @@ fn active_stage_paths_prefer_latest_running_leaf() {
         ended_at: None,
         status: RunStatus::Running,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -1131,7 +1131,7 @@ fn active_stage_paths_prefer_latest_running_leaf() {
         ended_at: None,
         status: RunStatus::Running,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -1160,7 +1160,7 @@ fn test_agent_run_node_tough_suffix() {
     use crate::data::config::schema::EffortMapping;
 
     let mut normal_run = run(1, "coder", RunStatus::Running);
-    normal_run.effort = crate::adapters::EffortLevel::Normal;
+    normal_run.effort = crate::data::adapters::EffortLevel::Normal;
     normal_run.effort_eligible = true;
     normal_run.effort_mapping = EffortMapping::new("low", "medium", "xhigh");
     let node = agent_run_node(&normal_run);
@@ -1171,7 +1171,7 @@ fn test_agent_run_node_tough_suffix() {
     );
 
     let mut tough_codex = run(2, "coder", RunStatus::Running);
-    tough_codex.effort = crate::adapters::EffortLevel::Tough;
+    tough_codex.effort = crate::data::adapters::EffortLevel::Tough;
     tough_codex.effort_eligible = true;
     tough_codex.effort_mapping = EffortMapping::new("low", "medium", "xhigh");
     let node = agent_run_node(&tough_codex);
@@ -1182,7 +1182,7 @@ fn test_agent_run_node_tough_suffix() {
     );
 
     let mut tough_claude = run(3, "coder", RunStatus::Running);
-    tough_claude.effort = crate::adapters::EffortLevel::Tough;
+    tough_claude.effort = crate::data::adapters::EffortLevel::Tough;
     tough_claude.effort_eligible = true;
     tough_claude.effort_mapping = EffortMapping::new("low", "medium", "max");
     let node = agent_run_node(&tough_claude);
@@ -1193,7 +1193,7 @@ fn test_agent_run_node_tough_suffix() {
     );
 
     let mut tough_gemini = run(4, "coder", RunStatus::Running);
-    tough_gemini.effort = crate::adapters::EffortLevel::Tough;
+    tough_gemini.effort = crate::data::adapters::EffortLevel::Tough;
     tough_gemini.effort_eligible = false;
     tough_gemini.effort_mapping = EffortMapping::default();
     let node = agent_run_node(&tough_gemini);
@@ -1204,7 +1204,7 @@ fn test_agent_run_node_tough_suffix() {
     );
 
     let mut low_codex = run(5, "coder", RunStatus::Running);
-    low_codex.effort = crate::adapters::EffortLevel::Low;
+    low_codex.effort = crate::data::adapters::EffortLevel::Low;
     low_codex.effort_eligible = true;
     low_codex.effort_mapping = EffortMapping::new("low", "medium", "xhigh");
     let node = agent_run_node(&low_codex);
@@ -1234,7 +1234,7 @@ fn test_task_node_tough_badge() {
         ended_at: Some(chrono::Utc::now()),
         status: RunStatus::Done,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
@@ -1247,7 +1247,7 @@ fn test_task_node_tough_badge() {
     let mut tough_run = normal_run;
     tough_run.id = 2;
     tough_run.task_id = Some(2);
-    tough_run.effort = crate::adapters::EffortLevel::Tough;
+    tough_run.effort = crate::data::adapters::EffortLevel::Tough;
     state.agent_runs.push(tough_run);
 
     let nodes = build_tree(&state);

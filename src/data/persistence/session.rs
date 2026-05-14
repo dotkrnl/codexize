@@ -4,7 +4,7 @@
 //! [`crate::state`] free of `std::fs`, `std::process`, and direct clock
 //! reads. The struct itself lives in `src/state/types.rs`; this file extends
 //! it with another `impl` block.
-use crate::adapters::EffortLevel;
+use crate::data::adapters::EffortLevel;
 use crate::logic::pipeline::stage::Stage;
 use crate::state::{
     Event, EventsFile, LaunchModes, Message, MessageKind, MessageSender, MessagesFile, RunRecord,

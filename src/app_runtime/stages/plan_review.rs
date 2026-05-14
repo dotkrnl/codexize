@@ -1,6 +1,6 @@
-use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::plan_review_prompt;
 use crate::app::{App, guard};
+use crate::data::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, MessageKind, RunStatus, Stage};
 use anyhow::Result;
@@ -12,10 +12,10 @@ impl App {
     /// `spec.md` during the session. Idempotent — silently skips
     /// appending an entry already in the operator's configured allowlist.
     pub(crate) fn plan_review_acp_policy(
-        mut policy: crate::acp::AcpLaunchPolicy,
+        mut policy: crate::data::acp::AcpLaunchPolicy,
         plan_path: &Path,
         spec_path: &Path,
-    ) -> crate::acp::AcpLaunchPolicy {
+    ) -> crate::data::acp::AcpLaunchPolicy {
         for path in [plan_path.to_path_buf(), spec_path.to_path_buf()] {
             if !policy.allowed_write_paths.contains(&path) {
                 policy.allowed_write_paths.push(path);
@@ -225,8 +225,8 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::App;
-    use crate::acp::AcpLaunchPolicy;
     use crate::app::test_support::{mk_app, with_temp_root};
+    use crate::data::acp::AcpLaunchPolicy;
     use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState, Stage};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::path::PathBuf;
@@ -245,7 +245,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
-            effort: crate::adapters::EffortLevel::Normal,
+            effort: crate::data::adapters::EffortLevel::Normal,
             effort_mapping: crate::data::config::schema::EffortMapping::default(),
             effort_eligible: false,
             modes: LaunchModes::default(),

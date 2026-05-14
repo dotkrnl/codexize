@@ -83,7 +83,7 @@ fn lines_text(lines: &[Line<'_>]) -> String {
 
 #[test]
 fn validation_report_renders_goal_met_summary_and_findings() {
-    use crate::final_validation::{ValidationStatus, ValidationVerdict};
+    use crate::data::validation::{ValidationStatus, ValidationVerdict};
     let verdict = ValidationVerdict {
         status: ValidationStatus::GoalMet,
         summary: "All goals achieved".to_string(),
@@ -101,7 +101,7 @@ fn validation_report_renders_goal_met_summary_and_findings() {
 
 #[test]
 fn validation_report_renders_dream_recommendation() {
-    use crate::final_validation::{DreamRecommendation, ValidationStatus, ValidationVerdict};
+    use crate::data::validation::{DreamRecommendation, ValidationStatus, ValidationVerdict};
     let verdict = ValidationVerdict {
         status: ValidationStatus::GoalMet,
         summary: "All goals achieved".to_string(),
@@ -118,7 +118,7 @@ fn validation_report_renders_dream_recommendation() {
 
 #[test]
 fn validation_report_renders_goal_gap_with_citations_and_tasks() {
-    use crate::final_validation::{Gap, ValidationStatus, ValidationVerdict, ValidatorGapTask};
+    use crate::data::validation::{Gap, ValidationStatus, ValidationVerdict, ValidatorGapTask};
     let verdict = ValidationVerdict {
         status: ValidationStatus::GoalGap,
         summary: "Missing retry logic".to_string(),
@@ -146,7 +146,7 @@ fn validation_report_renders_goal_gap_with_citations_and_tasks() {
 
 #[test]
 fn validation_report_renders_needs_human_with_gap_citations() {
-    use crate::final_validation::{Gap, ValidationStatus, ValidationVerdict};
+    use crate::data::validation::{Gap, ValidationStatus, ValidationVerdict};
     let verdict = ValidationVerdict {
         status: ValidationStatus::NeedsHuman,
         summary: "Operator must decide".to_string(),
@@ -171,7 +171,7 @@ fn validation_report_wraps_long_summary_to_width() {
     // Bug regression: a verdict whose summary exceeds the body width used
     // to render as a single overflowing line because
     // `final_validation_report_lines` ignored the available width.
-    use crate::final_validation::{ValidationStatus, ValidationVerdict};
+    use crate::data::validation::{ValidationStatus, ValidationVerdict};
     const WIDTH: usize = 30;
     let summary =
         "This is an intentionally long summary that should be wrapped across several rows"
@@ -204,7 +204,7 @@ fn validation_report_wraps_long_summary_to_width() {
 
 #[test]
 fn validation_report_wraps_long_finding_and_gap_description() {
-    use crate::final_validation::{Gap, ValidationStatus, ValidationVerdict};
+    use crate::data::validation::{Gap, ValidationStatus, ValidationVerdict};
     const WIDTH: usize = 30;
     let long_finding = "audited every module under src/ and verified each public API".to_string();
     let long_gap =

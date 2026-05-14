@@ -2780,9 +2780,9 @@ fn details_panel_lines(
     body.push(key_line);
     body.push(source_line);
     body.push(String::new());
-    body.extend(crate::tui::wrap_text(&value_line, inner_w));
+    body.extend(crate::ui::tui::wrap_text(&value_line, inner_w));
     body.push(String::new());
-    body.extend(crate::tui::wrap_text(meta.description, inner_w));
+    body.extend(crate::ui::tui::wrap_text(meta.description, inner_w));
 
     let max_body_lines = height.saturating_sub(2);
     for i in 0..max_body_lines {

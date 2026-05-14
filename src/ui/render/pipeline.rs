@@ -444,7 +444,7 @@ impl App {
         if !path.exists() {
             return Vec::new();
         }
-        let Ok(verdict) = crate::final_validation::validate(&path) else {
+        let Ok(verdict) = crate::data::validation::validate(&path) else {
             return Vec::new();
         };
         super::super::state::final_validation_report_lines(&verdict, indent, width)

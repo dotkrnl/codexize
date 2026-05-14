@@ -61,7 +61,7 @@ impl App {
             }
             _ => {}
         }
-        let _ = crate::input_editor::apply(&mut self.input_buffer, &mut self.input_cursor, key);
+        let _ = crate::ui::input_editor::apply(&mut self.input_buffer, &mut self.input_cursor, key);
         let _ = self.maybe_enter_command_mode_from_input_buffer();
         false
     }

@@ -11,12 +11,12 @@ mod viewport_layout;
 use super::prompts::*;
 use super::*;
 use crate::{
-    artifacts::{ArtifactKind, Spec},
+    data::artifacts::{ArtifactKind, Spec},
     state::{
         self as session_state, BlockOrigin, DreamingDecisionKind, MessageKind, RunStatus, Stage,
     },
     tasks,
-    tui::AppTerminal,
+    ui::tui::AppTerminal,
 };
 use anyhow::Result;
 use std::time::Duration;
@@ -266,7 +266,7 @@ impl App {
         path: &std::path::Path,
     ) {
         let banner_inserted = prepend_review_banner(path);
-        let _ = crate::tui::run_foreground(terminal, || {
+        let _ = crate::ui::tui::run_foreground(terminal, || {
             let _ = std::process::Command::new(
                 std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string()),
             )
@@ -1076,8 +1076,8 @@ impl App {
         session_state::clear_builder_recovery_context(&mut self.state);
     }
     pub fn accept_skip_to_implementation(&mut self) -> Result<()> {
-        use crate::artifacts::SkipToImplKind;
-        use crate::synthetic_artifacts::generate_synthetic_artifacts;
+        use crate::data::artifacts::SkipToImplKind;
+        use crate::data::synthetic_artifacts::generate_synthetic_artifacts;
         use anyhow::Context;
         let session_dir = self.session_dir();
         if self.state.skip_to_impl_kind == Some(SkipToImplKind::NothingToDo) {
@@ -1111,7 +1111,7 @@ impl App {
         Ok(())
     }
     pub fn decline_skip_to_implementation(&mut self) -> Result<()> {
-        use crate::artifacts::SkipToImplKind;
+        use crate::data::artifacts::SkipToImplKind;
         let kind = self.state.skip_to_impl_kind;
         session_state::clear_skip_to_impl_proposal(&mut self.state);
         let target = if kind == Some(SkipToImplKind::NothingToDo) {

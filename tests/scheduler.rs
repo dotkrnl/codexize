@@ -272,9 +272,12 @@ fn creating_session_lands_in_brainstorm_so_scheduler_can_continue() {
     // auto-launch path can fire — no implementation-lane dispatch should
     // occur from creation alone.
     with_temp_root(|sessions_root| {
-        let session_id =
-            codexize::picker::create_session("explore caching layer", Default::default(), None)
-                .expect("create");
+        let session_id = codexize::ui::widgets::picker::state::create_session(
+            "explore caching layer",
+            Default::default(),
+            None,
+        )
+        .expect("create");
         let state = SessionState::load(&session_id).expect("load");
         assert_eq!(state.current_stage, Stage::BrainstormRunning);
 
@@ -467,7 +470,7 @@ fn repo_state_update_policy_restricts_allowed_writes() {
     // spec.md, plan.md, the repo-state-update.toml report, the live summary,
     // and bounded memory updates. The policy's shell allowlist must allow
     // only read-only git inspection commands. Workspace must stay read-only.
-    use codexize::acp::{AcpLaunchPolicy, AcpShellCommandPolicy};
+    use codexize::data::acp::{AcpLaunchPolicy, AcpShellCommandPolicy};
     let policy = AcpLaunchPolicy::repo_state_update(
         std::path::Path::new("/s/artifacts/spec.md"),
         std::path::Path::new("/s/artifacts/plan.md"),

@@ -1,6 +1,6 @@
-use crate::adapters::EffortLevel;
 use crate::app::split::SplitTarget;
 use crate::app::test_support::{key, mk_app};
+use crate::data::adapters::EffortLevel;
 use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState, Stage};
 
 #[test]
@@ -34,7 +34,7 @@ fn synchronize_split_target_force_opens_interactive_prompt() {
     state.agent_runs.push(run);
 
     // Mock the run label to be waiting for input
-    crate::runner::request_run_label_interactive_input_for_test("test-run");
+    crate::data::runner::request_run_label_interactive_input_for_test("test-run");
 
     let mut app = mk_app(state);
     app.current_run_id = Some(42);
@@ -113,7 +113,7 @@ fn esc_in_interactive_prompt_closes_split_but_sync_reopens() {
         section_path: None,
     };
     state.agent_runs.push(run);
-    crate::runner::request_run_label_interactive_input_for_test("test-run");
+    crate::data::runner::request_run_label_interactive_input_for_test("test-run");
 
     let mut app = mk_app(state);
     app.current_run_id = Some(42);
@@ -161,7 +161,7 @@ fn interactive_split_input_routes_leading_colon_into_command_mode() {
         section_path: None,
     };
     state.agent_runs.push(run);
-    crate::runner::request_run_label_interactive_input_for_test("test-run");
+    crate::data::runner::request_run_label_interactive_input_for_test("test-run");
 
     let mut app = mk_app(state);
     app.current_run_id = Some(42);

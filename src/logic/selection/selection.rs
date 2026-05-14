@@ -2,7 +2,7 @@ use super::config::SelectionStage;
 use super::ranking::candidate_pool_weights;
 use super::subscription::{is_cheap_eligible, is_tough_eligible};
 use super::types::{CachedModel, SubscriptionKind};
-use crate::adapters::EffortLevel;
+use crate::data::adapters::EffortLevel;
 use std::cmp::Ordering;
 use std::ops::Deref;
 #[cfg(test)]

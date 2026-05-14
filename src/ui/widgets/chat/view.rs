@@ -119,7 +119,7 @@ fn format_timestamp(
         )
     }
 }
-use crate::tui::{strip_ansi, wrap_lines_with_prefix, wrap_text};
+use crate::ui::tui::{strip_ansi, wrap_lines_with_prefix, wrap_text};
 fn push_wrapped_span_line(
     lines: &mut Vec<Vec<Span<'static>>>,
     current: &mut Vec<Span<'static>>,

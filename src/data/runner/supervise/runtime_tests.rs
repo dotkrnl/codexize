@@ -1,5 +1,5 @@
 use super::*;
-use crate::acp::{
+use crate::data::acp::{
     AcpLaunchPolicy, AcpPermissionMode, AcpReasoningEffort, AcpResolvedLaunch, AcpResult,
     AcpSession, AcpSessionSpec, AcpSpawnSpec, ClientUpdate, PromptPayload,
 };

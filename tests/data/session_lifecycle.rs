@@ -18,7 +18,7 @@ fn sample_run(id: u64, status: RunStatus) -> RunRecord {
         ended_at: None,
         status,
         error: None,
-        effort: codexize::adapters::EffortLevel::Normal,
+        effort: codexize::data::adapters::EffortLevel::Normal,
         effort_mapping: codexize::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: LaunchModes::default(),

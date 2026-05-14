@@ -12,8 +12,8 @@ mod runtime;
 #[path = "supervise/tests_support.rs"]
 mod test_support;
 use super::transport::{AcpCancelReason, AcpInput, ManagedAcpLaunch};
-use crate::acp::AcpLaunchPolicy;
-use crate::adapters::AgentRun;
+use crate::data::acp::AcpLaunchPolicy;
+use crate::data::adapters::AgentRun;
 use anyhow::{Result, bail};
 use dashmap::DashMap;
 pub(in crate::data::runner) use launch::append_launch_cause;
@@ -403,7 +403,7 @@ impl Supervisor {
         interactive: bool,
         policy: AcpLaunchPolicy,
     ) -> Result<()> {
-        let acp_config = crate::acp::AcpConfig::from_config_views(
+        let acp_config = crate::data::acp::AcpConfig::from_config_views(
             &self.inner.config.acp.agents,
             &self.inner.config.acp_install_view(),
         );

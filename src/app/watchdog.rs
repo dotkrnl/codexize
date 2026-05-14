@@ -5,7 +5,7 @@
 //! runs, or write dashboard messages. Higher layers in `lifecycle.rs` /
 //! `observation.rs` apply the side effects when `evaluate(now)` returns
 //! `EmitWarning` or `EmitKill`.
-use crate::adapters::EffortLevel;
+use crate::data::adapters::EffortLevel;
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 use tokio::time::Instant;
 /// Identifier used by the watchdog to key per-run state. Mirrors the App's

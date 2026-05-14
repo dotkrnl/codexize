@@ -2,7 +2,7 @@ use super::*;
 use crate::app::chat_widget::ChatWidget;
 use crate::app::split::SplitTarget;
 use crate::state::Stage;
-use crate::tui::wrap_text;
+use crate::ui::tui::wrap_text;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 pub(crate) struct SplitWidget<'a> {

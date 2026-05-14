@@ -1,7 +1,7 @@
 // yolo_exit.rs
 use super::*;
 use crate::{
-    artifacts::{ArtifactKind, RecoveryArtifact, ReviewStatus},
+    data::artifacts::{ArtifactKind, RecoveryArtifact, ReviewStatus},
     state::{self as session_state, LaunchModes, RunRecord, Stage},
     tasks,
 };

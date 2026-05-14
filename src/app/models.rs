@@ -1,6 +1,6 @@
 use super::{App, state::ModelRefreshState, status_line::Severity};
 use crate::{
-    cache,
+    data::cache,
     data::config::schema::ProviderEntry,
     selection::{CachedModel, CliKind, QuotaError, SubscriptionKind},
 };
@@ -74,7 +74,7 @@ fn quota_error_summary(errors: &[QuotaError]) -> String {
 }
 impl App {
     fn available_clis(&self) -> BTreeSet<CliKind> {
-        crate::acp::AcpConfig::from_config_views(
+        crate::data::acp::AcpConfig::from_config_views(
             &self.config.acp.agents,
             &self.config.acp_install_view(),
         )

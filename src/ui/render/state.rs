@@ -1,7 +1,7 @@
 use crate::app::tree::VisibleNodeRow;
 use crate::app::{ModalKind, StageId};
 use crate::state::{NodeStatus, PendingGuardDecision};
-use crate::tui::{strip_ansi, wrap_lines_with_prefix, wrap_text};
+use crate::ui::tui::{strip_ansi, wrap_lines_with_prefix, wrap_text};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -45,11 +45,11 @@ pub(crate) fn status_highlight_bg(status: NodeStatus) -> Option<Color> {
 /// Continuation lines indent to match the visual prefix on the first line so
 /// wrapped bullets stay column-aligned with their first row.
 pub fn final_validation_report_lines(
-    verdict: &crate::final_validation::ValidationVerdict,
+    verdict: &crate::data::validation::ValidationVerdict,
     indent: &str,
     width: usize,
 ) -> Vec<Line<'static>> {
-    use crate::final_validation::ValidationStatus;
+    use crate::data::validation::ValidationStatus;
     let dim = Style::default().fg(Color::DarkGray);
     let bold = Style::default().add_modifier(Modifier::BOLD);
     let cyan = Style::default().fg(Color::Cyan);
@@ -109,8 +109,8 @@ pub fn final_validation_report_lines(
     }
     if let Some(recommendation) = &verdict.dream_recommendation {
         let recommendation = match recommendation {
-            crate::final_validation::DreamRecommendation::Suggest => "suggest",
-            crate::final_validation::DreamRecommendation::Skip => "skip",
+            crate::data::validation::DreamRecommendation::Suggest => "suggest",
+            crate::data::validation::DreamRecommendation::Skip => "skip",
         };
         push_wrapped_field(
             &mut lines,
@@ -222,10 +222,10 @@ pub fn sanitize_live_summary(text: &str) -> String {
 }
 pub(crate) fn skip_to_impl_content(
     rationale: Option<&str>,
-    kind: Option<crate::artifacts::SkipToImplKind>,
+    kind: Option<crate::data::artifacts::SkipToImplKind>,
     width: u16,
 ) -> Vec<Line<'static>> {
-    use crate::artifacts::SkipToImplKind;
+    use crate::data::artifacts::SkipToImplKind;
     let is_nothing = kind == Some(SkipToImplKind::NothingToDo);
     let header = if is_nothing {
         "The brainstorm agent found nothing to implement."

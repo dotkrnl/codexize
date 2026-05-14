@@ -353,7 +353,7 @@ impl App {
     }
     pub(crate) fn handle_paste(&mut self, text: &str) {
         if self.palette.open {
-            crate::input_editor::insert_str(
+            crate::ui::input_editor::insert_str(
                 &mut self.palette.buffer,
                 &mut self.palette.cursor,
                 text,
@@ -373,14 +373,14 @@ impl App {
         }
         self.input_mode = true;
         if self.maybe_enter_command_mode_from_input_buffer() {
-            crate::input_editor::insert_str(
+            crate::ui::input_editor::insert_str(
                 &mut self.palette.buffer,
                 &mut self.palette.cursor,
                 text,
             );
             return;
         }
-        crate::input_editor::insert_str(&mut self.input_buffer, &mut self.input_cursor, text);
+        crate::ui::input_editor::insert_str(&mut self.input_buffer, &mut self.input_cursor, text);
         let _ = self.maybe_enter_command_mode_from_input_buffer();
     }
 }

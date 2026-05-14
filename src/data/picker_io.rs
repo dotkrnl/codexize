@@ -1,8 +1,8 @@
 use crate::{
     data::session_index,
-    picker::SessionEntry,
     scheduler::ScannedSession,
     state::{self, SessionState, Stage},
+    ui::widgets::picker::state::SessionEntry,
 };
 use anyhow::Result;
 use std::fs;

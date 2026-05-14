@@ -1,6 +1,6 @@
-use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::planning_prompt;
 use crate::app::{App, guard};
+use crate::data::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Stage};
 use anyhow::Result;
@@ -185,7 +185,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
-            effort: crate::adapters::EffortLevel::Normal,
+            effort: crate::data::adapters::EffortLevel::Normal,
             effort_mapping: crate::data::config::schema::EffortMapping::default(),
             effort_eligible: false,
             modes: LaunchModes {

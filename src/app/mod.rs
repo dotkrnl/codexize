@@ -51,7 +51,7 @@ mod yolo_exit;
 pub(crate) use self::state::ModelRefreshState;
 use self::tree::{NodeKey, VisibleNodeRow};
 use crate::{
-    cache,
+    data::cache,
     selection::{CachedModel, QuotaError, SubscriptionKind},
     state::{Message, Node, SessionState},
 };
@@ -330,10 +330,10 @@ pub struct App {
     pub(crate) pending_yolo_toggle_gate: Option<&'static str>,
     pub(crate) yolo_exit_issued: HashSet<u64>,
     pub(crate) yolo_exit_observations: HashMap<u64, YoloExitObservation>,
-    pub(crate) runner_supervisor: crate::runner::Supervisor,
+    pub(crate) runner_supervisor: crate::data::runner::Supervisor,
     /// Runner-level operator knobs (full-alignment cadence, etc.).
     /// Populated from `config.runner_view()` at construction time.
-    pub(crate) runner_config: crate::runner::RunnerConfig,
+    pub(crate) runner_config: crate::data::runner::RunnerConfig,
     pub(crate) notification_runtime: crate::data::notifications::NotificationRuntime,
     pub(crate) interactive_wait_marker: Option<crate::data::notifications::InteractiveWaitMarker>,
     /// The loaded unified config, shared across subsystems. Every view

@@ -7,7 +7,7 @@ mod tool_call;
 pub fn client_updates_from_session_updates_for_test(
     values: impl IntoIterator<Item = serde_json::Value>,
     cwd: &std::path::Path,
-) -> Vec<crate::acp::ClientUpdate> {
+) -> Vec<crate::data::acp::ClientUpdate> {
     let mut map = tool_call::ToolCallMap::new();
     let mut boundary = dispatch::AcpBoundaryState::new();
     let mut out = std::collections::VecDeque::new();
@@ -29,7 +29,7 @@ pub use super::acp_events::{
     ClientUpdate, ToolCallActivityKind, translate_update,
 };
 use crate::{
-    adapters::EffortLevel, logic::memory::memory_glob_from_session_path, selection::CliKind,
+    data::adapters::EffortLevel, logic::memory::memory_glob_from_session_path, selection::CliKind,
     state::LaunchModes,
 };
 use std::collections::BTreeMap;

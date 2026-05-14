@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 
 use super::{CancelSignal, RunHandle, RunId, Supervisor};
-use crate::runner::transport::{AcpCancelReason, AcpInput};
+use crate::data::runner::transport::{AcpCancelReason, AcpInput};
 
 pub(in crate::data::runner) fn test_supervisor() -> &'static Supervisor {
     static SUPERVISOR: std::sync::OnceLock<Supervisor> = std::sync::OnceLock::new();

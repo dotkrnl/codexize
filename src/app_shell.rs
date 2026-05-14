@@ -344,7 +344,7 @@ impl AppShell {
         config: Arc<Config>,
         app_lock_guard: Option<AppLockGuard>,
     ) -> Result<Self> {
-        let sessions_root = crate::picker::sessions_root_for(&config);
+        let sessions_root = crate::ui::widgets::picker::state::sessions_root_for(&config);
         let focused_session_id = initial_state.session_id.clone();
         let mut supervisors = BTreeMap::new();
         let initial_supervisor =
@@ -434,7 +434,7 @@ impl AppShell {
 
     pub fn run_focused_terminal_app(
         &mut self,
-        terminal: &mut crate::tui::AppTerminal,
+        terminal: &mut crate::ui::tui::AppTerminal,
     ) -> Result<()> {
         use crate::app_runtime::terminal::{TerminalCommandOutcome, TerminalRuntime};
         use crate::ui::widgets::sidebar::view::render_sidebar;
@@ -1052,7 +1052,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
-            effort: crate::adapters::EffortLevel::Normal,
+            effort: crate::data::adapters::EffortLevel::Normal,
             effort_mapping: crate::data::config::schema::EffortMapping::default(),
             effort_eligible: false,
             modes: crate::state::LaunchModes::default(),
@@ -1067,7 +1067,7 @@ mod tests {
             .join("artifacts")
             .join("run-finish")
             .join(format!("{run_key}.toml"));
-        let stamp = crate::runner::FinishStamp {
+        let stamp = crate::data::runner::FinishStamp {
             finished_at: chrono::Utc::now().to_rfc3339(),
             exit_code: 0,
             head_before: "test-base".to_string(),
@@ -1076,7 +1076,7 @@ mod tests {
             signal_received: String::new(),
             working_tree_clean: true,
         };
-        crate::runner::write_finish_stamp(&stamp_path, &stamp).expect("write finish stamp");
+        crate::data::runner::write_finish_stamp(&stamp_path, &stamp).expect("write finish stamp");
     }
 
     fn write_tasks(session_id: &str) {

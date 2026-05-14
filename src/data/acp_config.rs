@@ -1,4 +1,4 @@
-use crate::acp::{
+use crate::data::acp::{
     AcpError, AcpLaunchPolicy, AcpLaunchRequest, AcpPermissionMode, AcpReasoningEffort,
     AcpResolvedLaunch, AcpResult, AcpSessionSpec, AcpShellCommandPolicy, AcpSpawnSpec,
 };
@@ -44,9 +44,9 @@ impl AcpConfig {
         let cwd = absolutize(&request.cwd)?;
         let policy = absolutize_policy(&request.policy)?;
         let reasoning_effort = match request.effective_effort {
-            crate::adapters::EffortLevel::Low => AcpReasoningEffort::Low,
-            crate::adapters::EffortLevel::Normal => AcpReasoningEffort::Medium,
-            crate::adapters::EffortLevel::Tough => AcpReasoningEffort::High,
+            crate::data::adapters::EffortLevel::Low => AcpReasoningEffort::Low,
+            crate::data::adapters::EffortLevel::Normal => AcpReasoningEffort::Medium,
+            crate::data::adapters::EffortLevel::Tough => AcpReasoningEffort::High,
         };
         let permission_mode = AcpPermissionMode::Code;
         let join = |paths: &[PathBuf]|
@@ -211,8 +211,8 @@ fn path_is_executable(path: &Path) -> bool {
     #[cfg(not(unix))] { true }
 }
 #[rustfmt::skip]
-fn effort_str(e: crate::adapters::EffortLevel) -> &'static str {
-    use crate::adapters::EffortLevel::*;
+fn effort_str(e: crate::data::adapters::EffortLevel) -> &'static str {
+    use crate::data::adapters::EffortLevel::*;
     match e { Low => "low", Normal => "normal", Tough => "tough" }
 }
 #[cfg(test)]

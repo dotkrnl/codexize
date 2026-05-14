@@ -126,8 +126,8 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
         pending_yolo_toggle_gate: None,
         yolo_exit_issued: HashSet::new(),
         yolo_exit_observations: HashMap::new(),
-        runner_supervisor: crate::runner::Supervisor::shared_for_test(),
-        runner_config: crate::runner::RunnerConfig::default(),
+        runner_supervisor: crate::data::runner::Supervisor::shared_for_test(),
+        runner_config: crate::data::runner::RunnerConfig::default(),
         notification_runtime: crate::data::notifications::NotificationRuntime::new_disabled(),
         interactive_wait_marker: None,
         config: std::sync::Arc::new(crate::data::config::Config::baked_defaults()),
@@ -151,7 +151,7 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
         .iter()
         .filter(|run| run.status == crate::state::RunStatus::Running)
     {
-        crate::runner::register_test_run_id(&run.window_name, run.id);
+        crate::data::runner::register_test_run_id(&run.window_name, run.id);
     }
     app.rebuild_visible_rows();
     app.restore_selection(app.selected_key.clone(), app.selected);

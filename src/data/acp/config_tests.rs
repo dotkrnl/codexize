@@ -1,5 +1,8 @@
 use super::*;
-use crate::{acp, adapters::EffortLevel, state::LaunchModes};
+use crate::{
+    data::{acp, adapters::EffortLevel},
+    state::LaunchModes,
+};
 
 // Driving the production launch path end-to-end. `assemble_universe`
 // produces the row + selected candidate; the `pick_cli_and_launch_name`

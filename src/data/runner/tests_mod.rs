@@ -2,7 +2,7 @@ use super::exit::*;
 use super::supervise::*;
 use super::transport::*;
 use super::*;
-use crate::acp::{AcpTextAccumulator, PromptPayload};
+use crate::data::acp::{AcpTextAccumulator, PromptPayload};
 use crate::state::{MessageKind, RunStatus, SessionState};
 use std::fs;
 use std::sync::{Mutex, OnceLock};
@@ -262,7 +262,7 @@ fn acp_text_stream_buffers_partial_text_until_paragraph_boundary() {
         ended_at: None,
         status: RunStatus::Running,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         hostname: None,
@@ -272,21 +272,21 @@ fn acp_text_stream_buffers_partial_text_until_paragraph_boundary() {
     });
     state.save().unwrap();
     let launch = ManagedAcpLaunch {
-        resolved: crate::acp::AcpResolvedLaunch {
+        resolved: crate::data::acp::AcpResolvedLaunch {
             cli: crate::selection::CliKind::Codex,
             interactive: true,
-            spawn: crate::acp::AcpSpawnSpec {
+            spawn: crate::data::acp::AcpSpawnSpec {
                 program: "true".to_string(),
                 args: Vec::new(),
                 env: std::collections::BTreeMap::new(),
             },
-            session: crate::acp::AcpSessionSpec {
+            session: crate::data::acp::AcpSessionSpec {
                 cwd: std::env::current_dir().unwrap(),
                 prompt: PromptPayload::Text("prompt".to_string()),
                 model: "model".to_string(),
-                reasoning_effort: crate::acp::AcpReasoningEffort::Medium,
-                permission_mode: crate::acp::AcpPermissionMode::Ask,
-                policy: crate::acp::AcpLaunchPolicy::default(),
+                reasoning_effort: crate::data::acp::AcpReasoningEffort::Medium,
+                permission_mode: crate::data::acp::AcpPermissionMode::Ask,
+                policy: crate::data::acp::AcpLaunchPolicy::default(),
                 metadata: std::collections::BTreeMap::new(),
             },
         },
@@ -327,21 +327,21 @@ fn acp_text_stream_buffers_partial_text_until_paragraph_boundary() {
 
 fn make_acp_test_launch(session_id: &str, window_name: &str, temp: &Path) -> ManagedAcpLaunch {
     ManagedAcpLaunch {
-        resolved: crate::acp::AcpResolvedLaunch {
+        resolved: crate::data::acp::AcpResolvedLaunch {
             cli: crate::selection::CliKind::Codex,
             interactive: true,
-            spawn: crate::acp::AcpSpawnSpec {
+            spawn: crate::data::acp::AcpSpawnSpec {
                 program: "true".to_string(),
                 args: Vec::new(),
                 env: std::collections::BTreeMap::new(),
             },
-            session: crate::acp::AcpSessionSpec {
+            session: crate::data::acp::AcpSessionSpec {
                 cwd: std::env::current_dir().unwrap(),
                 prompt: PromptPayload::Text("prompt".to_string()),
                 model: "model".to_string(),
-                reasoning_effort: crate::acp::AcpReasoningEffort::Medium,
-                permission_mode: crate::acp::AcpPermissionMode::Ask,
-                policy: crate::acp::AcpLaunchPolicy::default(),
+                reasoning_effort: crate::data::acp::AcpReasoningEffort::Medium,
+                permission_mode: crate::data::acp::AcpPermissionMode::Ask,
+                policy: crate::data::acp::AcpLaunchPolicy::default(),
                 metadata: std::collections::BTreeMap::new(),
             },
         },
@@ -368,7 +368,7 @@ fn seed_stream_session(session_id: &str, window_name: &str) {
         ended_at: None,
         status: RunStatus::Running,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         hostname: None,
@@ -416,13 +416,13 @@ fn acp_text_stream_start_new_message_splits_adjacent_logical_outputs() {
         &launch,
         "first logical output",
         MessageKind::AgentText,
-        crate::acp::AcpTextBoundary::StartNewMessage,
+        crate::data::acp::AcpTextBoundary::StartNewMessage,
     );
     stream.push_text_boundary(
         &launch,
         "second logical output",
         MessageKind::AgentText,
-        crate::acp::AcpTextBoundary::StartNewMessage,
+        crate::data::acp::AcpTextBoundary::StartNewMessage,
     );
     stream.finish_turn(&launch, MessageKind::AgentText);
 
@@ -453,13 +453,13 @@ fn acp_text_stream_continue_appends_within_stable_identity() {
         &launch,
         "hel",
         MessageKind::AgentText,
-        crate::acp::AcpTextBoundary::StartNewMessage,
+        crate::data::acp::AcpTextBoundary::StartNewMessage,
     );
     stream.push_text_boundary(
         &launch,
         "lo",
         MessageKind::AgentText,
-        crate::acp::AcpTextBoundary::Continue,
+        crate::data::acp::AcpTextBoundary::Continue,
     );
     stream.finish_turn(&launch, MessageKind::AgentText);
 
@@ -490,7 +490,7 @@ fn acp_text_stream_start_new_message_preserves_blank_line_splitting() {
         &launch,
         "first paragraph\n\nsecond paragraph",
         MessageKind::AgentText,
-        crate::acp::AcpTextBoundary::StartNewMessage,
+        crate::data::acp::AcpTextBoundary::StartNewMessage,
     );
     stream.finish_turn(&launch, MessageKind::AgentText);
 
@@ -521,19 +521,19 @@ fn acp_text_stream_boundary_finalizes_live_message_before_next_live_message() {
         &launch,
         "old live",
         MessageKind::AgentText,
-        crate::acp::AcpTextBoundary::StartNewMessage,
+        crate::data::acp::AcpTextBoundary::StartNewMessage,
     );
     stream.push_text_boundary(
         &launch,
         "new",
         MessageKind::AgentText,
-        crate::acp::AcpTextBoundary::StartNewMessage,
+        crate::data::acp::AcpTextBoundary::StartNewMessage,
     );
     stream.push_text_boundary(
         &launch,
         " live",
         MessageKind::AgentText,
-        crate::acp::AcpTextBoundary::Continue,
+        crate::data::acp::AcpTextBoundary::Continue,
     );
     stream.finish_turn(&launch, MessageKind::AgentText);
 
@@ -565,25 +565,25 @@ fn acp_text_stream_tool_call_boundaries_isolate_thought_and_agent_text() {
         &launch,
         "private thought",
         MessageKind::AgentThought,
-        crate::acp::AcpTextBoundary::StartNewMessage,
+        crate::data::acp::AcpTextBoundary::StartNewMessage,
     );
     agent.push_text_boundary(
         &launch,
         "pre-tool answer",
         MessageKind::AgentText,
-        crate::acp::AcpTextBoundary::StartNewMessage,
+        crate::data::acp::AcpTextBoundary::StartNewMessage,
     );
-    let tool_event = crate::acp::translate_update(
-        crate::acp::ClientUpdate::Text {
-            kind: crate::acp::ClientTextKind::Tool,
+    let tool_event = crate::data::acp::translate_update(
+        crate::data::acp::ClientUpdate::Text {
+            kind: crate::data::acp::ClientTextKind::Tool,
             text: "tool: exec(echo ok)".to_string(),
-            boundary: crate::acp::AcpTextBoundary::StartNewMessage,
+            boundary: crate::data::acp::AcpTextBoundary::StartNewMessage,
             identity: None,
         },
         true,
     )
     .expect("tool text event");
-    let crate::acp::AcpRuntimeEvent::Text(tool_text) = tool_event else {
+    let crate::data::acp::AcpRuntimeEvent::Text(tool_text) = tool_event else {
         panic!("tool call must translate to text");
     };
     thought.push_text_boundary(
@@ -596,7 +596,7 @@ fn acp_text_stream_tool_call_boundaries_isolate_thought_and_agent_text() {
         &launch,
         "post-tool answer",
         MessageKind::AgentText,
-        crate::acp::AcpTextBoundary::StartNewMessage,
+        crate::data::acp::AcpTextBoundary::StartNewMessage,
     );
     thought.finish_turn(&launch, MessageKind::AgentThought);
     agent.finish_turn(&launch, MessageKind::AgentText);
@@ -632,7 +632,7 @@ fn acp_text_stream_one_logical_output_persists_one_sequence_without_duplicates()
         &launch,
         "one visible output",
         MessageKind::AgentText,
-        crate::acp::AcpTextBoundary::StartNewMessage,
+        crate::data::acp::AcpTextBoundary::StartNewMessage,
     );
     stream.finish_turn(&launch, MessageKind::AgentText);
 
@@ -674,10 +674,10 @@ fn acp_session_update_fixture_path_merges_adjacent_no_identity_chunks() {
     .map(|raw| serde_json::from_str(raw).expect("fixture json"));
 
     for update in
-        crate::acp::client_updates_from_session_updates_for_test(fixture_updates, temp.path())
+        crate::data::acp::client_updates_from_session_updates_for_test(fixture_updates, temp.path())
     {
-        let event = crate::acp::translate_update(update, true).expect("runtime event");
-        let crate::acp::AcpRuntimeEvent::Text(text_event) = event else {
+        let event = crate::data::acp::translate_update(update, true).expect("runtime event");
+        let crate::data::acp::AcpRuntimeEvent::Text(text_event) = event else {
             panic!("fixture update must translate to text");
         };
         stream.push_text_boundary(
@@ -737,12 +737,12 @@ fn acp_session_update_fixture_path_splits_no_identity_chunks_around_tool_call() 
     .map(|raw| serde_json::from_str(raw).expect("fixture json"));
 
     for update in
-        crate::acp::client_updates_from_session_updates_for_test(fixture_updates, temp.path())
+        crate::data::acp::client_updates_from_session_updates_for_test(fixture_updates, temp.path())
     {
-        let Some(event) = crate::acp::translate_update(update, true) else {
+        let Some(event) = crate::data::acp::translate_update(update, true) else {
             continue;
         };
-        let crate::acp::AcpRuntimeEvent::Text(text_event) = event else {
+        let crate::data::acp::AcpRuntimeEvent::Text(text_event) = event else {
             continue;
         };
         if text_event.thought {
@@ -936,7 +936,7 @@ fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
         ended_at: None,
         status: RunStatus::Running,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         hostname: None,
@@ -946,21 +946,21 @@ fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
     });
     state.save().unwrap();
     let launch = ManagedAcpLaunch {
-        resolved: crate::acp::AcpResolvedLaunch {
+        resolved: crate::data::acp::AcpResolvedLaunch {
             cli: crate::selection::CliKind::Codex,
             interactive: true,
-            spawn: crate::acp::AcpSpawnSpec {
+            spawn: crate::data::acp::AcpSpawnSpec {
                 program: "true".to_string(),
                 args: Vec::new(),
                 env: std::collections::BTreeMap::new(),
             },
-            session: crate::acp::AcpSessionSpec {
+            session: crate::data::acp::AcpSessionSpec {
                 cwd: std::env::current_dir().unwrap(),
                 prompt: PromptPayload::Text("prompt".to_string()),
                 model: "model".to_string(),
-                reasoning_effort: crate::acp::AcpReasoningEffort::Medium,
-                permission_mode: crate::acp::AcpPermissionMode::Ask,
-                policy: crate::acp::AcpLaunchPolicy::default(),
+                reasoning_effort: crate::data::acp::AcpReasoningEffort::Medium,
+                permission_mode: crate::data::acp::AcpPermissionMode::Ask,
+                policy: crate::data::acp::AcpLaunchPolicy::default(),
                 metadata: std::collections::BTreeMap::new(),
             },
         },
@@ -1117,7 +1117,7 @@ fn launch_test_run(dir: &Path) -> AgentRun {
         cli: crate::selection::CliKind::Codex,
         launch_name: "model-x".to_string(),
         prompt_path,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),

@@ -1,8 +1,8 @@
-use crate::adapters::{AgentRun, run_label_with_model};
 use crate::app::prompts::{
     CoderPromptInputs, coder_prompt, read_review_scope, task_toml_for, write_review_scope_artifact,
 };
 use crate::app::{App, guard};
+use crate::data::adapters::{AgentRun, run_label_with_model};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Stage};
 use anyhow::Result;

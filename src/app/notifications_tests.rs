@@ -51,7 +51,7 @@ fn running_run(id: u64, stage: &str, interactive: bool) -> RunRecord {
         ended_at: None,
         status: RunStatus::Running,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: LaunchModes {
@@ -202,13 +202,13 @@ fn interactive_wait_rising_edge_emits_once_until_next_prompt() {
         let mut app = mk_app(state);
         app.enable_notifications_for_test();
         app.current_run_id = Some(7);
-        crate::runner::register_test_run_id("[brainstorm]", 7);
-        crate::runner::request_run_label_active_for_test("[brainstorm]");
+        crate::data::runner::register_test_run_id("[brainstorm]", 7);
+        crate::data::runner::request_run_label_active_for_test("[brainstorm]");
 
         app.runtime_tick_after_data_drain();
         assert!(app.notification_events_for_test().is_empty());
 
-        crate::runner::request_run_label_interactive_input_for_test("[brainstorm]");
+        crate::data::runner::request_run_label_interactive_input_for_test("[brainstorm]");
         app.messages.push(Message {
             ts: chrono::Utc::now(),
             run_id: 7,
@@ -243,10 +243,10 @@ fn interactive_wait_only_notifies_first_prompt_in_same_run() {
         let mut app = mk_app(state);
         app.enable_notifications_for_test();
         app.current_run_id = Some(RUN_ID);
-        crate::runner::register_test_run_id(WINDOW, RUN_ID);
-        crate::runner::request_run_label_active_for_test(WINDOW);
+        crate::data::runner::register_test_run_id(WINDOW, RUN_ID);
+        crate::data::runner::request_run_label_active_for_test(WINDOW);
 
-        crate::runner::request_run_label_interactive_input_for_test(WINDOW);
+        crate::data::runner::request_run_label_interactive_input_for_test(WINDOW);
         app.messages.push(Message {
             ts: chrono::Utc::now(),
             run_id: RUN_ID,
@@ -259,9 +259,9 @@ fn interactive_wait_only_notifies_first_prompt_in_same_run() {
         });
         app.runtime_tick_after_data_drain();
 
-        crate::runner::request_run_label_active_for_test(WINDOW);
+        crate::data::runner::request_run_label_active_for_test(WINDOW);
         app.runtime_tick_after_data_drain();
-        crate::runner::request_run_label_interactive_input_for_test(WINDOW);
+        crate::data::runner::request_run_label_interactive_input_for_test(WINDOW);
         app.messages.push(Message {
             ts: chrono::Utc::now(),
             run_id: RUN_ID,
@@ -366,8 +366,8 @@ fn interactive_wait_event_carries_last_agent_response() {
         let mut app = mk_app(state);
         app.enable_notifications_for_test();
         app.current_run_id = Some(RUN_ID);
-        crate::runner::register_test_run_id(WINDOW, RUN_ID);
-        crate::runner::request_run_label_active_for_test(WINDOW);
+        crate::data::runner::register_test_run_id(WINDOW, RUN_ID);
+        crate::data::runner::request_run_label_active_for_test(WINDOW);
         // Brief on the same run is the live summary; it must NOT be picked
         // up for an interactive-run wait — the agent's question is what the
         // operator wants to read.
@@ -391,7 +391,7 @@ fn interactive_wait_event_carries_last_agent_response() {
             },
             text: "Should I keep going on the implementation plan?".to_string(),
         });
-        crate::runner::request_run_label_interactive_input_for_test(WINDOW);
+        crate::data::runner::request_run_label_interactive_input_for_test(WINDOW);
 
         app.runtime_tick_after_data_drain();
 

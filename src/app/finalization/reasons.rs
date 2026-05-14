@@ -2,9 +2,9 @@ use super::super::run_helpers::OperatorTerminationMarker;
 use super::Reason;
 use crate::app::prompts::{read_review_scope_base_sha, validate_stage_toml_writes};
 use crate::app::{App, guard};
-use crate::artifacts::{RecoveryArtifact, ReviewStatus as RecoveryStatus};
+use crate::data::artifacts::{RecoveryArtifact, ReviewStatus as RecoveryStatus};
 use crate::state::{self as session_state, MessageKind, PendingGuardDecision, PipelineItemStatus};
-use crate::{coder_summary, final_validation, review, tasks};
+use crate::{coder_summary, data::validation as final_validation, review, tasks};
 impl App {
     const ARTIFACT_REASON_TABLE: &[(&'static str, &'static [&'static str])] = &[
         ("brainstorm", &["artifacts/spec.md"]),
@@ -89,7 +89,7 @@ impl App {
                 "missing finish stamp",
             ));
         }
-        let Ok(stamp) = crate::runner::read_finish_stamp(&stamp_path) else {
+        let Ok(stamp) = crate::data::runner::read_finish_stamp(&stamp_path) else {
             return Some(Self::failed_unverified_reason(
                 &stamp_path,
                 "malformed finish stamp",
@@ -137,7 +137,7 @@ impl App {
             return None;
         }
         let stamp_path = self.finish_stamp_path_for(run);
-        let Ok(stamp) = crate::runner::read_finish_stamp(&stamp_path) else {
+        let Ok(stamp) = crate::data::runner::read_finish_stamp(&stamp_path) else {
             return None;
         };
         if stamp.working_tree_clean {
@@ -289,7 +289,7 @@ impl App {
             if code > 128 {
                 let signal_num = code - 128;
                 let stamp_path = self.finish_stamp_path_for(run);
-                let signal_received = crate::runner::read_finish_stamp(&stamp_path)
+                let signal_received = crate::data::runner::read_finish_stamp(&stamp_path)
                     .map(|s| s.signal_received)
                     .unwrap_or_default();
                 let operator_marker = Self::operator_termination_marker(&session_dir, run.id);

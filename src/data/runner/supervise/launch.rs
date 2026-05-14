@@ -1,6 +1,6 @@
-use crate::acp::{AcpConfig, AcpLaunchPolicy, AcpLaunchRequest, PromptPayload};
-use crate::adapters::AgentRun;
-use crate::runner::transport::ManagedAcpLaunch;
+use crate::data::acp::{AcpConfig, AcpLaunchPolicy, AcpLaunchRequest, PromptPayload};
+use crate::data::adapters::AgentRun;
+use crate::data::runner::transport::ManagedAcpLaunch;
 use anyhow::{Context, Result, anyhow, bail};
 use std::{fs, path::Path};
 #[allow(clippy::too_many_arguments)]
@@ -51,7 +51,7 @@ pub(super) fn build_managed_acp_launch(
     })
 }
 fn ensure_program_exists(program: &str) -> Result<()> {
-    if crate::acp::program_is_executable(program) {
+    if crate::data::acp::program_is_executable(program) {
         Ok(())
     } else {
         bail!("ACP agent CLI not found - install it first");

@@ -1,7 +1,7 @@
-use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::brainstorm_prompt;
 use crate::app::{App, guard};
-use crate::artifacts::{ArtifactKind, SkipToImplProposal};
+use crate::data::adapters::{AgentRun, EffortLevel, run_label_with_model};
+use crate::data::artifacts::{ArtifactKind, SkipToImplProposal};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Stage};
 use anyhow::Result;
@@ -192,7 +192,7 @@ impl App {
         let summary_path = session_dir
             .join("artifacts")
             .join(ArtifactKind::SessionSummary.filename());
-        match crate::artifacts::SessionSummaryArtifact::read_from_path(&summary_path) {
+        match crate::data::artifacts::SessionSummaryArtifact::read_from_path(&summary_path) {
             Ok(Some(summary)) => {
                 session_state::record_session_title(
                     &mut self.state,

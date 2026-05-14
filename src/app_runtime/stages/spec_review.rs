@@ -1,6 +1,6 @@
-use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::spec_review_prompt;
 use crate::app::{App, guard};
+use crate::data::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, MessageKind, RunStatus, Stage};
 use anyhow::Result;
@@ -12,9 +12,9 @@ impl App {
     /// session. Idempotent — silently skips appending if `spec.md` is
     /// already in the operator's configured allowlist.
     pub(crate) fn spec_review_acp_policy(
-        mut policy: crate::acp::AcpLaunchPolicy,
+        mut policy: crate::data::acp::AcpLaunchPolicy,
         spec_path: &Path,
-    ) -> crate::acp::AcpLaunchPolicy {
+    ) -> crate::data::acp::AcpLaunchPolicy {
         let spec_path = spec_path.to_path_buf();
         if !policy.allowed_write_paths.contains(&spec_path) {
             policy.allowed_write_paths.push(spec_path);
@@ -216,7 +216,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::App;
-    use crate::acp::AcpLaunchPolicy;
+    use crate::data::acp::AcpLaunchPolicy;
     use std::path::PathBuf;
 
     #[test]

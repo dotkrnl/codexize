@@ -95,7 +95,7 @@ impl App {
             cache_path = %cache_path.display(),
             "external publish observed; reloading model strip"
         );
-        let loaded = crate::cache::load(&self.paths.cache_root);
+        let loaded = crate::data::cache::load(&self.paths.cache_root);
         let providers = self.config.providers.value().clone();
         let available = self.available_clis_for_cache_watcher();
         let models =
@@ -112,7 +112,7 @@ impl App {
     fn available_clis_for_cache_watcher(
         &self,
     ) -> std::collections::BTreeSet<crate::selection::CliKind> {
-        crate::acp::AcpConfig::from_config_views(
+        crate::data::acp::AcpConfig::from_config_views(
             &self.config.acp.agents,
             &self.config.acp_install_view(),
         )

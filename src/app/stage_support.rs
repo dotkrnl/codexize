@@ -1,6 +1,5 @@
 use crate::{
-    adapters::EffortLevel,
-    artifacts::ReviewScopeArtifact,
+    data::{adapters::EffortLevel, artifacts::ReviewScopeArtifact},
     state::{self as session_state},
     tasks,
 };
@@ -115,7 +114,7 @@ pub(crate) fn validate_stage_toml_writes(
         .map(|template| session_dir.join(template.replace("{round}", &round_token)))
         .collect::<Vec<_>>();
     let refs = paths.iter().map(|path| path.as_path()).collect::<Vec<_>>();
-    crate::runner::validate_toml_artifacts(&refs)
+    crate::data::runner::validate_toml_artifacts(&refs)
 }
 pub(crate) fn read_review_scope(path: &std::path::Path) -> anyhow::Result<ReviewScopeArtifact> {
     let text =

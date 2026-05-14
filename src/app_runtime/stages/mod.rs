@@ -27,8 +27,8 @@ mod simplification;
 mod spec_review;
 use crate::app::models::subscription_tag;
 use crate::{
-    adapters::EffortLevel,
     app::App,
+    data::adapters::EffortLevel,
     data::config::schema::EffortMapping,
     selection::{
         CachedModel, CliKind, SubscriptionKind,
@@ -43,7 +43,7 @@ use crate::{
 /// Tuple returned by every model-pick helper so the launch boundary always
 /// sees the selected `Candidate`'s CLI, launch_name, and effort metadata.
 /// `effort_mapping` and `effort_eligible` are sourced from the candidate so
-/// the launch site can drive [`crate::adapters::launch_effort_suffix`]
+/// the launch site can drive [`crate::data::adapters::launch_effort_suffix`]
 /// without consulting any vendor-keyed table.
 pub(crate) type StagePick = (
     String,        // model row name
@@ -110,7 +110,7 @@ impl App {
                 let stamp_path = artifacts_dir
                     .join("run-finish")
                     .join(format!("{run_key}.toml"));
-                let stamp = crate::runner::FinishStamp {
+                let stamp = crate::data::runner::FinishStamp {
                     finished_at: chrono::Utc::now().to_rfc3339(),
                     exit_code: outcome.exit_code,
                     head_before: "test-base".to_string(),
@@ -119,7 +119,7 @@ impl App {
                     signal_received: String::new(),
                     working_tree_clean: true,
                 };
-                let _ = crate::runner::write_finish_stamp(&stamp_path, &stamp);
+                let _ = crate::data::runner::write_finish_stamp(&stamp_path, &stamp);
                 Ok(())
             })())
         }
@@ -260,7 +260,7 @@ impl App {
                 .register(run.id, run.effort, prompt_path, tokio::time::Instant::now());
         }
         self.prime_yolo_exit_tracking(&run);
-        let effort_suffix = crate::adapters::launch_effort_suffix(
+        let effort_suffix = crate::data::adapters::launch_effort_suffix(
             run.effort,
             run.effort_eligible,
             &run.effort_mapping,

@@ -5,7 +5,7 @@
 //! logic layer reference the type without pulling in filesystem or process
 //! dependencies; the additional `impl` block in `data/persistence` extends it
 //! with load/save/log helpers.
-use crate::adapters::EffortLevel;
+use crate::data::adapters::EffortLevel;
 use crate::data::config::schema::EffortMapping;
 use crate::logic::pipeline::stage::Stage;
 use crate::logic::selection::SelectionStage;
@@ -376,7 +376,7 @@ pub struct SessionState {
     #[serde(default)]
     pub skip_to_impl_rationale: Option<String>,
     #[serde(default)]
-    pub skip_to_impl_kind: Option<crate::artifacts::SkipToImplKind>,
+    pub skip_to_impl_kind: Option<crate::data::artifacts::SkipToImplKind>,
     #[serde(default)]
     pub pending_guard_decision: Option<PendingGuardDecision>,
     /// Number of `FinalValidation` runs entered in this session. Increments

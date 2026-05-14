@@ -55,7 +55,7 @@ fn claude_acp_install_root_uses_home_codexize_acp() {
         std::env::set_var("HOME", home.path());
     }
 
-    let root = crate::acp::claude_acp_install_root();
+    let root = crate::data::acp::claude_acp_install_root();
 
     unsafe {
         match prev_home {

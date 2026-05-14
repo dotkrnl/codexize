@@ -1,11 +1,11 @@
-use crate::adapters::{AgentRun, run_label_with_model};
 use crate::app::prompts::{
     ReviewerPromptInputs, assigned_revise_task_ids, read_review_scope,
     reviewer_full_alignment_prompt, reviewer_prompt, rewrite_tasks_for_revise,
 };
 use crate::app::{App, guard};
+use crate::data::adapters::{AgentRun, run_label_with_model};
+use crate::data::runner::select_full_alignment;
 use crate::review;
-use crate::runner::select_full_alignment;
 use crate::selection::CachedModel;
 use crate::state::{
     self as session_state, Message, MessageKind, MessageSender, PipelineItemStatus, Stage,
@@ -22,9 +22,9 @@ impl App {
     /// duplicates. The launcher stays `launch_noninteractive_with_policy`;
     /// only `allowed_write_paths` is widened.
     pub(crate) fn reviewer_acp_policy(
-        mut policy: crate::acp::AcpLaunchPolicy,
+        mut policy: crate::data::acp::AcpLaunchPolicy,
         artifacts_dir: &Path,
-    ) -> crate::acp::AcpLaunchPolicy {
+    ) -> crate::data::acp::AcpLaunchPolicy {
         for name in ["spec.md", "plan.md", "tasks.toml"] {
             let path = artifacts_dir.join(name);
             if !policy.allowed_write_paths.contains(&path) {
@@ -377,11 +377,11 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::App;
-    use crate::acp::AcpLaunchPolicy;
     use crate::app::TestLaunchHarness;
     use crate::app::TestLaunchOutcome;
     use crate::app::test_support::{mk_app, with_temp_root};
-    use crate::runner::{RunnerConfig, select_full_alignment};
+    use crate::data::acp::AcpLaunchPolicy;
+    use crate::data::runner::{RunnerConfig, select_full_alignment};
     use crate::selection::{
         CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind,
     };

@@ -6,7 +6,7 @@
 use crate::app_runtime::{AppCommand, AppView, ModalKind};
 use crate::data::events::{DataEvent, DataOutcome, DataRequest, LiveSummaryEvents};
 use crate::state::RunStatus;
-use crate::{app::App, tui::AppTerminal};
+use crate::{app::App, ui::tui::AppTerminal};
 use anyhow::Result;
 /// Result of routing an [`AppCommand`] through the terminal runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]

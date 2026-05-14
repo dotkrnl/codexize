@@ -101,7 +101,7 @@ pub enum DataOutcome {
 /// Dispatch a [`DataRequest`] to the appropriate data primitive.
 pub fn dispatch(
     request: DataRequest,
-    runner_supervisor: &crate::runner::Supervisor,
+    runner_supervisor: &crate::data::runner::Supervisor,
 ) -> DataOutcome {
     match dispatch_observation(&request) {
         Some(outcome) => outcome,

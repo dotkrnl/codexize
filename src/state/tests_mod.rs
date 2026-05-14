@@ -1,5 +1,5 @@
 use super::*;
-use crate::adapters::EffortLevel;
+use crate::data::adapters::EffortLevel;
 use serde::{Deserialize, Serialize};
 
 #[test]

@@ -1,39 +1,22 @@
-//! Crate root.
+//! Crate root for the application binary and integration tests.
 //!
-//! The implementation is split into three layered trees: [`logic`] (pure
-//! orchestration), [`data`] (IO + state custody), and [`ui`] (terminal
-//! rendering). The `pub use` aliases below flatten frequently-used
-//! sub-modules into a single `crate::*` namespace consumed by `main.rs`,
-//! the integration tests, and the future server-mode binary.
-pub use crate::data::acp;
-pub use crate::data::adapters;
+//! The implementation is split into [`logic`] (pure orchestration), [`data`]
+//! (IO + state custody), [`ui`] (terminal rendering), and [`app_runtime`]
+//! (runtime-facing command/view adapters). Callers import through those owning
+//! modules instead of root-level aliases.
 pub mod app;
 pub mod app_runtime;
 pub mod app_shell;
-pub mod lifecycle;
-pub use crate::data::artifacts;
-pub use crate::data::cache;
-pub use crate::data::cache_lock;
 pub mod coder_summary;
-pub use crate::data::dashboard_io as dashboard;
 pub mod data;
 pub mod diagnostics;
-pub use crate::data::validation as final_validation;
-pub use crate::ui::input_editor;
+pub mod lifecycle;
 pub mod logic;
 pub mod model_names;
-pub use crate::data::providers;
-pub use crate::data::repo_state_update;
-pub use crate::ui::preflight;
-pub use crate::ui::widgets::picker::state as picker;
 pub mod review;
-pub use crate::data::runner;
 pub mod scheduler;
 pub mod selection;
 pub mod simplification;
-pub use crate::data::snapshot;
 pub mod state;
-pub use crate::data::synthetic_artifacts;
 pub mod tasks;
-pub use crate::ui::tui;
 pub mod ui;

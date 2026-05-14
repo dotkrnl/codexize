@@ -8,8 +8,8 @@ use crate::data::preflight as backend;
 pub use crate::data::preflight::PreflightOutcome;
 use crate::data::preflight::Scenario;
 use crate::state::codexize_root;
-use crate::tui::{AppTerminal, wrap_text};
 use crate::ui::chrome::modal::{modal_inner_width, render_modal_overlay};
+use crate::ui::tui::{AppTerminal, wrap_text};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
@@ -304,7 +304,7 @@ fn run_acp_install_modals_if_missing(
     terminal: &mut AppTerminal,
     claude_acp_root: &std::path::Path,
 ) -> Result<()> {
-    if crate::acp::should_offer_codex_acp_install() {
+    if crate::data::acp::should_offer_codex_acp_install() {
         run_acp_install_modal(
             terminal,
             Scenario::CodexAcpMissing,
@@ -312,7 +312,7 @@ fn run_acp_install_modals_if_missing(
             backend::install_codex_acp,
         )?;
     }
-    if crate::acp::should_offer_claude_acp_install_for(claude_acp_root) {
+    if crate::data::acp::should_offer_claude_acp_install_for(claude_acp_root) {
         let root = claude_acp_root.to_path_buf();
         run_acp_install_modal(
             terminal,

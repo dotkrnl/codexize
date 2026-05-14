@@ -25,7 +25,7 @@ fn make_run(status: RunStatus) -> RunRecord {
         ended_at: None,
         status,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: crate::state::LaunchModes::default(),

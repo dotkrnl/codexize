@@ -1,6 +1,6 @@
-use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::dreaming_prompt;
 use crate::app::{App, guard};
+use crate::data::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::selection::CachedModel;
 use crate::selection::config::SelectionStage;
 use crate::state::{self as session_state, Stage};
@@ -112,7 +112,7 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&dream_report_path),
-                crate::acp::AcpLaunchPolicy::dreaming(&dream_report_path, &live_summary_path),
+                crate::data::acp::AcpLaunchPolicy::dreaming(&dream_report_path, &live_summary_path),
             )
         };
         match launch_result {
@@ -168,9 +168,9 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use crate::adapters::EffortLevel;
     use crate::app::test_support::{key, mk_app};
     use crate::app::{ModalKind, StageId, TestLaunchHarness, TestLaunchOutcome};
+    use crate::data::adapters::EffortLevel;
     use crate::selection::{
         CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind,
     };

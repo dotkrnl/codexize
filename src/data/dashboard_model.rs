@@ -1,4 +1,4 @@
-use crate::dashboard::DashboardModel;
+use crate::data::dashboard_io::DashboardModel;
 use crate::selection::{IpbrStageScores, ScoreSource};
 use std::collections::{BTreeMap, BTreeSet};
 

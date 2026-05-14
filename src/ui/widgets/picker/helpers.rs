@@ -1,5 +1,5 @@
 use crate::app::palette::{self, PaletteCommand};
-use crate::picker::SessionEntry;
+use crate::ui::widgets::picker::state::SessionEntry;
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},

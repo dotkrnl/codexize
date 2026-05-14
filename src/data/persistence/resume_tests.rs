@@ -1,5 +1,5 @@
 use super::*;
-use crate::artifacts::SkipProposalStatus;
+use crate::data::artifacts::SkipProposalStatus;
 use std::fs;
 
 fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {

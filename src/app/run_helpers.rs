@@ -15,8 +15,8 @@ pub(crate) enum OperatorTerminationMarker {
 #[path = "run_helpers_tests.rs"]
 mod tests;
 impl App {
-    pub(crate) fn default_acp_policy(&self) -> crate::acp::AcpLaunchPolicy {
-        crate::acp::AcpLaunchPolicy::from_policy_defaults(&self.config.acp_policy_view())
+    pub(crate) fn default_acp_policy(&self) -> crate::data::acp::AcpLaunchPolicy {
+        crate::data::acp::AcpLaunchPolicy::from_policy_defaults(&self.config.acp_policy_view())
     }
 
     /// Resolve the session directory from the loaded `[paths]` config.
@@ -116,7 +116,7 @@ impl App {
         session_dir: &std::path::Path,
         task_id: u32,
         round: u32,
-    ) -> crate::adapters::EffortLevel {
+    ) -> crate::data::adapters::EffortLevel {
         use crate::app::prompts::{auto_tough_effort, task_effort_for};
         let declared = task_effort_for(session_dir, task_id);
         auto_tough_effort(declared, self.task_round_index(task_id, round))
@@ -291,7 +291,7 @@ impl App {
         guard::verify(&dir, &run.stage)
     }
     pub(crate) fn read_exit_status_code(&self, run: &crate::state::RunRecord) -> Option<i32> {
-        crate::runner::read_finish_stamp(&self.finish_stamp_path_for(run))
+        crate::data::runner::read_finish_stamp(&self.finish_stamp_path_for(run))
             .ok()
             .map(|stamp| stamp.exit_code)
     }

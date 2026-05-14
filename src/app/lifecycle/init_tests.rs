@@ -5,9 +5,9 @@
 //! resume we backfill it as `Failed`, the FSM starts `Idle`, and the persisted
 //! `current_run_id`/`run_launched` mirrors are forced to "no live run"
 //! regardless of what's on disk.
-use crate::adapters::EffortLevel;
 use crate::app::App;
 use crate::app::test_support::with_temp_root;
+use crate::data::adapters::EffortLevel;
 use crate::lifecycle::{
     AgentState, DreamingData, GitGuardData, PendingDecisions, PlanApprovalData, SkipToImplData,
     SpecApprovalData, Stage as LifecycleStage,

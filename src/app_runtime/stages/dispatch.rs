@@ -124,7 +124,7 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Failed,
             error: Some("model failed".to_string()),
-            effort: crate::adapters::EffortLevel::Normal,
+            effort: crate::data::adapters::EffortLevel::Normal,
             effort_mapping: crate::data::config::schema::EffortMapping::default(),
             effort_eligible: false,
             modes: LaunchModes::default(),

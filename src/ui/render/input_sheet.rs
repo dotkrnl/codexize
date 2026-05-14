@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::wrap_text;
+use crate::ui::tui::wrap_text;
 impl App {
     pub(crate) fn input_sheet_content(&self, width: u16) -> Vec<Line<'static>> {
         let inner_width = (width as usize).saturating_sub(4).max(1);

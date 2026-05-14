@@ -1,5 +1,5 @@
-use crate::adapters::EffortLevel;
 use crate::app::test_support::{mk_app, with_temp_root};
+use crate::data::adapters::EffortLevel;
 use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState};
 fn run(stage: &str, task_id: Option<u32>, round: u32, attempt: u32) -> RunRecord {
     RunRecord {

@@ -20,7 +20,7 @@ fn running_recovery_run(id: u64) -> RunRecord {
         ended_at: None,
         status: RunStatus::Running,
         error: None,
-        effort: crate::adapters::EffortLevel::Normal,
+        effort: crate::data::adapters::EffortLevel::Normal,
         effort_mapping: crate::data::config::schema::EffortMapping::default(),
         effort_eligible: false,
         modes: LaunchModes::default(),
@@ -276,7 +276,7 @@ fn confirmed_idle_cancel_preserves_messages_and_artifacts() {
 fn confirmed_running_cancel_signals_runner_and_finalizes_to_cancelled() {
     crate::app::test_support::with_temp_root(|| {
         let window = "[Cancel Running Test]";
-        crate::runner::request_run_label_active_for_test(window);
+        crate::data::runner::request_run_label_active_for_test(window);
         let mut run = running_noninteractive_run(7101);
         run.window_name = window.to_string();
         let mut state = SessionState::new("cancel-running".to_string());
@@ -292,7 +292,7 @@ fn confirmed_running_cancel_signals_runner_and_finalizes_to_cancelled() {
         ));
 
         assert_eq!(
-            crate::runner::drain_test_cancel_receiver_for(window),
+            crate::data::runner::drain_test_cancel_receiver_for(window),
             vec!["terminate"]
         );
         assert_eq!(app.state.current_stage, Stage::RepoStateUpdateRunning);
@@ -307,7 +307,7 @@ fn confirmed_running_cancel_signals_runner_and_finalizes_to_cancelled() {
 fn repeated_running_cancel_while_pending_is_idempotent() {
     crate::app::test_support::with_temp_root(|| {
         let window = "[Cancel Idempotent Test]";
-        crate::runner::request_run_label_active_for_test(window);
+        crate::data::runner::request_run_label_active_for_test(window);
         let mut run = running_noninteractive_run(7102);
         run.window_name = window.to_string();
         let mut state = SessionState::new("cancel-running-idempotent".to_string());
@@ -322,14 +322,14 @@ fn repeated_running_cancel_while_pending_is_idempotent() {
             crate::app::test_support::key(KeyCode::Enter)
         ));
         assert_eq!(
-            crate::runner::drain_test_cancel_receiver_for(window),
+            crate::data::runner::drain_test_cancel_receiver_for(window),
             vec!["terminate"]
         );
 
         app.execute_palette_input("cancel");
 
         assert_eq!(
-            crate::runner::drain_test_cancel_receiver_for(window),
+            crate::data::runner::drain_test_cancel_receiver_for(window),
             Vec::<&str>::new()
         );
         assert_eq!(app.state.current_stage, Stage::RepoStateUpdateRunning);

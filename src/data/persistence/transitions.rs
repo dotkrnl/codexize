@@ -4,7 +4,7 @@
 //! defined in [`crate::logic::pipeline::transitions`]. Callers in the runtime
 //! and tests should prefer these wrappers; tests that need a pure mutation
 //! can still call the logic-layer counterpart directly.
-use crate::adapters::EffortLevel;
+use crate::data::adapters::EffortLevel;
 use crate::logic::pipeline::stage::Stage;
 use crate::logic::pipeline::transitions::{
     FinishedRunRecord, SIMPLIFICATION_ATTEMPT_CAP, VALIDATION_ATTEMPT_CAP, validate_transition,

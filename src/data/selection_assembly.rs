@@ -3,10 +3,10 @@
 //! dashboard refresh, and quota refresh involved in producing the
 //! `CachedModel` list — the logic layer is forbidden to touch any of
 //! these directly (see `scripts/check-layers.sh`).
-use crate::cache::{self, LoadedCache};
-use crate::dashboard::{self, LoadOutcome};
+use crate::data::cache::{self, LoadedCache};
 use crate::data::cache_lock;
 use crate::data::config::schema::ProviderEntry;
+use crate::data::dashboard_io::LoadOutcome;
 use crate::data::selection_quota as quota;
 use crate::logic::selection::assemble as pure;
 use crate::logic::selection::types::{CachedModel, CliKind, QuotaError, SubscriptionKind};
@@ -146,7 +146,7 @@ async fn assemble_with_refresh_unlocked(
     };
     let (cached_quota, quota_expired) = match loaded.quotas {
         Some(section) => (section.data, section.expired),
-        None => (crate::cache::QuotaPayload::default(), true),
+        None => (crate::data::cache::QuotaPayload::default(), true),
     };
     let (cached_resets, resets_expired) = match loaded.quota_resets {
         Some(section) => (section.data, section.expired),
@@ -156,7 +156,7 @@ async fn assemble_with_refresh_unlocked(
     // Dashboard refresh (independent of quota refresh).
     // On error, fall back to expired cached entries (which may be empty).
     let dashboard_entries = if dashboard_expired {
-        match dashboard::load_models_async().await {
+        match crate::data::dashboard_io::load_models_async().await {
             Ok(LoadOutcome {
                 models: fresh,
                 warnings,

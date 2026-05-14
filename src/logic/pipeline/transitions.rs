@@ -88,7 +88,7 @@ pub fn record_session_title(state: &mut SessionState, title: impl Into<String>) 
 pub fn record_skip_to_impl_proposal(
     state: &mut SessionState,
     rationale: impl Into<String>,
-    kind: crate::artifacts::SkipToImplKind,
+    kind: crate::data::artifacts::SkipToImplKind,
 ) {
     state.skip_to_impl_rationale = Some(rationale.into());
     state.skip_to_impl_kind = Some(kind);

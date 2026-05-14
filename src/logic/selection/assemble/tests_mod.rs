@@ -1,5 +1,5 @@
 use super::*;
-use crate::cache::{DashboardEntry, LoadedCache, LoadedSection, QuotaPayload, ResetPayload};
+use crate::data::cache::{DashboardEntry, LoadedCache, LoadedSection, QuotaPayload, ResetPayload};
 use crate::selection::ScoreSource;
 
 fn candidate(

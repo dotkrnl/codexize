@@ -22,9 +22,9 @@
 //! [`crate::data::picker_io::scan_sessions_for_scheduler`], which is now a
 //! thin wrapper that builds a fresh index, refreshes once, and snapshots.
 
-use crate::picker::SessionEntry;
 use crate::scheduler::{ScannedSession, SchedulerSession};
 use crate::state::{Modes, SessionState, Stage};
+use crate::ui::widgets::picker::state::SessionEntry;
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;

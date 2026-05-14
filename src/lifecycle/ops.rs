@@ -102,8 +102,6 @@ impl LifecycleOps {
             AgentState::Starting { .. } => {
                 // Starting has no live run for the FSM to stop; treat the
                 // same as Idle so the operator gets a clear message.
-                // Step 5's app cutover will handle preempting Starting via
-                // its launch supervisor, not via this path.
                 OpOutcome::NoOp("agent has not started yet".to_string())
             }
             AgentState::Running { .. } | AgentState::Stopping { .. } => {
@@ -136,9 +134,9 @@ impl LifecycleOps {
                 return OpOutcome::NoOp("no agent running".to_string());
             }
             AgentState::Starting { .. } => {
-                // No live run for `Fsm::request_stop` to drive; defer to
-                // Step 5's app cutover (which preempts the pending launch
-                // via the supervisor) and treat this as a no-op here.
+                // No live run for `Fsm::request_stop` to drive; the app
+                // preempts the pending launch via the supervisor. Treat as
+                // a no-op here.
                 return OpOutcome::NoOp("agent has not started yet".to_string());
             }
             AgentState::Running { run } => run.spec.stage_id,
@@ -186,9 +184,7 @@ impl LifecycleOps {
             AgentState::Idle | AgentState::Starting { .. } => {
                 // Starting has no live run for `Fsm::request_stop` to
                 // drive; lump it in with Idle and apply the rewind
-                // synchronously. Step 5's app cutover preempts the
-                // pending launch via the supervisor before applying the
-                // immediate plan.
+                // synchronously.
                 OpOutcome::Staged(OpAction::Immediate {
                     phase_change: Some(target),
                     cleanup,
@@ -225,8 +221,7 @@ impl LifecycleOps {
         match ctx.fsm.view() {
             AgentState::Idle | AgentState::Starting { .. } => {
                 // Starting has no live run for `Fsm::request_stop` to
-                // drive; Step 5's app preempts the pending launch and
-                // applies this immediate plan.
+                // drive; apply cancellation immediately.
                 OpOutcome::Staged(OpAction::Immediate {
                     phase_change: Some(Phase::Cancelled),
                     cleanup: CleanupPlan::empty(),
@@ -252,9 +247,9 @@ impl LifecycleOps {
 }
 
 /// Lift a [`StopResolution`] back to the same `OpAction::Immediate` shape
-/// the idle-path commands return. The confirm-dead handler in Step 5's
-/// App can use this single function to apply any pending operator
-/// command's plan uniformly, regardless of which command produced it.
+/// the idle-path commands return. The confirm-dead handler uses this
+/// single function to apply any pending operator command's plan uniformly,
+/// regardless of which command produced it.
 pub fn resolution_to_action(resolution: StopResolution) -> OpAction {
     match resolution.next {
         AfterStop::GoIdle => OpAction::Immediate {

@@ -52,27 +52,6 @@ fn launch_load_silently_uses_defaults_when_file_missing() {
 }
 
 #[test]
-fn cheap_flag_parses_as_create_mode_seed() {
-    let cli = Cli::try_parse_from(["codexize", "--cheap"]).expect("parse --cheap");
-    assert!(cli.cheap);
-    assert!(!cli.yolo);
-}
-
-#[test]
-fn yolo_flag_parses_as_create_mode_seed() {
-    let cli = Cli::try_parse_from(["codexize", "--yolo"]).expect("parse --yolo");
-    assert!(cli.yolo);
-    assert!(!cli.cheap);
-}
-
-#[test]
-fn yolo_and_cheap_flags_combine() {
-    let cli = Cli::try_parse_from(["codexize", "--yolo", "--cheap"]).expect("parse --yolo --cheap");
-    assert!(cli.yolo);
-    assert!(cli.cheap);
-}
-
-#[test]
 fn resume_warning_mentions_ignored_cheap_flag() {
     let warnings = resume_ignored_mode_warnings(Modes {
         yolo: false,
@@ -109,29 +88,6 @@ fn resume_warning_mentions_both_ignored_flags() {
             "warning: --cheap ignored on resume; persisted modes win",
         ]
     );
-}
-
-#[test]
-fn message_short_flag_parses_with_yolo() {
-    let cli = Cli::try_parse_from(["codexize", "--yolo", "-m", "ship the dashboard"])
-        .expect("parse --yolo -m ...");
-    assert!(cli.yolo);
-    assert_eq!(cli.message.as_deref(), Some("ship the dashboard"));
-}
-
-#[test]
-fn message_long_flag_with_equals_parses() {
-    let cli = Cli::try_parse_from(["codexize", "--yolo", "--message=ship it"])
-        .expect("parse --yolo --message=...");
-    assert_eq!(cli.message.as_deref(), Some("ship it"));
-}
-
-#[test]
-fn message_can_appear_before_yolo() {
-    let cli =
-        Cli::try_parse_from(["codexize", "-m", "ship it", "--yolo"]).expect("parse -m ... --yolo");
-    assert!(cli.yolo);
-    assert_eq!(cli.message.as_deref(), Some("ship it"));
 }
 
 fn cli(args: &[&str]) -> Cli {

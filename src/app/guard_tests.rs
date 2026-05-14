@@ -144,6 +144,16 @@ fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
     outcome.unwrap()
 }
 
+fn git_available() -> bool {
+    std::process::Command::new("git")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 fn run_git(dir: &Path, args: &[&str]) {
     let status = std::process::Command::new("git")
         .args(args)
@@ -167,6 +177,9 @@ fn init_repo(dir: &Path) {
 #[test]
 #[serial_test::serial(process_cwd)]
 fn git_status_dirty_reports_clean_then_dirty() {
+    if !git_available() {
+        return;
+    }
     let temp = tempfile::TempDir::new().unwrap();
     init_repo(temp.path());
     with_cwd(temp.path(), || {
@@ -179,6 +192,9 @@ fn git_status_dirty_reports_clean_then_dirty() {
 #[test]
 #[serial_test::serial(process_cwd)]
 fn capture_non_coder_writes_snapshot_with_head_and_status() {
+    if !git_available() {
+        return;
+    }
     let repo = tempfile::TempDir::new().unwrap();
     init_repo(repo.path());
     let snapshot_dir = tempfile::TempDir::new().unwrap();
@@ -194,6 +210,9 @@ fn capture_non_coder_writes_snapshot_with_head_and_status() {
 #[test]
 #[serial_test::serial(process_cwd)]
 fn capture_coder_records_round_control_files() {
+    if !git_available() {
+        return;
+    }
     let repo = tempfile::TempDir::new().unwrap();
     init_repo(repo.path());
     let session_dir = repo.path().join("session");
@@ -260,6 +279,9 @@ fn verify_dispatches_to_coder_path_when_stage_is_coder() {
 #[test]
 #[serial_test::serial(process_cwd)]
 fn reset_hard_to_returns_false_when_head_does_not_resolve() {
+    if !git_available() {
+        return;
+    }
     let temp = tempfile::TempDir::new().unwrap();
     init_repo(temp.path());
     with_cwd(temp.path(), || {

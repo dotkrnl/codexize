@@ -206,10 +206,9 @@ fn kind_message(run_id: u64, kind: MessageKind, text: &str) -> Message {
 }
 
 // model_strip_* full-table rendering tests have moved to
-// src/app/models_area.rs and target the new responsive_models_area
+// src/ui/widgets/models_area.rs and target the new responsive_models_area
 // entry point. The underlying model_strip / model_strip_height /
-// format_model_name_spans helpers stay alive here only until the
-// chrome cutover wires the new renderer into App::draw.
+// format_model_name_spans helpers are used by the current renderer.
 
 fn node(
     label: &str,

@@ -285,9 +285,9 @@ impl App {
         self.current_run_id = Some(run_id);
         self.input_mode = false;
         self.run_launched = true;
-        // Mirror the launch into the lifecycle FSM so Step 5a's operator
-        // paths (:stop / :restart) observe a Running state. Errors are
-        // logged; the FSM is non-authoritative during the cutover window.
+        // Mirror the launch into the lifecycle FSM so operator paths
+        // (:stop / :restart) observe a Running state. Errors are logged;
+        // the legacy phase remains authoritative for persistence.
         if let Some(stage_id) = crate::lifecycle::stage_id_for_run(stage, &run.window_name) {
             let spec = crate::lifecycle::StageSpec {
                 stage_id,

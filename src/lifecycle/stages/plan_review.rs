@@ -3,7 +3,7 @@
 //!
 //! Single-shot per round. Runs on [`Phase::Plan`]. The legacy code restores
 //! `plan.pre-review-1.md`/`spec.pre-review-1.md` only on round-1 rewind —
-//! this stage preserves that asymmetry verbatim. Step 5 may revisit
+//! this stage preserves that asymmetry verbatim. Future work may revisit
 //! per-round backups; until then, matching today's behavior is the
 //! contract.
 use super::{has_succeeded, next_attempt};
@@ -100,7 +100,7 @@ impl Stage for PlanReviewStage {
         } else {
             // Legacy retry.rs only restores round-1 backups; later rounds
             // overwrite plan.md in place without a fresh backup. Preserve
-            // that behavior verbatim — Step 5 / Step 8 may revisit per-round
+            // that behavior verbatim — future work may revisit per-round
             // backups, but Step 2 is behavior-preserving.
             Vec::new()
         }

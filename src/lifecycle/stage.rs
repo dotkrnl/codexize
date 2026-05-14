@@ -60,20 +60,19 @@ pub struct StageCtx<'a> {
     pub cheap: bool,
     /// True when the Recovery / RecoveryPlanReview / RecoverySharding chain
     /// has been activated for the current implementation round (i.e. a
-    /// reviewer failure escalated the round into recovery). Defaults to
-    /// false; Step 5 populates this from session state. Used by
-    /// [`StageRegistry::next_stage_for_phase`] to gate recovery stages so
-    /// they aren't auto-scheduled in a healthy round.
+    /// reviewer failure escalated the round into recovery). Populated from
+    /// session state. Used by [`StageRegistry::next_stage_for_phase`] to gate
+    /// recovery stages so they aren't auto-scheduled in a healthy round.
     pub recovery_active: bool,
     /// True when the reviewer's approval verdict for the current round
-    /// requested a simplification pass. Defaults to false; Step 5 populates
-    /// it. Used by [`StageRegistry::next_stage_for_phase`] to gate
-    /// [`StageId::Simplification`] on the `Phase::Review(r)` candidate list.
+    /// requested a simplification pass. Populated from session state. Used by
+    /// [`StageRegistry::next_stage_for_phase`] to gate [`StageId::Simplification`]
+    /// on the `Phase::Review(r)` candidate list.
     pub simplification_requested: bool,
     /// True when the operator accepted the dreaming-decision modal after
-    /// final validation. Defaults to false; Step 5 populates it. Used by
-    /// [`StageRegistry::next_stage_for_phase`] to gate
-    /// [`StageId::Dreaming`] on the `Phase::Finalization` candidate list.
+    /// final validation. Populated from session state. Used by
+    /// [`StageRegistry::next_stage_for_phase`] to gate [`StageId::Dreaming`]
+    /// on the `Phase::Finalization` candidate list.
     pub dreaming_accepted: bool,
 }
 
@@ -106,8 +105,8 @@ pub trait Stage: Send + Sync {
     fn label(&self) -> &'static str;
 
     /// Window name used by the terminal layer for this run. Must match the
-    /// literal the existing `launch_*` functions emit so Step 5's cutover
-    /// preserves operator-visible labels.
+    /// literal the existing `launch_*` functions emit to preserve
+    /// operator-visible labels.
     fn window_name(&self, round: u32, task: Option<u32>) -> String;
 
     /// Build a fresh [`StageSpec`] for this stage from the current context.

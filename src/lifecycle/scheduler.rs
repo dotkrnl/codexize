@@ -6,7 +6,7 @@
 //! should do next. The function is **pure** — no IO, no FSM mutation —
 //! which keeps it trivial to unit-test with hand-built inputs.
 //!
-//! The caller (Step 5's App) takes the returned [`StageSpec`] and decides
+//! The caller (App) takes the returned [`StageSpec`] and decides
 //! whether to actually invoke [`Fsm::start`](super::Fsm::start). This
 //! separation lets project-lane gating, paused-phase gating, and pending
 //! decisions all coexist in one place without leaking back into the FSM.

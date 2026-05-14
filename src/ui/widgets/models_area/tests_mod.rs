@@ -361,9 +361,8 @@ fn full_table_bolds_only_phase_rank_one_when_percentages_round_together() {
 
 #[test]
 fn full_table_drops_probabilities_below_60() {
-    // Spec rule: "drop probabilities entirely below ~60 cols". The
-    // pre-cutover model_strip used to keep IPBR at width 50 — under the
-    // new spec, that whole column collapses.
+    // Spec rule: "drop probabilities entirely below ~60 cols". Under the
+    // current responsive layout, probability columns collapse below ~60 cols.
     let models = vec![model_with_axis_score("gemini-3.1-pro-preview", 1.0, 0)];
 
     let (lines, _) = responsive_models_area(&models, &[], 50, 50, ModelsAreaMode::FullTable);

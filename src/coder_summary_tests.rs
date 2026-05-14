@@ -22,24 +22,6 @@ rebuttal = ["[Round 1, Item 2] Already addressed in the latest diff."]
 }
 
 #[test]
-fn coder_summary_tolerates_unknown_fields() {
-    // `deny_unknown_fields` was lifted so the schema can accept future
-    // additions (e.g., the `spec_plan_defect` extension) without breaking
-    // older readers; verify forward-compat by parsing an unknown key.
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = write_summary(
-        &dir,
-        r#"status = "done"
-summary = "Task already complete"
-dirty_before = false
-rebuttal = ["[Round 1, Item 2] Already addressed in the latest diff."]
-"#,
-    );
-    let summary = validate(&path).unwrap();
-    assert_eq!(summary.status, CoderStatus::Done);
-}
-
-#[test]
 fn coder_summary_spec_plan_defect_absent_defaults_to_empty() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = write_summary(

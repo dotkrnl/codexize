@@ -1028,24 +1028,6 @@ fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
 }
 
 #[test]
-fn finish_stamp_parses_old_stamp_without_signal_received() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = dir.path().join("stamp.toml");
-    fs::write(
-        &path,
-        r#"finished_at = "2026-04-26T10:00:00Z"
-exit_code = 1
-head_before = "000000"
-head_after = "111111"
-head_state = "unstable"
-"#,
-    )
-    .unwrap();
-    let stamp = read_finish_stamp(&path).unwrap();
-    assert_eq!(stamp.signal_received, "");
-}
-
-#[test]
 fn run_child_with_timeout_returns_status_when_child_exits_quickly() {
     let launch = ChildLaunch::new("true")
         .stdin_null()

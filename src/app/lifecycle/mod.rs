@@ -20,6 +20,7 @@ use crate::{
 };
 use anyhow::Result;
 use std::time::Duration;
+
 fn parse_task_label_id(label: &str) -> Option<u32> {
     let rest = label.strip_prefix("Task ")?;
     let digits = rest.split(':').next()?.split_whitespace().next()?;
@@ -30,6 +31,50 @@ pub(crate) enum RetryTarget {
     Task(u32),
     Stage(&'static str),
 }
+
+/// Owned App-side snapshot used to build a borrowed lifecycle [`StageCtx`].
+///
+/// The App still carries the legacy [`crate::state::Phase`] as persisted
+/// authority. This projection is the single place where that legacy shape is
+/// translated into the slim lifecycle inputs a stage scheduler needs.
+#[derive(Debug)]
+pub(crate) struct LifecycleStageProjection {
+    session_id: String,
+    session_dir: std::path::PathBuf,
+    phase: crate::lifecycle::Phase,
+    prior_runs: Vec<crate::lifecycle::RunHistoryEntry>,
+    pending_task_ids: Vec<u32>,
+    yolo: bool,
+    cheap: bool,
+    gates: LifecycleStageGates,
+}
+
+impl LifecycleStageProjection {
+    fn stage_ctx(&self) -> crate::lifecycle::StageCtx<'_> {
+        crate::lifecycle::StageCtx {
+            session_id: self.session_id.as_str(),
+            session_dir: self.session_dir.as_path(),
+            phase: self.phase,
+            prior_runs: self.prior_runs.as_slice(),
+            pending_task_ids: self.pending_task_ids.as_slice(),
+            yolo: self.yolo,
+            cheap: self.cheap,
+            recovery_active: self.gates.recovery_active,
+            simplification_requested: self.gates.simplification_requested,
+            dreaming_accepted: self.gates.dreaming_accepted,
+        }
+    }
+}
+
+/// Stage-selection gates derived from the legacy phase while the lifecycle
+/// cutover is in progress.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct LifecycleStageGates {
+    recovery_active: bool,
+    simplification_requested: bool,
+    dreaming_accepted: bool,
+}
+
 fn retry_stage_for_label(label: &str) -> Option<&'static str> {
     match label {
         "Brainstorm" => Some("brainstorm"),
@@ -340,18 +385,28 @@ impl App {
         phase: crate::lifecycle::Phase,
         f: impl FnOnce(crate::lifecycle::StageCtx<'_>) -> R,
     ) -> R {
-        let session_dir = self.session_dir();
-        let session_id = self.state.session_id.clone();
-        let prior_runs = self.slim_run_history();
-        let pending_task_ids = self.lifecycle_task_ids_for_phase(phase);
-        let stage_ctx = crate::lifecycle::StageCtx {
-            session_id: session_id.as_str(),
-            session_dir: session_dir.as_path(),
+        let projection = self.lifecycle_stage_projection(phase);
+        f(projection.stage_ctx())
+    }
+
+    pub(crate) fn lifecycle_stage_projection(
+        &self,
+        phase: crate::lifecycle::Phase,
+    ) -> LifecycleStageProjection {
+        LifecycleStageProjection {
+            session_id: self.state.session_id.clone(),
+            session_dir: self.session_dir(),
             phase,
-            prior_runs: prior_runs.as_slice(),
-            pending_task_ids: pending_task_ids.as_slice(),
+            prior_runs: self.slim_run_history(),
+            pending_task_ids: self.lifecycle_task_ids_for_phase(phase),
             yolo: self.state.modes.yolo,
             cheap: self.state.modes.cheap,
+            gates: self.lifecycle_stage_gates(),
+        }
+    }
+
+    fn lifecycle_stage_gates(&self) -> LifecycleStageGates {
+        LifecycleStageGates {
             recovery_active: matches!(
                 self.state.current_phase,
                 Phase::BuilderRecovery(_)
@@ -360,8 +415,7 @@ impl App {
             ),
             simplification_requested: matches!(self.state.current_phase, Phase::Simplification(_)),
             dreaming_accepted: matches!(self.state.current_phase, Phase::Dreaming(_)),
-        };
-        f(stage_ctx)
+        }
     }
 
     /// Build an [`crate::lifecycle::OpsCtx`] in-place and hand it to `f`.
@@ -376,31 +430,10 @@ impl App {
         &mut self,
         f: impl FnOnce(&mut crate::lifecycle::OpsCtx<'_>) -> R,
     ) -> R {
-        let session_dir = self.session_dir();
-        let session_id = self.state.session_id.clone();
-        let prior_runs = self.slim_run_history();
-        let pending_task_ids = self.lifecycle_task_ids_for_phase(self.slim_phase);
+        let projection = self.lifecycle_stage_projection(self.slim_phase);
         let now = chrono::Utc::now();
-        let yolo = self.state.modes.yolo;
-        let cheap = self.state.modes.cheap;
-        let mut phase_local = self.slim_phase;
-        let stage_ctx = crate::lifecycle::StageCtx {
-            session_id: session_id.as_str(),
-            session_dir: session_dir.as_path(),
-            phase: phase_local,
-            prior_runs: prior_runs.as_slice(),
-            pending_task_ids: pending_task_ids.as_slice(),
-            yolo,
-            cheap,
-            recovery_active: matches!(
-                self.state.current_phase,
-                Phase::BuilderRecovery(_)
-                    | Phase::BuilderRecoveryPlanReview(_)
-                    | Phase::BuilderRecoverySharding(_)
-            ),
-            simplification_requested: matches!(self.state.current_phase, Phase::Simplification(_)),
-            dreaming_accepted: matches!(self.state.current_phase, Phase::Dreaming(_)),
-        };
+        let mut phase_local = projection.phase;
+        let stage_ctx = projection.stage_ctx();
         let mut ctx = crate::lifecycle::OpsCtx {
             fsm: &mut self.fsm,
             phase: &mut phase_local,
@@ -1261,6 +1294,54 @@ mod tests {
                 .is_empty(),
             "non-task phases should not receive builder task ids",
         );
+    }
+
+    #[test]
+    fn lifecycle_projection_names_stage_gate_flags_from_legacy_phase() {
+        let mut state = SessionState::new("stage-gates".to_string());
+        state.current_phase = Phase::BuilderRecoveryPlanReview(2);
+        let app = mk_app(state);
+
+        let projection = app.lifecycle_stage_projection(crate::lifecycle::Phase::Implementation(2));
+
+        assert!(projection.gates.recovery_active);
+        assert!(!projection.gates.simplification_requested);
+        assert!(!projection.gates.dreaming_accepted);
+
+        let mut state = SessionState::new("simplification-gate".to_string());
+        state.current_phase = Phase::Simplification(3);
+        let app = mk_app(state);
+
+        let projection = app.lifecycle_stage_projection(crate::lifecycle::Phase::Review(3));
+
+        assert!(!projection.gates.recovery_active);
+        assert!(projection.gates.simplification_requested);
+        assert!(!projection.gates.dreaming_accepted);
+    }
+
+    #[test]
+    fn lifecycle_projection_builds_stage_ctx_with_owned_snapshots() {
+        let mut state = SessionState::new("projection-context".to_string());
+        state.current_phase = Phase::ImplementationRound(4);
+        state.builder.pipeline_items = vec![
+            item(10, PipelineItemStatus::Pending),
+            item(20, PipelineItemStatus::Running),
+        ];
+        state.modes.yolo = true;
+        state.modes.cheap = true;
+        let app = mk_app(state);
+
+        let projection = app.lifecycle_stage_projection(crate::lifecycle::Phase::Implementation(4));
+        let ctx = projection.stage_ctx();
+
+        assert_eq!(ctx.session_id, "projection-context");
+        assert_eq!(ctx.phase, crate::lifecycle::Phase::Implementation(4));
+        assert_eq!(ctx.pending_task_ids, &[20, 10]);
+        assert!(ctx.yolo);
+        assert!(ctx.cheap);
+        assert!(!ctx.recovery_active);
+        assert!(!ctx.simplification_requested);
+        assert!(!ctx.dreaming_accepted);
     }
 
     #[test]

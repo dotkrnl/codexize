@@ -342,6 +342,29 @@ pub struct App {
     pub(crate) pending_app_exit: bool,
     pub(crate) pending_shell_command: Option<String>,
     pub(crate) current_run_id: Option<u64>,
+    /// New lifecycle FSM, runs alongside the legacy `current_run_id` /
+    /// `run_launched` / `pending_termination` triplet during the Step 5
+    /// cutover. Today only [`crate::app::App::stop_running_agent`] and
+    /// [`crate::app::App::retry_running_agent`] route through it; everything
+    /// else still drives the legacy path. Step 5b–5d remove that legacy
+    /// path one consumer at a time.
+    pub(crate) fsm: crate::lifecycle::Fsm,
+    /// Slim, round-aware lifecycle [`crate::lifecycle::Phase`] derived from
+    /// `state.current_phase` via [`crate::lifecycle::slim_phase_for`].
+    /// Refreshed by [`crate::app::App::refresh_slim_phase`] at every legacy-
+    /// phase mutation site.
+    pub(crate) slim_phase: crate::lifecycle::Phase,
+    /// Slot for the slim phase the lifecycle was paused at when the
+    /// operator issued `:stop`. None outside `Stopping`/`Idle`-after-stop
+    /// transitions. Mirrors `OpsCtx.paused_at_phase` so the scheduler can
+    /// avoid relaunching the same stage immediately after a stop.
+    pub(crate) paused_at_phase: Option<crate::lifecycle::Phase>,
+    /// Operator-decision slots used by the slim lifecycle. Populated by
+    /// the cutover paths as 5b–5c moves modals onto this surface; today
+    /// only the `:stop` / `:retry` paths touch it.
+    pub(crate) pending_decisions: crate::lifecycle::PendingDecisions,
+    /// Stage registry the lifecycle FSM and operator ops consult.
+    pub(crate) stage_registry: crate::lifecycle::StageRegistry,
     pub(crate) failed_models: HashMap<RetryKey, FailedModelSet>,
     pub(crate) pending_yolo_toggle_gate: Option<&'static str>,
     pub(crate) yolo_exit_issued: HashSet<u64>,

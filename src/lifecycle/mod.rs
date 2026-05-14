@@ -27,6 +27,7 @@ pub mod spec;
 pub mod stage;
 pub mod stage_id;
 pub mod stages;
+pub mod translate;
 
 pub use fsm::{
     AfterStop, AgentState, CancelledBy, CleanupPlan, FinalizedRun, Fsm, FsmError, Outcome,
@@ -44,3 +45,4 @@ pub use scheduler::{BlockReason, Scheduler, TickInput, TickOutcome};
 pub use stage::{RunHistoryEntry, Stage, StageCtx, StageRegistry, SuccessOutcome, WorkUnit};
 pub use stage_id::StageId;
 pub use stages::default_registry;
+pub use translate::{slim_phase_for, stage_id_for_run};

@@ -71,6 +71,7 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
     let nodes = build_tree(&state);
     let current = current_node_index(&nodes);
     let selected_key = node_key_at_path(&nodes, &[current]);
+    let initial_slim_phase = crate::lifecycle::slim_phase_for(&state.current_phase);
     let mut app = App {
         state,
         nodes,
@@ -119,6 +120,11 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
         pending_app_exit: false,
         pending_shell_command: None,
         current_run_id: Some(2),
+        fsm: crate::lifecycle::Fsm::new(),
+        slim_phase: initial_slim_phase,
+        paused_at_phase: None,
+        pending_decisions: crate::lifecycle::PendingDecisions::default(),
+        stage_registry: crate::lifecycle::default_registry(),
         failed_models: HashMap::new(),
         pending_yolo_toggle_gate: None,
         yolo_exit_issued: HashSet::new(),

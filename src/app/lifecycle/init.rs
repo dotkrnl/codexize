@@ -83,6 +83,7 @@ impl App {
         let current = current_node_index(&nodes);
         let selected_key = node_key_at_path(&nodes, &[current]);
         let failed_models = Self::rebuild_failed_models(&state);
+        let initial_slim_phase = crate::lifecycle::slim_phase_for(&state.current_phase);
         let project_name = std::env::current_dir()
             .ok()
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
@@ -146,6 +147,11 @@ impl App {
             pending_app_exit: false,
             pending_shell_command: None,
             current_run_id: None,
+            fsm: crate::lifecycle::Fsm::new(),
+            slim_phase: initial_slim_phase,
+            paused_at_phase: None,
+            pending_decisions: crate::lifecycle::PendingDecisions::default(),
+            stage_registry: crate::lifecycle::default_registry(),
             failed_models,
             runner_supervisor: app_runner_supervisor(&config),
             runner_config: crate::runner::RunnerConfig {

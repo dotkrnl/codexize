@@ -15,6 +15,7 @@ pub mod recovery_plan_review;
 pub mod recovery_sharding;
 pub mod reviewer;
 pub mod sharding;
+pub mod simplification;
 pub mod spec_review;
 
 pub use brainstorm::BrainstormStage;
@@ -27,6 +28,7 @@ pub use recovery_plan_review::RecoveryPlanReviewStage;
 pub use recovery_sharding::RecoveryShardingStage;
 pub use reviewer::ReviewerStage;
 pub use sharding::ShardingStage;
+pub use simplification::SimplificationStage;
 pub use spec_review::SpecReviewStage;
 
 use crate::lifecycle::fsm::Outcome;

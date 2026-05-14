@@ -132,11 +132,9 @@ pub fn slim_to_old_phase(target: SlimPhase, current_old: &LegacyPhase) -> Legacy
 /// Best-effort lifecycle [`StageId`](super::stage_id::StageId) for a
 /// legacy run record's `stage` string and `window_name` discriminators.
 ///
-/// Mirrors [`crate::app::RetryLaunch::for_run`] so the FSM-mirroring shim
-/// can synthesize a [`super::StageSpec`] from the existing `RunRecord`
-/// without rebuilding the per-stage logic. Recovery sub-stages share the
-/// `stage == "recovery"` string so we key off the human-readable window
-/// label to preserve fidelity.
+/// Synthesizes a [`super::StageId`] from the existing `RunRecord` fields.
+/// Recovery sub-stages share the `stage == "recovery"` string, so we key off
+/// the human-readable window label to preserve fidelity.
 pub fn stage_id_for_run(stage: &str, window_name: &str) -> Option<super::StageId> {
     if window_name.contains("[Recovery Plan Review]") {
         return Some(super::StageId::RecoveryPlanReview);
@@ -347,7 +345,10 @@ mod tests {
     #[test]
     fn stage_id_for_run_maps_stage_strings() {
         use super::super::StageId;
-        assert_eq!(stage_id_for_run("coder", "[Builder r1]"), Some(StageId::Coder));
+        assert_eq!(
+            stage_id_for_run("coder", "[Builder r1]"),
+            Some(StageId::Coder)
+        );
         assert_eq!(
             stage_id_for_run("simplifier", "[Simplifier]"),
             Some(StageId::Simplification)

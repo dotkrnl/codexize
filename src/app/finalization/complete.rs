@@ -82,9 +82,8 @@ impl App {
                 // the failed stage's running variant, which the scheduler
                 // tick already routes back to the same stage. Clear the
                 // error so the auto-launch guard doesn't short-circuit and
-                // drive a tick directly — the shell loop will tick again,
-                // but firing eagerly here keeps perceived latency low and
-                // mirrors the legacy `launch_retry_from_descriptor` cadence.
+                // drive a tick directly. The shell loop will tick again, but
+                // firing eagerly here keeps perceived latency low.
                 self.clear_agent_error();
                 self.maybe_auto_launch();
                 return Ok(());

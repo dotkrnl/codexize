@@ -6,9 +6,6 @@ use crate::state::{self as session_state, Phase};
 use crate::tasks;
 use anyhow::{Context, Result};
 impl App {
-    pub(crate) fn launch_sharding(&mut self) {
-        let _ = self.launch_sharding_with_model(None);
-    }
     pub(crate) fn launch_sharding_with_model(
         &mut self,
         override_model: Option<CachedModel>,

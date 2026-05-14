@@ -7,9 +7,6 @@ use crate::selection::config::SelectionPhase;
 use crate::state::{self as session_state, Phase};
 use anyhow::Result;
 impl App {
-    pub(crate) fn launch_simplifier(&mut self) {
-        let _ = self.launch_simplifier_with_model(None);
-    }
     pub(crate) fn launch_simplifier_with_model(
         &mut self,
         override_model: Option<CachedModel>,

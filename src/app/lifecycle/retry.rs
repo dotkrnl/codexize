@@ -6,8 +6,6 @@ use crate::app::tree::node_at_path;
 use crate::lifecycle::{
     LifecycleOps, Phase as SlimPhase, slim_phase_for_stage_retry, slim_phase_for_task_retry,
 };
-use crate::logic::rules::retry_phase_for_stage;
-use crate::scheduler::{is_implementation_lane_phase, manual_retry_allowed};
 use crate::state::{self as session_state, NodeKind, Phase};
 use std::time::Duration;
 
@@ -23,9 +21,7 @@ use std::time::Duration;
 /// recovery flow is automatic, not operator-driven. `Sharding` lives under
 /// `Phase::Plan` in the slim model; the modal returns the per-stage
 /// retry intent rather than the broader plan-phase rewind.
-fn lifecycle_stage_id_from_view(
-    view: crate::app::StageId,
-) -> crate::lifecycle::StageId {
+fn lifecycle_stage_id_from_view(view: crate::app::StageId) -> crate::lifecycle::StageId {
     use crate::app::StageId as V;
     use crate::lifecycle::StageId as L;
     match view {
@@ -90,61 +86,6 @@ impl App {
         self.clear_agent_error();
         if let Some(spec) = spec {
             self.dispatch_start(&spec);
-        }
-    }
-
-    pub(crate) fn retry_allowed_by_project_lane(&mut self, target_phase: Phase) -> bool {
-        if !is_implementation_lane_phase(target_phase) {
-            return true;
-        }
-        let sessions_root = crate::picker::sessions_root_for(&self.config);
-        let scan = match crate::data::picker_io::scan_sessions_for_scheduler(&sessions_root) {
-            Ok(scan) => scan,
-            Err(err) => {
-                let message = format!("retry blocked: cannot scan sessions for lane gate: {err:#}");
-                self.surface_boundary_error(message, false);
-                return false;
-            }
-        };
-        if manual_retry_allowed(target_phase, &self.state.session_id, &scan) {
-            return true;
-        }
-        if !scan
-            .iter()
-            .any(|entry| entry.session_id() == self.state.session_id)
-        {
-            // Isolated App tests and path-based sessions can run outside the
-            // project scan; only shell-owned focused sessions can be lane-gated.
-            return true;
-        }
-        // Manual implementation retries share the scheduler's project-wide
-        // lane gate; otherwise a focused session could start sharding or
-        // later work while a background session is already mutating the repo.
-        let message = "retry blocked: implementation lane is occupied by another session";
-        let _ = self.state.log_event(message);
-        self.push_status(message.to_string(), Severity::Warn, Duration::from_secs(5));
-        false
-    }
-
-    pub(crate) fn retry_gate_phase_for_stage(stage: &str) -> Option<Phase> {
-        match stage {
-            "sharding" => Some(Phase::ShardingRunning),
-            "repo-state-update" => Some(Phase::RepoStateUpdateRunning),
-            _ => retry_phase_for_stage(stage),
-        }
-    }
-
-    pub(crate) fn retry_gate_phase_for_stage_id(stage_id: crate::app::StageId) -> Phase {
-        match stage_id {
-            crate::app::StageId::Brainstorm => Phase::BrainstormRunning,
-            crate::app::StageId::SpecReview => Phase::SpecReviewRunning,
-            crate::app::StageId::Planning => Phase::PlanningRunning,
-            crate::app::StageId::PlanReview => Phase::PlanReviewRunning,
-            crate::app::StageId::Sharding => Phase::ShardingRunning,
-            crate::app::StageId::Implementation => Phase::ImplementationRound(1),
-            crate::app::StageId::Review => Phase::ReviewRound(1),
-            crate::app::StageId::FinalValidation => Phase::FinalValidation(1),
-            crate::app::StageId::Dreaming => Phase::Dreaming(1),
         }
     }
 

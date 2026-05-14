@@ -33,9 +33,6 @@ impl App {
         }
         policy
     }
-    pub(crate) fn launch_reviewer(&mut self) {
-        let _ = self.launch_reviewer_with_model(None);
-    }
     pub(crate) fn launch_reviewer_with_model(
         &mut self,
         override_model: Option<CachedModel>,

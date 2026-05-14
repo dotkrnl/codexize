@@ -8,9 +8,6 @@ use crate::selection::config::SelectionPhase;
 use crate::state::{self as session_state, DreamingDecision, DreamingDecisionKind, Phase};
 use anyhow::{Context, Result};
 impl App {
-    pub(crate) fn launch_final_validation(&mut self) {
-        let _ = self.launch_final_validation_with_model(None);
-    }
     pub(crate) fn launch_final_validation_with_model(
         &mut self,
         override_model: Option<CachedModel>,

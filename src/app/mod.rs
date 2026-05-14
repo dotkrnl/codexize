@@ -118,46 +118,6 @@ pub(crate) enum ModalKind {
     FinalValidationBlocked,
     DreamingDecision,
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum RetryLaunch {
-    Brainstorm,
-    SpecReview,
-    Planning,
-    PlanReview,
-    Sharding,
-    Recovery,
-    RecoveryPlanReview,
-    RecoverySharding,
-    Coder,
-    Reviewer,
-    FinalValidation,
-    Dreaming,
-}
-impl RetryLaunch {
-    fn for_run(run: &crate::state::RunRecord) -> Option<Self> {
-        // Recovery sub-stages all share `stage == "recovery"`, so we key off the
-        // human-readable window label to preserve retry fidelity.
-        if run.window_name.contains("[Recovery Plan Review]") {
-            return Some(Self::RecoveryPlanReview);
-        }
-        if run.window_name.contains("[Recovery Sharding]") {
-            return Some(Self::RecoverySharding);
-        }
-        match run.stage.as_str() {
-            "brainstorm" => Some(Self::Brainstorm),
-            "spec-review" => Some(Self::SpecReview),
-            "planning" => Some(Self::Planning),
-            "plan-review" => Some(Self::PlanReview),
-            "sharding" => Some(Self::Sharding),
-            "recovery" => Some(Self::Recovery),
-            "coder" => Some(Self::Coder),
-            "reviewer" => Some(Self::Reviewer),
-            "final-validation" => Some(Self::FinalValidation),
-            "dreaming" => Some(Self::Dreaming),
-            _ => None,
-        }
-    }
-}
 /// Side effects parked on the App when an operator rewind lands while an
 /// agent is still alive. The runner is asked to cancel synchronously; the
 /// FSM stays in `Stopping` carrying [`crate::lifecycle::AfterStop::Rewind`]

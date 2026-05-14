@@ -7,10 +7,6 @@ use crate::state::{self as session_state, Phase};
 use anyhow::Result;
 
 impl App {
-    pub(crate) fn launch_dreaming(&mut self) {
-        let _ = self.launch_dreaming_with_model(None);
-    }
-
     pub(crate) fn launch_dreaming_with_model(
         &mut self,
         override_model: Option<CachedModel>,

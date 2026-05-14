@@ -5,10 +5,6 @@ use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
 use anyhow::Context;
 impl App {
-    /// Launch the non-interactive recovery-mode sharding agent.
-    pub(crate) fn launch_recovery_sharding(&mut self) {
-        let _ = self.launch_recovery_sharding_with_model(None);
-    }
     pub(crate) fn launch_recovery_sharding_with_model(
         &mut self,
         override_model: Option<CachedModel>,

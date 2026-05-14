@@ -5,9 +5,6 @@ use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
 use anyhow::Context;
 impl App {
-    pub(crate) fn launch_recovery_plan_review(&mut self) {
-        let _ = self.launch_recovery_plan_review_with_model(None);
-    }
     pub(crate) fn launch_recovery_plan_review_with_model(
         &mut self,
         override_model: Option<CachedModel>,

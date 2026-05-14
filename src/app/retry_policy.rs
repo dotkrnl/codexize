@@ -171,13 +171,11 @@ impl App {
             self.next_run_model_override = Some(next_model);
             self.clear_agent_error();
             self.maybe_auto_launch();
-            // Mirror the legacy `launch_retry_for_stage` return: true iff a
-            // run actually launched (run_launched flips on inside
-            // start_run_tracking). If the scheduler tick declined to
-            // dispatch — e.g. lane-blocked or no work for the current
-            // phase — clear the override so a future tick doesn't reuse
-            // the stale pin and report failure so the caller records the
-            // original error.
+            // Report success only if a run actually launched
+            // (`run_launched` flips inside `start_run_tracking`). If the
+            // scheduler tick declined to dispatch, clear the override so a
+            // future tick doesn't reuse the stale pin and report failure so
+            // the caller records the original error.
             if self.run_launched {
                 return true;
             }

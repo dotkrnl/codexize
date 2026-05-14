@@ -38,10 +38,6 @@ const STAGE: &str = "repo-state-update";
 const REPO_STATE_UPDATE_BASELINE_DIR: &str = ".repo-state-update-baseline";
 
 impl App {
-    pub(crate) fn launch_repo_state_update(&mut self) {
-        let _ = self.launch_repo_state_update_with_model(None);
-    }
-
     pub(crate) fn launch_repo_state_update_with_model(
         &mut self,
         override_model: Option<CachedModel>,

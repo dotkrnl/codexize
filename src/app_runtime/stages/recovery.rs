@@ -5,9 +5,6 @@ use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase, PipelineItemStatus};
 use anyhow::{Context, Result};
 impl App {
-    pub(crate) fn launch_recovery(&mut self) {
-        let _ = self.launch_recovery_with_model(None);
-    }
     pub(crate) fn launch_recovery_with_model(
         &mut self,
         override_model: Option<CachedModel>,

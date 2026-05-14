@@ -8,7 +8,10 @@
 use crate::adapters::EffortLevel;
 use crate::app::App;
 use crate::app::test_support::with_temp_root;
-use crate::lifecycle::AgentState;
+use crate::lifecycle::{
+    AgentState, DreamingData, GitGuardData, PendingDecisions, Phase as SlimPhase, PlanApprovalData,
+    SkipToImplData, SpecApprovalData,
+};
 use crate::state::{LaunchModes, Phase as LegacyPhase, RunRecord, RunStatus, SessionState};
 use std::sync::Arc;
 
@@ -106,5 +109,30 @@ fn resume_clears_current_run_id_and_run_launched() {
 
         assert_eq!(app.current_run_id, None);
         assert!(!app.run_launched);
+    });
+}
+
+#[test]
+fn session_round_trips_paused_at_phase_and_pending_decisions() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("20260513-150000-000000004".to_string());
+        state.current_phase = LegacyPhase::PlanReviewPaused;
+        state.paused_at_phase = Some(SlimPhase::Plan);
+        state.pending_decisions = PendingDecisions {
+            git_guard: Some(GitGuardData {}),
+            spec_approval: Some(SpecApprovalData {}),
+            plan_approval: Some(PlanApprovalData {}),
+            skip_to_impl: Some(SkipToImplData {}),
+            dreaming: Some(DreamingData {}),
+        };
+        state.save().unwrap();
+        let session_id = state.session_id.clone();
+        let expected_paused = state.paused_at_phase;
+        let expected_pending = state.pending_decisions.clone();
+
+        drop(state);
+        let reloaded = SessionState::load(&session_id).expect("reload session");
+        assert_eq!(reloaded.paused_at_phase, expected_paused);
+        assert_eq!(reloaded.pending_decisions, expected_pending);
     });
 }

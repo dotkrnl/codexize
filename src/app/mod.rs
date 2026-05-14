@@ -201,7 +201,15 @@ pub enum AppStartupOrigin {
 }
 impl App {
     /// Persist session state and log failures instead of silently dropping them.
+    ///
+    /// Mirrors the App-side lifecycle-overlay fields (`paused_at_phase`,
+    /// `pending_decisions`) into `state` immediately before the write so the
+    /// on-disk `session.toml` reflects the current FSM context. The reverse
+    /// copy happens in `App::new` from the loaded `SessionState` into the
+    /// App mirrors.
     pub(crate) fn save_state(&mut self) {
+        self.state.paused_at_phase = self.paused_at_phase;
+        self.state.pending_decisions = self.pending_decisions.clone();
         if let Err(e) = self.state.save() {
             tracing::warn!("failed to save session state: {e}");
         }

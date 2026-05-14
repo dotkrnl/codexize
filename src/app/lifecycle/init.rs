@@ -84,6 +84,11 @@ impl App {
         let selected_key = node_key_at_path(&nodes, &[current]);
         let failed_models = Self::rebuild_failed_models(&state);
         let initial_slim_phase = crate::lifecycle::slim_phase_for(&state.current_phase);
+        // Lift the persisted lifecycle-overlay fields out of `state` into the
+        // App mirrors. `App::save_state` writes them back before each save so
+        // disk and memory stay in sync.
+        let initial_paused_at_phase = state.paused_at_phase;
+        let initial_pending_decisions = state.pending_decisions.clone();
         let project_name = std::env::current_dir()
             .ok()
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
@@ -149,8 +154,8 @@ impl App {
             current_run_id: None,
             fsm: crate::lifecycle::Fsm::new(),
             slim_phase: initial_slim_phase,
-            paused_at_phase: None,
-            pending_decisions: crate::lifecycle::PendingDecisions::default(),
+            paused_at_phase: initial_paused_at_phase,
+            pending_decisions: initial_pending_decisions,
             scheduler: crate::lifecycle::Scheduler::new(crate::lifecycle::default_registry()),
             failed_models,
             runner_supervisor: app_runner_supervisor(&config),

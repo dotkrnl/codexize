@@ -363,7 +363,7 @@ fn plan_blocks_on_pending_decision() {
     let sched = Scheduler::new(default_registry());
     let agent = AgentState::Idle;
     let pending = PendingDecisions {
-        git_guard: Some(GitGuardData),
+        git_guard: Some(GitGuardData {}),
         ..Default::default()
     };
     let outcome = sched.plan(baseline_input(

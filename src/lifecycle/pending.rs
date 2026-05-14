@@ -10,24 +10,28 @@ use serde::{Deserialize, Serialize};
 
 /// Operator decision payload for the git-guard modal (`HEAD` moved under
 /// `GuardMode::AskOperator`).
+///
+/// Defined as an empty named-field struct (`{}`) rather than a unit struct
+/// (`;`) so TOML can serialize it as an inline empty table — `toml-rs`
+/// rejects unit-struct values entirely.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GitGuardData;
+pub struct GitGuardData {}
 
 /// Operator decision payload for the spec-review pause.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SpecApprovalData;
+pub struct SpecApprovalData {}
 
 /// Operator decision payload for the plan-review pause.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PlanApprovalData;
+pub struct PlanApprovalData {}
 
 /// Operator decision payload for the "skip to implementation" modal.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SkipToImplData;
+pub struct SkipToImplData {}
 
 /// Operator decision payload for the Dreaming-after-validation modal.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DreamingData;
+pub struct DreamingData {}
 
 /// Aggregate of every operator-decision slot the lifecycle can block on.
 ///
@@ -44,6 +48,17 @@ pub struct PendingDecisions {
 }
 
 impl PendingDecisions {
+    /// True when no decision slot is populated. Used by the persistence
+    /// layer's `skip_serializing_if` so a default `PendingDecisions` stays
+    /// out of `session.toml` (avoiding fixture drift).
+    pub fn is_empty(&self) -> bool {
+        self.git_guard.is_none()
+            && self.spec_approval.is_none()
+            && self.plan_approval.is_none()
+            && self.skip_to_impl.is_none()
+            && self.dreaming.is_none()
+    }
+
     /// True when any pending decision applies to `phase`.
     ///
     /// The phase-applicability map is intentionally permissive in Step 1: a
@@ -108,23 +123,23 @@ mod tests {
     fn any_some_field_blocks() {
         let cases: Vec<PendingDecisions> = vec![
             PendingDecisions {
-                git_guard: Some(GitGuardData),
+                git_guard: Some(GitGuardData {}),
                 ..Default::default()
             },
             PendingDecisions {
-                spec_approval: Some(SpecApprovalData),
+                spec_approval: Some(SpecApprovalData {}),
                 ..Default::default()
             },
             PendingDecisions {
-                plan_approval: Some(PlanApprovalData),
+                plan_approval: Some(PlanApprovalData {}),
                 ..Default::default()
             },
             PendingDecisions {
-                skip_to_impl: Some(SkipToImplData),
+                skip_to_impl: Some(SkipToImplData {}),
                 ..Default::default()
             },
             PendingDecisions {
-                dreaming: Some(DreamingData),
+                dreaming: Some(DreamingData {}),
                 ..Default::default()
             },
         ];
@@ -136,11 +151,11 @@ mod tests {
     #[test]
     fn clear_after_drops_only_decisions_originating_past_target() {
         let mut pd = PendingDecisions {
-            git_guard: Some(GitGuardData),
-            spec_approval: Some(SpecApprovalData),
-            plan_approval: Some(PlanApprovalData),
-            skip_to_impl: Some(SkipToImplData),
-            dreaming: Some(DreamingData),
+            git_guard: Some(GitGuardData {}),
+            spec_approval: Some(SpecApprovalData {}),
+            plan_approval: Some(PlanApprovalData {}),
+            skip_to_impl: Some(SkipToImplData {}),
+            dreaming: Some(DreamingData {}),
         };
         // Rewinding to Plan keeps Plan-or-earlier decisions but drops the
         // later Finalization-origin dreaming modal.

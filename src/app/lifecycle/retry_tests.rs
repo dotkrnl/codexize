@@ -105,7 +105,7 @@ fn go_back_is_noop_while_a_pending_decision_blocks() {
         // Open a git-guard pending decision on the slim surface; go_back
         // should refuse to rewind until the operator resolves it.
         app.pending_decisions = PendingDecisions {
-            git_guard: Some(GitGuardData),
+            git_guard: Some(GitGuardData {}),
             ..Default::default()
         };
         let original_phase = app.state.current_phase;

@@ -400,6 +400,19 @@ pub struct SessionState {
     /// matches the baseline definition.
     #[serde(default)]
     pub planned_after_session_id: Option<String>,
+    /// Slim lifecycle phase the agent was paused at when the operator issued
+    /// `:stop`. Persisted so the scheduler doesn't relaunch the same stage
+    /// immediately after a TUI restart. `None` outside `:stop`-then-`Idle`
+    /// transitions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused_at_phase: Option<crate::lifecycle::Phase>,
+    /// Operator-decision slots used by the slim lifecycle. Persisted so a
+    /// modal raised by a prior TUI invocation survives a restart.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::lifecycle::PendingDecisions::is_empty"
+    )]
+    pub pending_decisions: crate::lifecycle::PendingDecisions,
 }
 impl SessionState {
     pub fn new(session_id: String) -> Self {
@@ -425,6 +438,8 @@ impl SessionState {
             block_origin: None,
             dreaming_decision: None,
             planned_after_session_id: None,
+            paused_at_phase: None,
+            pending_decisions: crate::lifecycle::PendingDecisions::default(),
         }
     }
     /// Return the next available agent_run_id (monotonic within session).

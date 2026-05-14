@@ -1,6 +1,6 @@
 //! Mtime-cached read model for `sessions/<id>/session.toml` files.
 //!
-//! The shell scheduler tick and (eventually) the sidebar model both ask
+//! The shell scheduler tick and sidebar model both ask
 //! "what sessions exist on disk, what stage are they in, are they archived?".
 //! Today every caller answers that by walking the sessions directory and
 //! calling [`SessionState::load`] for every entry — which parses the full

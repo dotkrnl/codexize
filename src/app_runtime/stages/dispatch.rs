@@ -39,9 +39,8 @@ impl App {
         if matches!(self.state.current_stage, Stage::WaitingToImplement) {
             return;
         }
-        // DreamingPending is the operator-decision modal. It is not yet
-        // represented in PendingDecisions (pending_decisions.dreaming is
-        // never populated), so we still gate on the persisted stage.
+        // DreamingPending is a persisted operator-decision stage, not a
+        // PendingDecisions entry, so gate on the persisted stage.
         if matches!(self.state.current_stage, Stage::DreamingPending) {
             return;
         }

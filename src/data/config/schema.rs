@@ -516,9 +516,8 @@ impl Config {
     }
 
     /// Apply every validation rule from spec §3 and return the first
-    /// failure as a single human-readable string. Subsequent CLI/TUI
-    /// surfaces will surface multiple errors at once; for now the loader
-    /// only needs to reject bad files at launch.
+    /// failure as a single human-readable string. The loader needs one
+    /// actionable error to reject bad files at launch.
     pub fn validate(&self) -> Result<(), String> {
         let n = &self.ntfy;
         if *n.enabled.value() && n.server.value().trim().is_empty() {

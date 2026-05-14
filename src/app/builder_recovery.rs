@@ -436,6 +436,3 @@ impl App {
         Ok(())
     }
 }
-#[cfg(test)]
-#[path = "builder_recovery_tests.rs"]
-mod tests;

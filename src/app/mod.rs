@@ -182,10 +182,6 @@ impl App {
         }
     }
 
-    /// Return the `artifacts/spec.md` paths for every non-archived session that
-    /// sorts earlier than the current session and is in `WaitingToImplement`.
-    /// These represent the "expected future repository state" that brainstorm,
-    /// spec review, and planning stages must consider.
     /// Guard that the model list has been loaded. If empty, records an agent
     /// error, saves state, rebuilds the tree, and returns `false`.
     pub(crate) fn guard_models_loaded(&mut self) -> bool {
@@ -200,6 +196,10 @@ impl App {
         true
     }
 
+    /// Return the `artifacts/spec.md` paths for every non-archived session that
+    /// sorts earlier than the current session and is in `WaitingToImplement`.
+    /// These represent the expected future repository state that brainstorm,
+    /// spec review, and planning stages must consider.
     pub(crate) fn earlier_waiting_specs(&self) -> Vec<std::path::PathBuf> {
         let Ok(scanned) =
             crate::data::picker_io::scan_sessions_for_scheduler(&self.sessions_root())

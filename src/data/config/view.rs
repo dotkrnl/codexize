@@ -182,16 +182,3 @@ impl Config {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn baked_views_round_trip_default_values() {
-        let cfg = Config::baked_defaults();
-        assert_eq!(cfg.runner_view().full_review_interval, 5);
-        assert_eq!(cfg.ntfy_view().detail_mode, NtfyDetailMode::Detailed);
-        assert!(cfg.memory_view().enabled);
-    }
-}

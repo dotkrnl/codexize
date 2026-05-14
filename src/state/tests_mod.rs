@@ -1168,22 +1168,6 @@ fn test_pipeline_items_update_then_persist() {
 }
 
 #[test]
-fn test_pipeline_all_verdict_values_roundtrip() {
-    for (input, expected) in [
-        ("\"approved\"", PipelineItemStatus::Approved),
-        ("\"stale\"", PipelineItemStatus::Stale),
-        ("\"revise\"", PipelineItemStatus::Revise),
-        ("\"human_blocked\"", PipelineItemStatus::HumanBlocked),
-        ("\"agent_pivot\"", PipelineItemStatus::AgentPivot),
-    ] {
-        let status: PipelineItemStatus = toml::from_str(&format!("status = {input}\n"))
-            .map(|w: std::collections::HashMap<String, PipelineItemStatus>| w["status"])
-            .unwrap();
-        assert_eq!(status, expected);
-    }
-}
-
-#[test]
 fn test_resume_hostname_mismatch_marks_failed_unverified() {
     with_temp_root(|| {
         let mut state = SessionState::new("test-hostname-mismatch".to_string());

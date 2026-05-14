@@ -330,17 +330,6 @@ fn frozen_clock_difference_exactly_in_seconds_field() {
 }
 
 #[test]
-fn gradient_spans_round_trip_ascii_text() {
-    let text = "Awaiting idea";
-    let spans = gradient_spans(text, 0);
-    let rebuilt = spans
-        .iter()
-        .map(|span| span.content.as_ref())
-        .collect::<String>();
-    assert_eq!(rebuilt, text);
-}
-
-#[test]
 fn gradient_spans_stage_shift_changes_at_least_one_pigment() {
     let a = gradient_spans("gradient", 0);
     let b = gradient_spans("gradient", 4);

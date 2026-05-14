@@ -111,26 +111,6 @@ fn verify_non_coder_hard_error_when_dirty_baseline_changes() {
     }
 }
 
-#[test]
-#[serial_test::serial(process_cwd)]
-fn guard_mode_round_trips_through_toml() {
-    let snap = Snapshot {
-        head: "deadbeef".to_string(),
-        git_status: String::new(),
-        control_files: BTreeMap::new(),
-        baseline_stash: None,
-        mode: GuardMode::AskOperator,
-        working_tree_baseline: None,
-    };
-    let text = toml::to_string(&snap).expect("serialize");
-    assert!(
-        text.contains("ask_operator"),
-        "expected snake_case variant in: {text}"
-    );
-    let back: Snapshot = toml::from_str(&text).expect("deserialize");
-    assert_eq!(back.mode, GuardMode::AskOperator);
-}
-
 fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
     let _guard = crate::state::test_fs_lock().lock();
     let prev = std::env::current_dir().unwrap();

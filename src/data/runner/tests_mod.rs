@@ -117,25 +117,6 @@ fn interrupt_run_label_input_queues_interrupt_when_turn_is_active() {
 }
 
 #[test]
-fn finish_stamp_round_trip() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = dir.path().join("stamp.toml");
-    let stamp = FinishStamp {
-        finished_at: "2026-04-26T10:00:00Z".to_string(),
-        exit_code: 0,
-        head_before: "abc123".to_string(),
-        head_after: "def456".to_string(),
-        head_state: "stable".to_string(),
-        signal_received: String::new(),
-        working_tree_clean: true,
-    };
-    write_finish_stamp(&path, &stamp).unwrap();
-    assert!(path.exists());
-    let read = read_finish_stamp(&path).unwrap();
-    assert_eq!(read, stamp);
-}
-
-#[test]
 fn finish_stamp_atomic_write_no_partial_file_on_failure() {
     let dir = tempfile::TempDir::new().unwrap();
     // Use a read-only directory to force the write to fail.

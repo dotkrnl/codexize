@@ -6,12 +6,14 @@
 //! registration step. The structs and their tests exist now so the trait
 //! contract is exercised before the FSM scheduler turns them on.
 pub mod brainstorm;
+pub mod coder;
 pub mod plan_review;
 pub mod planning;
 pub mod sharding;
 pub mod spec_review;
 
 pub use brainstorm::BrainstormStage;
+pub use coder::CoderStage;
 pub use plan_review::PlanReviewStage;
 pub use planning::PlanningStage;
 pub use sharding::ShardingStage;

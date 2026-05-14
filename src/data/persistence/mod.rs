@@ -11,5 +11,5 @@ pub use resume::resume_session;
 pub use transitions::{
     FinalValidationEntry, SimplificationEntry, block_with_origin, enter_final_validation,
     enter_simplification, execute_transition, finish_run_record, resume_running_runs,
-    start_agent_run, try_parse_toml_artifact,
+    try_parse_toml_artifact,
 };

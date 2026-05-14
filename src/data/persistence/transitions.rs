@@ -234,38 +234,6 @@ fn recovery_iteration_for_path(state: &SessionState, task_id: Option<u32>) -> u3
         .unwrap_or(1)
 }
 #[allow(clippy::too_many_arguments)]
-pub fn start_agent_run(
-    state: &mut SessionState,
-    stage: String,
-    task_id: Option<u32>,
-    round: u32,
-    attempt: u32,
-    model: String,
-    subscription_label: String,
-    window_name: String,
-    effort: EffortLevel,
-    effort_mapping: crate::data::config::schema::EffortMapping,
-    effort_eligible: bool,
-    modes: LaunchModes,
-) -> u64 {
-    let run_id = state.next_agent_run_id();
-    start_agent_run_with_id(
-        state,
-        run_id,
-        stage,
-        task_id,
-        round,
-        attempt,
-        model,
-        subscription_label,
-        window_name,
-        effort,
-        effort_mapping,
-        effort_eligible,
-        modes,
-    )
-}
-#[allow(clippy::too_many_arguments)]
 pub fn start_agent_run_with_id(
     state: &mut SessionState,
     run_id: u64,

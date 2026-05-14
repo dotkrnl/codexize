@@ -18,8 +18,10 @@ fn coder_run_captures_iteration_loop_task_round_stage_path() {
         interactive: None,
         iteration: 1,
     });
-    let id = start_agent_run(
+    let run_id = state.next_agent_run_id();
+    let id = start_agent_run_with_id(
         &mut state,
+        run_id,
         "coder".to_string(),
         Some(4),
         9,
@@ -63,8 +65,10 @@ fn simplifier_run_captures_iteration_simplification_round_stage_path() {
         interactive: None,
         iteration: 1,
     });
-    let id = start_agent_run(
+    let run_id = state.next_agent_run_id();
+    let id = start_agent_run_with_id(
         &mut state,
+        run_id,
         "simplifier".to_string(),
         None,
         9,
@@ -95,8 +99,10 @@ fn simplifier_run_captures_iteration_simplification_round_stage_path() {
 fn brainstorm_run_captures_brainstorm_stage_path() {
     let mut state = SessionState::new("brainstorm".to_string());
     state.current_phase = Phase::BrainstormRunning;
-    let id = start_agent_run(
+    let run_id = state.next_agent_run_id();
+    let id = start_agent_run_with_id(
         &mut state,
+        run_id,
         "brainstorm".to_string(),
         None,
         0,

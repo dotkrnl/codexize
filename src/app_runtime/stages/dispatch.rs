@@ -7,6 +7,7 @@
 // instead of matching on stage strings themselves.
 use crate::{
     app::{App, AppStartupOrigin, RetryLaunch, StageId},
+    lifecycle::{TickInput, TickOutcome},
     selection::CachedModel,
     state::Phase,
 };
@@ -38,9 +39,18 @@ impl App {
     }
 
     /// Auto-launch the agent for the current phase if it's a non-interactive
-    /// one (spec review, sharding, coder, reviewer). Idempotent: no-op if the
-    /// run is already launched, if models aren't loaded, or if the last run
-    /// errored (user needs to intervene).
+    /// one. Idempotent: no-op if a run is already launched, if models aren't
+    /// loaded, or if the last run errored (user needs to intervene).
+    ///
+    /// 5c routes the per-phase dispatch decision through
+    /// [`crate::lifecycle::Scheduler::plan`]: this function builds a
+    /// [`TickInput`] from the App's slim phase and FSM state, hands it to
+    /// the scheduler, and dispatches the returned [`crate::lifecycle::StageSpec`]
+    /// via [`Self::dispatch_start`]. The cross-session project-lane gate is
+    /// enforced by the shell scheduler (see `app_shell::evaluate_tick`) so
+    /// `project_lane_allows` is `true` here; the per-session lane gate inside
+    /// [`Self::retry_allowed_by_project_lane`] still covers operator-initiated
+    /// retries.
     pub(crate) fn maybe_auto_launch(&mut self) {
         if self.startup_origin == AppStartupOrigin::PickerCreated {
             return;
@@ -51,27 +61,60 @@ impl App {
         if self.models.is_empty() {
             return;
         }
-        match self.state.current_phase {
-            Phase::BrainstormRunning => {
-                if let Some(idea) = self.state.idea_text.clone() {
-                    self.launch_brainstorm(idea);
-                }
+        // The shell scheduler owns the WaitingToImplement → Sharding /
+        // RepoStateUpdate decision via `decide_waiting_dispatch`; per-session
+        // auto-launch deliberately skips this phase so the baseline check
+        // runs first. The slim phase for WaitingToImplement is `Phase::Plan`
+        // and `Scheduler::plan` would otherwise pick Sharding here.
+        if matches!(self.state.current_phase, Phase::WaitingToImplement) {
+            return;
+        }
+        // DreamingPending is the operator-decision modal; the slim model
+        // routes this through `PendingDecisions::blocks` once 5c-B / 5c-C
+        // migrate the modal slots. Preserve the legacy no-op until then.
+        if matches!(self.state.current_phase, Phase::DreamingPending) {
+            return;
+        }
+
+        let spec = {
+            let session_dir = self.session_dir();
+            let session_id = self.state.session_id.clone();
+            let prior_runs = self.slim_run_history();
+            let stage_ctx = crate::lifecycle::StageCtx {
+                session_id: session_id.as_str(),
+                session_dir: session_dir.as_path(),
+                phase: self.slim_phase,
+                prior_runs: prior_runs.as_slice(),
+                pending_task_ids: &[],
+                yolo: self.state.modes.yolo,
+                cheap: self.state.modes.cheap,
+                recovery_active: matches!(
+                    self.state.current_phase,
+                    Phase::BuilderRecovery(_)
+                        | Phase::BuilderRecoveryPlanReview(_)
+                        | Phase::BuilderRecoverySharding(_)
+                ),
+                simplification_requested: matches!(
+                    self.state.current_phase,
+                    Phase::Simplification(_)
+                ),
+                dreaming_accepted: matches!(self.state.current_phase, Phase::Dreaming(_)),
+            };
+            let input = TickInput {
+                agent: self.fsm.view(),
+                phase: self.slim_phase,
+                paused_at_phase: self.paused_at_phase,
+                pending_decisions: &self.pending_decisions,
+                project_lane_allows: true,
+                ctx: stage_ctx,
+            };
+            match self.scheduler.plan(input) {
+                TickOutcome::Dispatch(spec) => Some(spec),
+                TickOutcome::Idle | TickOutcome::Blocked(_) => None,
             }
-            Phase::SpecReviewRunning => self.launch_spec_review(),
-            Phase::PlanningRunning => self.launch_planning(),
-            Phase::PlanReviewRunning => self.launch_plan_review(),
-            Phase::RepoStateUpdateRunning => self.launch_repo_state_update(),
-            Phase::ShardingRunning => self.launch_sharding(),
-            Phase::ImplementationRound(_) => self.launch_coder(),
-            Phase::ReviewRound(_) => self.launch_reviewer(),
-            Phase::BuilderRecovery(_) => self.launch_recovery(),
-            Phase::BuilderRecoveryPlanReview(_) => self.launch_recovery_plan_review(),
-            Phase::BuilderRecoverySharding(_) => self.launch_recovery_sharding(),
-            Phase::Simplification(_) => self.launch_simplifier(),
-            Phase::FinalValidation(_) => self.launch_final_validation(),
-            Phase::Dreaming(_) => self.launch_dreaming(),
-            Phase::DreamingPending => {}
-            _ => {}
+        };
+        if let Some(spec) = spec {
+            self.dispatch_start(&spec);
         }
     }
     /// Re-launch a stage after the operator stopped a running run with a

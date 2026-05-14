@@ -384,8 +384,9 @@ pub struct App {
     /// the cutover paths as 5b–5c moves modals onto this surface; today
     /// only the `:stop` / `:retry` paths touch it.
     pub(crate) pending_decisions: crate::lifecycle::PendingDecisions,
-    /// Stage registry the lifecycle FSM and operator ops consult.
-    pub(crate) stage_registry: crate::lifecycle::StageRegistry,
+    /// Lifecycle scheduler. Owns the [`crate::lifecycle::StageRegistry`]
+    /// that operator ops and the per-tick auto-launch path consult.
+    pub(crate) scheduler: crate::lifecycle::Scheduler,
     pub(crate) failed_models: HashMap<RetryKey, FailedModelSet>,
     pub(crate) pending_yolo_toggle_gate: Option<&'static str>,
     pub(crate) yolo_exit_issued: HashSet<u64>,

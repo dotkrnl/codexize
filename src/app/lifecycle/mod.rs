@@ -344,7 +344,7 @@ impl App {
             phase: &mut phase_local,
             paused_at_phase: &mut self.paused_at_phase,
             pending_decisions: &mut self.pending_decisions,
-            registry: &self.stage_registry,
+            registry: self.scheduler.registry(),
             stage_ctx,
             now,
         };
@@ -627,9 +627,13 @@ impl App {
     }
 
     /// Bridge a [`crate::lifecycle::StageSpec`] to the matching legacy
-    /// `launch_X` entry point. 5c will make `launch_*` take the spec as a
-    /// parameter; for 5b we route by `stage_id`.
-    fn dispatch_start(&mut self, spec: &crate::lifecycle::StageSpec) {
+    /// `launch_X` entry point. Called by [`Self::apply_op_outcome`] (for
+    /// rewind / restart launches) and by [`Self::maybe_auto_launch`] (for
+    /// the per-tick scheduler dispatch).
+    ///
+    /// 5d will make `launch_*` take the spec as a parameter; until then we
+    /// route by `stage_id`.
+    pub(crate) fn dispatch_start(&mut self, spec: &crate::lifecycle::StageSpec) {
         use crate::lifecycle::StageId as L;
         match spec.stage_id {
             L::Brainstorm => {
@@ -640,8 +644,15 @@ impl App {
             L::Planning => self.launch_planning(),
             L::PlanReview => self.launch_plan_review(),
             L::Sharding => {
-                // Sharding launches lazily on the next scheduler tick after a
-                // baseline check; today the legacy auto_launch handles this.
+                // The slim `Phase::Plan` covers PlanningRunning..ShardingRunning;
+                // operator rewinds that land on Plan must defer Sharding to the
+                // shell scheduler so `decide_waiting_dispatch` can re-verify the
+                // baseline. The auto-launch path only fires this branch when
+                // legacy `current_phase == ShardingRunning`, which already
+                // encodes a passed baseline check.
+                if matches!(self.state.current_phase, crate::state::Phase::ShardingRunning) {
+                    self.launch_sharding();
+                }
             }
             L::Coder => self.launch_coder(),
             L::Reviewer => self.launch_reviewer(),

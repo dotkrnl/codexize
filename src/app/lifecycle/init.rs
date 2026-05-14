@@ -152,7 +152,7 @@ impl App {
             slim_phase: initial_slim_phase,
             paused_at_phase: None,
             pending_decisions: crate::lifecycle::PendingDecisions::default(),
-            stage_registry: crate::lifecycle::default_registry(),
+            scheduler: crate::lifecycle::Scheduler::new(crate::lifecycle::default_registry()),
             failed_models,
             runner_supervisor: app_runner_supervisor(&config),
             runner_config: crate::runner::RunnerConfig {

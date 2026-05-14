@@ -389,8 +389,8 @@ pub(super) async fn finalize_managed_acp_launch(
             // case finalisation that records the failure.
             let _ = waiting_for_input.send_replace(false);
             let _ = write_launch_cause(&launch.cause_path, &format!("{err:#}"));
-            let fallback_head_before = git_rev_parse_head().unwrap_or_default();
-            let _ = write_finish_stamp_for_outcome(&launch.stamp_path, fallback_head_before, 1, "")
+            let head_before = git_rev_parse_head().unwrap_or_default();
+            let _ = write_finish_stamp_for_outcome(&launch.stamp_path, head_before, 1, "")
                 .await;
             return;
         }
@@ -418,8 +418,8 @@ pub(super) async fn finalize_managed_acp_launch(
         Err(err) => {
             let _ = waiting_for_input.send_replace(false);
             let _ = write_launch_cause(&launch.cause_path, &format!("{err:#}"));
-            let fallback_head_before = git_rev_parse_head().unwrap_or_default();
-            let _ = write_finish_stamp_for_outcome(&launch.stamp_path, fallback_head_before, 1, "")
+            let head_before = git_rev_parse_head().unwrap_or_default();
+            let _ = write_finish_stamp_for_outcome(&launch.stamp_path, head_before, 1, "")
                 .await;
         }
     }

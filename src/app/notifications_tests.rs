@@ -232,6 +232,62 @@ fn interactive_wait_rising_edge_emits_once_until_next_prompt() {
 }
 
 #[test]
+fn interactive_wait_only_notifies_first_prompt_in_same_run() {
+    const RUN_ID: u64 = 72;
+    const WINDOW: &str = "[brainstorm-first-wait-only]";
+    with_temp_root(|| {
+        let mut state = state_in_phase(Phase::BrainstormRunning);
+        let mut run = running_run(RUN_ID, "brainstorm", true);
+        run.window_name = WINDOW.to_string();
+        state.agent_runs.push(run);
+        let mut app = mk_app(state);
+        app.enable_notifications_for_test();
+        app.current_run_id = Some(RUN_ID);
+        crate::runner::register_test_run_id(WINDOW, RUN_ID);
+        crate::runner::request_run_label_active_for_test(WINDOW);
+
+        crate::runner::request_run_label_interactive_input_for_test(WINDOW);
+        app.messages.push(Message {
+            ts: chrono::Utc::now(),
+            run_id: RUN_ID,
+            kind: MessageKind::AgentText,
+            sender: MessageSender::Agent {
+                model: "codex-latest".to_string(),
+                subscription_label: "openai".to_string(),
+            },
+            text: "First prompt".to_string(),
+        });
+        app.runtime_tick_after_data_drain();
+
+        crate::runner::request_run_label_active_for_test(WINDOW);
+        app.runtime_tick_after_data_drain();
+        crate::runner::request_run_label_interactive_input_for_test(WINDOW);
+        app.messages.push(Message {
+            ts: chrono::Utc::now(),
+            run_id: RUN_ID,
+            kind: MessageKind::AgentText,
+            sender: MessageSender::Agent {
+                model: "codex-latest".to_string(),
+                subscription_label: "openai".to_string(),
+            },
+            text: "Second prompt".to_string(),
+        });
+        app.runtime_tick_after_data_drain();
+
+        let events = app.notification_events_for_test();
+        assert_eq!(
+            events.len(),
+            1,
+            "only the first interactive wait in a run should notify"
+        );
+        assert_eq!(
+            events[0].context.last_agent_response.as_deref(),
+            Some("First prompt")
+        );
+    });
+}
+
+#[test]
 fn phase_wait_event_carries_last_live_summary() {
     with_temp_root(|| {
         let mut app = app_in_phase(Phase::SpecReviewRunning);

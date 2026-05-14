@@ -60,7 +60,6 @@ pub enum NotificationDedupeKey {
         session_id: String,
         stage: String,
         run_id: u64,
-        message_index: usize,
     },
     PipelineDone {
         session_id: String,
@@ -241,7 +240,6 @@ impl NotificationRuntime {
             session_id: context.session_id.clone(),
             stage: context.stage.clone(),
             run_id: marker.run_id,
-            message_index: marker.message_index,
         };
         self.push(NotificationEvent {
             kind: NotificationEventKind::InputNeeded,

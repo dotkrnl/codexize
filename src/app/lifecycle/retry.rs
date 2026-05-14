@@ -10,7 +10,89 @@ use crate::logic::rules::retry_phase_for_stage;
 use crate::scheduler::{is_implementation_lane_phase, manual_retry_allowed};
 use crate::state::{self as session_state, NodeKind, Phase};
 use std::time::Duration;
+
+/// Map the operator-visible [`crate::app::StageId`] (9 modal variants) to
+/// the lifecycle-internal [`crate::lifecycle::StageId`] used by the stage
+/// registry. The modal collapses sub-stages into one operator-facing
+/// concept (e.g. Implementation covers Coder + Recovery* under the hood);
+/// the modal "retry" button hands us the user-facing identifier and we
+/// pick the canonical lifecycle stage to relaunch.
+///
+/// `Implementation` and `Review` map to `Coder` / `Reviewer` respectively;
+/// the recovery sub-chain isn't reachable from a modal retry because the
+/// recovery flow is automatic, not operator-driven. `Sharding` lives under
+/// `Phase::Plan` in the slim model; the modal returns the per-stage
+/// retry intent rather than the broader plan-phase rewind.
+fn lifecycle_stage_id_from_view(
+    view: crate::app::StageId,
+) -> crate::lifecycle::StageId {
+    use crate::app::StageId as V;
+    use crate::lifecycle::StageId as L;
+    match view {
+        V::Brainstorm => L::Brainstorm,
+        V::SpecReview => L::SpecReview,
+        V::Planning => L::Planning,
+        V::PlanReview => L::PlanReview,
+        V::Sharding => L::Sharding,
+        V::Implementation => L::Coder,
+        V::Review => L::Reviewer,
+        V::FinalValidation => L::FinalValidation,
+        V::Dreaming => L::Dreaming,
+    }
+}
 impl App {
+    /// Relaunch a specific failed stage from the stage-error modal.
+    ///
+    /// The modal's "retry" button hands us a [`crate::app::StageId`]
+    /// (the operator-visible category, 9 variants). We project it down to
+    /// the lifecycle stage, build a fresh [`crate::lifecycle::StageSpec`]
+    /// from the stage's `build_spec`, and dispatch via
+    /// [`App::dispatch_start`]. Going through `dispatch_start` (rather
+    /// than the scheduler tick) keeps the modal's stage choice
+    /// authoritative — slim `Phase::Finalization` covers both
+    /// FinalValidation and Dreaming, so `Scheduler::plan` would otherwise
+    /// pick FinalValidation first even when the operator clicked "retry"
+    /// on the dreaming modal.
+    pub(crate) fn retry_failed_stage(&mut self, view_stage_id: crate::app::StageId) {
+        let stage_id = lifecycle_stage_id_from_view(view_stage_id);
+        let spec = {
+            let session_dir = self.session_dir();
+            let session_id = self.state.session_id.clone();
+            let prior_runs = self.slim_run_history();
+            let ctx = crate::lifecycle::StageCtx {
+                session_id: session_id.as_str(),
+                session_dir: session_dir.as_path(),
+                phase: self.slim_phase,
+                prior_runs: prior_runs.as_slice(),
+                pending_task_ids: &[],
+                yolo: self.state.modes.yolo,
+                cheap: self.state.modes.cheap,
+                recovery_active: matches!(
+                    self.state.current_phase,
+                    Phase::BuilderRecovery(_)
+                        | Phase::BuilderRecoveryPlanReview(_)
+                        | Phase::BuilderRecoverySharding(_)
+                ),
+                simplification_requested: matches!(
+                    self.state.current_phase,
+                    Phase::Simplification(_)
+                ),
+                dreaming_accepted: matches!(self.state.current_phase, Phase::Dreaming(_)),
+            };
+            self.scheduler
+                .registry()
+                .get(stage_id)
+                .map(|stage| stage.build_spec(&ctx))
+        };
+        // clear_agent_error so the maybe_auto_launch guard inside
+        // start_run_tracking can release the run; without this the
+        // dispatched launch would silently no-op.
+        self.clear_agent_error();
+        if let Some(spec) = spec {
+            self.dispatch_start(&spec);
+        }
+    }
+
     pub(crate) fn retry_allowed_by_project_lane(&mut self, target_phase: Phase) -> bool {
         if !is_implementation_lane_phase(target_phase) {
             return true;

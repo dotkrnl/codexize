@@ -82,6 +82,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         pending_decisions: crate::lifecycle::PendingDecisions::default(),
         scheduler: crate::lifecycle::Scheduler::new(crate::lifecycle::default_registry()),
         failed_models: HashMap::new(),
+        next_run_model_override: None,
         pending_yolo_toggle_gate: None,
         yolo_exit_issued: std::collections::HashSet::new(),
         yolo_exit_observations: HashMap::new(),

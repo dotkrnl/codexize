@@ -416,10 +416,20 @@ impl App {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('r') | KeyCode::Enter => {
-                // Dispatch routes through `app_runtime::stages` so the modal
-                // handler only carries the keybinding contract; per-stage
-                // launch wiring stays co-located with each stage module.
-                self.launch_retry_for_stage_id(stage_id);
+                // Operator-initiated retry of the failed stage. The modal
+                // only opens when `agent_error.is_some()` while the FSM is
+                // Idle; clear the error and synthesize a [`StageSpec`] for
+                // the specific stage the modal targets, then route through
+                // [`Self::dispatch_start`]. Going through `dispatch_start`
+                // (rather than `Scheduler::plan` + tick) keeps the modal's
+                // stage choice authoritative — slim `Phase::Finalization`
+                // covers both FinalValidation and Dreaming, so a tick
+                // would dispatch FinalValidation first in a healthy
+                // session, but the modal's contract says "retry this
+                // specific stage". The keybinding contract stays here;
+                // per-stage launch wiring stays co-located with each
+                // stage.
+                self.retry_failed_stage(stage_id);
                 false
             }
             KeyCode::Char('e') if stage_id == StageId::Brainstorm => {

@@ -637,18 +637,32 @@ impl App {
     /// rewind / restart launches) and by [`Self::maybe_auto_launch`] (for
     /// the per-tick scheduler dispatch).
     ///
+    /// Consumes `App::next_run_model_override` (the model-fallback chain's
+    /// pinned next-attempt model) when set, handing it to the matching
+    /// `launch_*_with_model` entry point. Stages whose model picker is
+    /// non-overridable (`Planning` with the round-fallback flag, the
+    /// Sharding deferral) simply ignore the override; the slot is cleared
+    /// unconditionally so a stale value can't bleed into the next launch.
+    ///
     /// 5d will make `launch_*` take the spec as a parameter; until then we
     /// route by `stage_id`.
     pub(crate) fn dispatch_start(&mut self, spec: &crate::lifecycle::StageSpec) {
         use crate::lifecycle::StageId as L;
+        let override_model = self.next_run_model_override.take();
         match spec.stage_id {
             L::Brainstorm => {
                 let idea = self.state.idea_text.clone().unwrap_or_default();
-                self.launch_brainstorm(idea);
+                let _ = self.launch_brainstorm_with_model(idea, override_model);
             }
-            L::SpecReview => self.launch_spec_review(),
-            L::Planning => self.launch_planning(),
-            L::PlanReview => self.launch_plan_review(),
+            L::SpecReview => {
+                let _ = self.launch_spec_review_with_model(override_model);
+            }
+            L::Planning => {
+                let _ = self.launch_planning_with_model(override_model, true);
+            }
+            L::PlanReview => {
+                let _ = self.launch_plan_review_with_model(override_model);
+            }
             L::Sharding => {
                 // The slim `Phase::Plan` covers PlanningRunning..ShardingRunning;
                 // operator rewinds that land on Plan must defer Sharding to the
@@ -657,18 +671,36 @@ impl App {
                 // legacy `current_phase == ShardingRunning`, which already
                 // encodes a passed baseline check.
                 if matches!(self.state.current_phase, crate::state::Phase::ShardingRunning) {
-                    self.launch_sharding();
+                    let _ = self.launch_sharding_with_model(override_model);
                 }
             }
-            L::Coder => self.launch_coder(),
-            L::Reviewer => self.launch_reviewer(),
-            L::Recovery => self.launch_recovery(),
-            L::RecoveryPlanReview => self.launch_recovery_plan_review(),
-            L::RecoverySharding => self.launch_recovery_sharding(),
-            L::FinalValidation => self.launch_final_validation(),
-            L::Simplification => self.launch_simplifier(),
-            L::Dreaming => self.launch_dreaming(),
-            L::RepoStateUpdate => self.launch_repo_state_update(),
+            L::Coder => {
+                let _ = self.launch_coder_with_model(override_model);
+            }
+            L::Reviewer => {
+                let _ = self.launch_reviewer_with_model(override_model);
+            }
+            L::Recovery => {
+                let _ = self.launch_recovery_with_model(override_model);
+            }
+            L::RecoveryPlanReview => {
+                let _ = self.launch_recovery_plan_review_with_model(override_model);
+            }
+            L::RecoverySharding => {
+                let _ = self.launch_recovery_sharding_with_model(override_model);
+            }
+            L::FinalValidation => {
+                let _ = self.launch_final_validation_with_model(override_model);
+            }
+            L::Simplification => {
+                let _ = self.launch_simplifier_with_model(override_model);
+            }
+            L::Dreaming => {
+                let _ = self.launch_dreaming_with_model(override_model);
+            }
+            L::RepoStateUpdate => {
+                let _ = self.launch_repo_state_update_with_model(override_model);
+            }
         }
     }
 
@@ -726,14 +758,19 @@ impl App {
         // Validate that the run is retryable before issuing the cancel; the
         // post-finalize handler reads the FSM state to know to relaunch but
         // can't tell the operator their stage is unretryable from there.
-        if self
+        // The lifecycle stage registry is the source of truth: a stage is
+        // restartable iff its [`crate::lifecycle::Stage::supports_restart`]
+        // returns `true`. Falls back to "not restartable" when the run's
+        // stage string doesn't map to a registered StageId.
+        let stage_supports_restart = self
             .state
             .agent_runs
             .iter()
             .find(|run| run.id == run_id)
-            .and_then(super::RetryLaunch::for_run)
-            .is_none()
-        {
+            .and_then(|run| crate::lifecycle::stage_id_for_run(&run.stage, &run.window_name))
+            .and_then(|id| self.scheduler.registry().get(id))
+            .is_some_and(|stage| stage.supports_restart());
+        if !stage_supports_restart {
             self.push_status(
                 "restart: current run is not restartable".to_string(),
                 Severity::Warn,

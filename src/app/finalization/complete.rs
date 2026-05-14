@@ -77,16 +77,16 @@ impl App {
                 return Ok(());
             }
             Some(PendingAfterStop::Restart) => {
+                // Operator-initiated `:retry`/restart after a `:stop`. The
+                // failure-finalize path normally leaves `current_phase` on
+                // the failed stage's running variant, which the scheduler
+                // tick already routes back to the same stage. Clear the
+                // error so the auto-launch guard doesn't short-circuit and
+                // drive a tick directly — the shell loop will tick again,
+                // but firing eagerly here keeps perceived latency low and
+                // mirrors the legacy `launch_retry_from_descriptor` cadence.
                 self.clear_agent_error();
-                if let Some(retry) = self
-                    .state
-                    .agent_runs
-                    .iter()
-                    .find(|candidate| candidate.id == run.id)
-                    .and_then(super::super::RetryLaunch::for_run)
-                {
-                    self.launch_retry_from_descriptor(retry);
-                }
+                self.maybe_auto_launch();
                 return Ok(());
             }
             Some(PendingAfterStop::Cancel) => {

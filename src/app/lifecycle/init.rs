@@ -158,6 +158,7 @@ impl App {
             pending_decisions: initial_pending_decisions,
             scheduler: crate::lifecycle::Scheduler::new(crate::lifecycle::default_registry()),
             failed_models,
+            next_run_model_override: None,
             runner_supervisor: app_runner_supervisor(&config),
             runner_config: crate::runner::RunnerConfig {
                 full_review_interval: config.runner_view().full_review_interval,

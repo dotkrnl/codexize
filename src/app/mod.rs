@@ -353,6 +353,15 @@ pub struct App {
     /// that operator ops and the per-tick auto-launch path consult.
     pub(crate) scheduler: crate::lifecycle::Scheduler,
     pub(crate) failed_models: HashMap<RetryKey, FailedModelSet>,
+    /// Pinned model for the very next launch the scheduler dispatches.
+    ///
+    /// Used by [`crate::app::retry_policy::App::maybe_auto_retry`] to plumb a
+    /// model-fallback choice through the scheduler-driven launch path: the
+    /// policy picks the next vendor, parks it here, and lets the next tick's
+    /// [`App::maybe_auto_launch`] hand the override to the chosen stage's
+    /// `launch_*_with_model` entry point. Consumed-once and cleared on read
+    /// so a single override never bleeds across launches.
+    pub(crate) next_run_model_override: Option<CachedModel>,
     pub(crate) pending_yolo_toggle_gate: Option<&'static str>,
     pub(crate) yolo_exit_issued: HashSet<u64>,
     pub(crate) yolo_exit_observations: HashMap<u64, YoloExitObservation>,

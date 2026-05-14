@@ -144,7 +144,45 @@ impl App {
                     next_model.name
                 ),
             );
-            return self.launch_retry_for_stage(failed_run, next_model);
+            // Sharding's auto-fallback retry must re-enter the
+            // WaitingToImplement gate so the shell scheduler re-verifies
+            // the repo-state baseline before dispatching sharding again —
+            // spec §Data model line 96. Other stages can be picked up
+            // directly by the next scheduler tick from the failed phase.
+            let sharding_pause = matches!(failed_run.stage.as_str(), "sharding")
+                && !matches!(
+                    self.state.current_phase,
+                    crate::state::Phase::BuilderRecoverySharding(_),
+                );
+            if sharding_pause {
+                self.clear_agent_error();
+                self.current_run_id = None;
+                self.run_launched = false;
+                self.live_summary_cached_text.clear();
+                self.live_summary_cached_mtime = None;
+                return self
+                    .transition_to_phase(crate::state::Phase::WaitingToImplement)
+                    .is_ok();
+            }
+            // Pin the model-fallback choice on the App so the next
+            // scheduler tick's `dispatch_start` plumbs it through the
+            // stage's `launch_*_with_model` entry point. The slot is
+            // consumed-once and cleared on read.
+            self.next_run_model_override = Some(next_model);
+            self.clear_agent_error();
+            self.maybe_auto_launch();
+            // Mirror the legacy `launch_retry_for_stage` return: true iff a
+            // run actually launched (run_launched flips on inside
+            // start_run_tracking). If the scheduler tick declined to
+            // dispatch — e.g. lane-blocked or no work for the current
+            // phase — clear the override so a future tick doesn't reuse
+            // the stale pin and report failure so the caller records the
+            // original error.
+            if self.run_launched {
+                return true;
+            }
+            self.next_run_model_override = None;
+            return false;
         }
         let summary = self.retry_exhausted_summary(failed_run);
         self.handle_retry_exhausted(failed_run, summary, false)

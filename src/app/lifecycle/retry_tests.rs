@@ -154,7 +154,7 @@ fn retry_selected_target_for_task_row_rewinds_to_implementation_round() {
         // Drive the slim-target lookup directly: we're testing the
         // target-derivation contract, not the tree-row selection path
         // (already covered by the tree tests).
-        let target = super::slim_phase_for_task_retry(7, &app.state);
+        let target = crate::app::lifecycle::retry::slim_phase_for_task_retry(7, &app.state);
         assert_eq!(target, crate::lifecycle::Phase::Implementation(5));
         // And confirm the App-level wrapper applies it. The
         // run_lifecycle_op + LifecycleOps::rewind composition is what

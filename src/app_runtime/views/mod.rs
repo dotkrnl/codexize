@@ -1,7 +1,34 @@
 //! Per-surface UI-neutral projections.
-//!
-//! Each surface owned by the runtime (tree, chat, palette, status line,
-//! footer, models, render, config panel, picker, sheet, split, clock,
-//! watchdog, modal) gets its own file here in a later task. The directory
-//! exists today so that follow-up work can add files without touching the
-//! module tree.
+pub mod chat;
+pub mod clock;
+pub mod config_panel;
+pub mod footer;
+pub mod modal;
+pub mod models;
+pub mod palette;
+pub mod picker;
+pub mod render;
+pub mod session;
+pub mod shell;
+pub mod sheet;
+pub mod split;
+pub mod status_line;
+pub mod tree;
+pub mod watchdog;
+
+pub use chat::*;
+pub use clock::*;
+pub use config_panel::*;
+pub use footer::*;
+pub use modal::*;
+pub use models::*;
+pub use palette::*;
+pub use picker::*;
+pub use render::*;
+pub use session::*;
+pub use shell::*;
+pub use sheet::*;
+pub use split::*;
+pub use status_line::*;
+pub use tree::*;
+pub use watchdog::*;

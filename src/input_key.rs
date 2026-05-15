@@ -12,6 +12,14 @@ pub(crate) struct UiKey {
     pub alt: bool,
 }
 
+impl UiKey {
+    /// Synthetic key with no modifiers (the common case for command-to-key
+    /// bridging in the transitional typed-command handlers).
+    pub(crate) fn new(code: UiKeyCode) -> Self {
+        Self { code, ctrl: false, alt: false }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UiKeyCode {
     Esc,

@@ -135,7 +135,7 @@ impl Supervisor {
         }
     }
     #[cfg(test)]
-    pub fn shared_for_test() -> Self {
+    pub(crate) fn shared_for_test() -> Self {
         test_supervisor().clone()
     }
     /// Drain RunHandles whose inner task has signalled `finished=true`,

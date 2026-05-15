@@ -4,7 +4,7 @@ mod dispatch;
 mod handshake;
 mod tool_call;
 #[cfg(test)]
-pub fn client_updates_from_session_updates_for_test(
+pub(crate) fn client_updates_from_session_updates_for_test(
     values: impl IntoIterator<Item = serde_json::Value>,
     cwd: &std::path::Path,
 ) -> Vec<crate::data::acp::ClientUpdate> {

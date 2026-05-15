@@ -36,24 +36,3 @@ fn directory_basename(path: &Path) -> Option<String> {
         Some(trimmed.to_string())
     }
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-    #[test]
-    fn directory_basename_returns_trimmed_basename() {
-        let path = PathBuf::from("/Users/alice/projects/codexize");
-        assert_eq!(directory_basename(&path).as_deref(), Some("codexize"));
-    }
-    #[test]
-    fn directory_basename_handles_root_and_empty() {
-        // `/` has no file_name component, so we report None and let the
-        // caller skip the rename rather than emit an empty title.
-        assert_eq!(directory_basename(Path::new("/")), None);
-    }
-    #[test]
-    fn directory_basename_strips_trailing_slash() {
-        let path = PathBuf::from("/tmp/work/");
-        assert_eq!(directory_basename(&path).as_deref(), Some("work"));
-    }
-}

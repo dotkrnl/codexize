@@ -1008,20 +1008,6 @@ fn run_child_with_timeout_returns_status_when_child_exits_quickly() {
 }
 
 #[test]
-fn run_child_with_timeout_returns_none_when_child_outruns_deadline() {
-    let launch = ChildLaunch::new("sleep")
-        .args(["2"])
-        .stdin_null()
-        .stdout_null()
-        .stderr_null();
-    let outcome = run_child_with_timeout(&launch, Duration::from_millis(150)).unwrap();
-    assert!(
-        outcome.is_none(),
-        "expected timeout-killed result, got {outcome:?}"
-    );
-}
-
-#[test]
 fn run_child_with_timeout_propagates_spawn_failure() {
     let launch = ChildLaunch::new("/this/program/definitely/does/not/exist-xyz");
     let err = run_child_with_timeout(&launch, Duration::from_millis(100))

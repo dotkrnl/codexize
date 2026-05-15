@@ -329,7 +329,6 @@ impl RuntimePublisher {
             },
         );
     }
-
 }
 
 fn stage_after_command(current: Stage, command: StageCommand) -> Option<Stage> {

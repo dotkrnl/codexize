@@ -34,8 +34,6 @@ pub mod terminal;
 pub mod views;
 pub use crate::app::App;
 pub use crate::app::AppStartupOrigin;
-#[cfg(test)]
-pub(crate) use crate::app::{ExpansionOverride, ModelRefreshState, watchdog};
 pub(crate) use crate::app_shell::{AppShell, ShellCommandOutcome};
 pub use command::AppCommand;
 pub use commands::{

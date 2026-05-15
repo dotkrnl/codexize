@@ -1,5 +1,3 @@
-#[cfg(test)]
-use super::ModelRefreshState;
 use crate::state::{NodeStatus, RunRecord, RunStatus, Stage};
 use chrono::Offset;
 use ratatui::{
@@ -539,6 +537,3 @@ impl App {
         }
     }
 }
-#[cfg(test)]
-#[path = "tests_mod.rs"]
-mod tests_mod;

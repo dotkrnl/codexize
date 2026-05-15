@@ -213,54 +213,8 @@ fn acp_text_stream_buffers_partial_text_until_paragraph_boundary() {
     }
 
     let session_id = "runner-block-stream";
-    let mut state = SessionState::new(session_id.to_string());
-    state.agent_runs.push(crate::state::RunRecord {
-        id: 7,
-        stage: "brainstorm".to_string(),
-        task_id: None,
-        round: 1,
-        attempt: 1,
-        model: "model".to_string(),
-        subscription_label: "vendor".to_string(),
-        window_name: "[Block]".to_string(),
-        started_at: chrono::Utc::now(),
-        ended_at: None,
-        status: RunStatus::Running,
-        error: None,
-        effort: crate::data::adapters::EffortLevel::Normal,
-        effort_mapping: crate::data::config::schema::EffortMapping::default(),
-        effort_eligible: false,
-        hostname: None,
-        mount_device_id: None,
-        section_path: None,
-        modes: crate::state::LaunchModes::default(),
-    });
-    state.save().unwrap();
-    let launch = ManagedAcpLaunch {
-        resolved: crate::data::acp::AcpResolvedLaunch {
-            cli: crate::selection::CliKind::Codex,
-            interactive: true,
-            spawn: crate::data::acp::AcpSpawnSpec {
-                program: "true".to_string(),
-                args: Vec::new(),
-                env: std::collections::BTreeMap::new(),
-            },
-            session: crate::data::acp::AcpSessionSpec {
-                cwd: std::env::current_dir().unwrap(),
-                prompt: PromptPayload::Text("prompt".to_string()),
-                model: "model".to_string(),
-                reasoning_effort: crate::data::acp::AcpReasoningEffort::Medium,
-                permission_mode: crate::data::acp::AcpPermissionMode::Ask,
-                policy: crate::data::acp::AcpLaunchPolicy::default(),
-                metadata: std::collections::BTreeMap::new(),
-            },
-        },
-        window_name: "[Block]".to_string(),
-        session_id: Some(session_id.to_string()),
-        stamp_path: temp.path().join("stamp.toml"),
-        cause_path: temp.path().join("cause.txt"),
-        required_artifact: None,
-    };
+    seed_stream_session(session_id, "[Block]");
+    let launch = make_acp_test_launch(session_id, "[Block]", temp.path());
     let mut stream = AcpTextStream::new();
 
     // Partial chunks don't write to messages.toml until a paragraph/max-char
@@ -282,12 +236,7 @@ fn acp_text_stream_buffers_partial_text_until_paragraph_boundary() {
     assert_eq!(messages[0].text, "thinking aloud");
     assert_eq!(messages[1].text, "next");
 
-    unsafe {
-        match prev {
-            Some(value) => std::env::set_var("CODEXIZE_ROOT", value),
-            None => std::env::remove_var("CODEXIZE_ROOT"),
-        }
-    }
+    restore_codexize_root_env(prev);
 }
 
 fn make_acp_test_launch(session_id: &str, window_name: &str, temp: &Path) -> ManagedAcpLaunch {
@@ -887,54 +836,8 @@ fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
     }
 
     let session_id = "runner-trim-stream";
-    let mut state = SessionState::new(session_id.to_string());
-    state.agent_runs.push(crate::state::RunRecord {
-        id: 7,
-        stage: "brainstorm".to_string(),
-        task_id: None,
-        round: 1,
-        attempt: 1,
-        model: "model".to_string(),
-        subscription_label: "vendor".to_string(),
-        window_name: "[Trim]".to_string(),
-        started_at: chrono::Utc::now(),
-        ended_at: None,
-        status: RunStatus::Running,
-        error: None,
-        effort: crate::data::adapters::EffortLevel::Normal,
-        effort_mapping: crate::data::config::schema::EffortMapping::default(),
-        effort_eligible: false,
-        hostname: None,
-        mount_device_id: None,
-        section_path: None,
-        modes: crate::state::LaunchModes::default(),
-    });
-    state.save().unwrap();
-    let launch = ManagedAcpLaunch {
-        resolved: crate::data::acp::AcpResolvedLaunch {
-            cli: crate::selection::CliKind::Codex,
-            interactive: true,
-            spawn: crate::data::acp::AcpSpawnSpec {
-                program: "true".to_string(),
-                args: Vec::new(),
-                env: std::collections::BTreeMap::new(),
-            },
-            session: crate::data::acp::AcpSessionSpec {
-                cwd: std::env::current_dir().unwrap(),
-                prompt: PromptPayload::Text("prompt".to_string()),
-                model: "model".to_string(),
-                reasoning_effort: crate::data::acp::AcpReasoningEffort::Medium,
-                permission_mode: crate::data::acp::AcpPermissionMode::Ask,
-                policy: crate::data::acp::AcpLaunchPolicy::default(),
-                metadata: std::collections::BTreeMap::new(),
-            },
-        },
-        window_name: "[Trim]".to_string(),
-        session_id: Some(session_id.to_string()),
-        stamp_path: temp.path().join("stamp.toml"),
-        cause_path: temp.path().join("cause.txt"),
-        required_artifact: None,
-    };
+    seed_stream_session(session_id, "[Trim]");
+    let launch = make_acp_test_launch(session_id, "[Trim]", temp.path());
     let mut stream = AcpTextStream::new();
 
     stream.push_text(
@@ -953,14 +856,10 @@ fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
         vec!["**thinking**".to_string(), "next".to_string()]
     );
 
-    unsafe {
-        match prev {
-            Some(value) => std::env::set_var("CODEXIZE_ROOT", value),
-            None => std::env::remove_var("CODEXIZE_ROOT"),
-        }
-    }
+    restore_codexize_root_env(prev);
 }
 
+#[test]
 fn run_child_with_timeout_propagates_spawn_failure() {
     let launch = ChildLaunch::new("/this/program/definitely/does/not/exist-xyz");
     let err = run_child_with_timeout(&launch, Duration::from_millis(100))

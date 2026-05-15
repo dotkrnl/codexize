@@ -318,9 +318,9 @@ impl App {
             return Some(Reason::ExitCode(code).to_string());
         }
         let (mut guard_reason, guard_warnings) = match self.enforce_run_guard(run) {
-            guard::VerifyResult::Ok { warnings } => (None, warnings),
             guard::VerifyResult::HardError { reason, warnings } => (Some(reason), warnings),
-            guard::VerifyResult::PendingDecision { warnings, .. } => (None, warnings),
+            guard::VerifyResult::Ok { warnings }
+            | guard::VerifyResult::PendingDecision { warnings, .. } => (None, warnings),
         };
         for w in guard_warnings {
             self.append_system_message(run.id, MessageKind::SummaryWarn, w);

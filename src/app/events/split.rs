@@ -168,7 +168,6 @@ impl App {
                 self.close_split();
                 false
             }
-            KeyCode::Char('q' | 'Q') => false,
             KeyCode::Char(':') => {
                 self.open_palette_browser();
                 false
@@ -190,7 +189,7 @@ impl App {
                 false
             }
             KeyCode::Enter
-            | KeyCode::Char(_)
+            | KeyCode::Char('q' | 'Q' | _)
             | KeyCode::Backspace
             | KeyCode::Delete
             | KeyCode::Left

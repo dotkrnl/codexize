@@ -712,10 +712,7 @@ impl AppShell {
                     supervisor.replace_live_summary(text);
                 }
             }
-            ShellEvent::RunStarted { .. } => {
-                self.sidebar.mark_dirty();
-            }
-            ShellEvent::RunFinished { .. } => {
+            ShellEvent::RunStarted { .. } | ShellEvent::RunFinished { .. } => {
                 self.sidebar.mark_dirty();
             }
         }

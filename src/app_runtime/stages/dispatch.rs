@@ -135,10 +135,9 @@ mod tests {
 
     #[test]
     fn automatic_sharding_model_retry_pauses_in_waiting_to_implement() {
-        // Retargeted in 8a: the model-fallback retry path now drives the
-        // sharding-pause re-entry into WaitingToImplement directly inside
-        // `App::maybe_auto_retry` so the shell scheduler re-verifies the
-        // repo-state baseline before launching sharding again.
+        // The model retry path re-enters WaitingToImplement so the shell
+        // scheduler re-verifies the repo-state baseline before launching
+        // sharding again.
         with_temp_root(|| {
             let mut state = SessionState::new("20260511-093000-000000001".to_string());
             state.current_stage = Stage::ShardingRunning;

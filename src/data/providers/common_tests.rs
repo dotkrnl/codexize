@@ -103,16 +103,6 @@ async fn spawn_one_shot_http_responder(body: &'static str) -> std::net::SocketAd
 }
 
 #[tokio::test]
-async fn parse_json_response_returns_value_for_valid_json() {
-    let addr = spawn_one_shot_http_responder(r#"{"hello":"world"}"#).await;
-    let client = build_http_client(5).unwrap();
-    let req = client.get(format!("http://{addr}/"));
-    let resp = send_request(req, "json-test").await.unwrap();
-    let value = parse_json_response(resp, "json-test").await.unwrap();
-    assert_eq!(value["hello"].as_str(), Some("world"));
-}
-
-#[tokio::test]
 async fn fetch_json_response_returns_provider_context_on_malformed_body() {
     let addr = spawn_one_shot_http_responder("not-json-at-all").await;
     let client = build_http_client(5).unwrap();

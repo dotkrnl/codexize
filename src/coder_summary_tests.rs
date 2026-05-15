@@ -7,7 +7,7 @@ fn write_summary(dir: &tempfile::TempDir, content: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn coder_summary_done_new_schema_passes_validation() {
+fn coder_summary_done_with_rebuttal_passes_validation() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = write_summary(
         &dir,

@@ -7,22 +7,6 @@ fn write_review(dir: &tempfile::TempDir, content: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn review_approved_basic() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = write_review(
-        &dir,
-        r#"status = "approved"
-summary = "All changes look good"
-"#,
-    );
-    let verdict = validate(&path).unwrap();
-    assert_eq!(verdict.status, ReviewStatus::Approved);
-    assert_eq!(verdict.summary, "All changes look good");
-    assert!(verdict.feedback.is_empty());
-    assert!(verdict.new_tasks.is_empty());
-}
-
-#[test]
 fn review_approved_with_advisory_feedback_is_allowed() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = write_review(

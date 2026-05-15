@@ -48,7 +48,7 @@ fn assert_capture_lessons_block(name: &str, actual: &str) {
     );
     assert!(
         actual.contains("no new lesson"),
-        "{name} prompt must mention the no-new-lesson fallback"
+        "{name} prompt must mention the no-new-lesson journal option"
     );
     assert!(
         actual.contains("write_file"),

@@ -34,9 +34,8 @@ struct FakeSessionState {
     closed: bool,
     dead_reason: Option<String>,
     /// Suppresses `dead_reason` (returns None) until `cancel_calls`
-    /// reaches this threshold. Lets a test prove that a particular
-    /// fallback path was *not* taken by gating it on a cancel count
-    /// that should never be reached.
+    /// reaches this threshold. Tests use it to prove the runtime did not
+    /// issue an unexpected cancel by gating death on an impossible count.
     dead_after_cancel_calls: Option<u32>,
 }
 

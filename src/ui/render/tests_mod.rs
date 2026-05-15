@@ -2835,10 +2835,7 @@ fn depth_0_pending_row_has_no_highlight_or_underline() {
         assert!(
             !matches!(
                 style.bg,
-                Some(Color::Cyan)
-                    | Some(Color::Green)
-                    | Some(Color::Red)
-                    | Some(Color::LightYellow)
+                Some(Color::Cyan | Color::Green | Color::Red | Color::LightYellow)
             ),
             "Pending row should not carry a status highlight bg at col {col}; got {:?}",
             style.bg

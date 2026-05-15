@@ -171,14 +171,8 @@ fn command_from_key_event(key: KeyEvent, view: &AppView) -> Option<AppCommand> {
     // generic `KeyPress` bridge.
     if matches!(view.modal, Some(ModalKind::QuitRunningAgent)) && key.modifiers.is_empty() {
         return match key.code {
-            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
-                Some(AppCommand::ConfirmModal)
-            }
-            KeyCode::Esc
-            | KeyCode::Char('n')
-            | KeyCode::Char('N')
-            | KeyCode::Char('q')
-            | KeyCode::Char('Q') => Some(AppCommand::CancelModal),
+            KeyCode::Enter | KeyCode::Char('y' | 'Y') => Some(AppCommand::ConfirmModal),
+            KeyCode::Esc | KeyCode::Char('n' | 'N' | 'q' | 'Q') => Some(AppCommand::CancelModal),
             _ => None,
         };
     }

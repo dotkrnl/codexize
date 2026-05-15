@@ -32,7 +32,11 @@ pub(crate) fn palette_inner_rows(buffer: &str, selected_archived: bool) -> u16 {
     let suggestions = filtered.len().min(10) as u16;
     (1 + suggestions + 1).min(MAX_OVERLAY_INNER)
 }
-pub(crate) fn palette_overlay_height(buffer: &str, selected_archived: bool, total_height: u16) -> u16 {
+pub(crate) fn palette_overlay_height(
+    buffer: &str,
+    selected_archived: bool,
+    total_height: u16,
+) -> u16 {
     const LIST_RESERVE: u16 = 4;
     let inner = palette_inner_rows(buffer, selected_archived);
     let desired = inner + 2;

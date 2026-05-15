@@ -182,7 +182,7 @@ impl App {
     /// pause-modal behavior live in one file.
     pub(crate) fn handle_plan_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
+            KeyCode::Char('q' | 'Q') | KeyCode::Esc => true,
             KeyCode::Char('y') | KeyCode::Enter => {
                 self.clear_agent_error();
                 self.queue_view_of_current_artifact("plan.md");

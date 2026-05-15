@@ -284,8 +284,10 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
                 }
                 clock.park();
             }
-            Some(AcpRuntimeEvent::ToolCallActivity { .. })
-            | Some(AcpRuntimeEvent::SessionTitleUpdated { .. })
+            Some(
+                AcpRuntimeEvent::ToolCallActivity { .. }
+                | AcpRuntimeEvent::SessionTitleUpdated { .. },
+            )
             | None => clock.park(),
         }
         watchdog.tick(&mut session, launch, cancel, clock, diagnostics)?;

@@ -357,27 +357,23 @@ fn run_acp_install_modal(
 
 fn classify_required_modal_key(key: KeyCode) -> ModalAction {
     match key {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,
-        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => ModalAction::Exit,
+        KeyCode::Char('y' | 'Y') | KeyCode::Enter => ModalAction::Accept,
+        KeyCode::Char('q' | 'Q') | KeyCode::Esc => ModalAction::Exit,
         _ => ModalAction::Ignore,
     }
 }
 fn classify_gitignore_modal_key(key: KeyCode) -> ModalAction {
     match key {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,
-        KeyCode::Char('n') | KeyCode::Char('N') => ModalAction::Skip,
-        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => ModalAction::Exit,
+        KeyCode::Char('y' | 'Y') | KeyCode::Enter => ModalAction::Accept,
+        KeyCode::Char('n' | 'N') => ModalAction::Skip,
+        KeyCode::Char('q' | 'Q') | KeyCode::Esc => ModalAction::Exit,
         _ => ModalAction::Ignore,
     }
 }
 fn classify_optional_modal_key(key: KeyCode) -> ModalAction {
     match key {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,
-        KeyCode::Char('n')
-        | KeyCode::Char('N')
-        | KeyCode::Char('q')
-        | KeyCode::Char('Q')
-        | KeyCode::Esc => ModalAction::Skip,
+        KeyCode::Char('y' | 'Y') | KeyCode::Enter => ModalAction::Accept,
+        KeyCode::Char('n' | 'N' | 'q' | 'Q') | KeyCode::Esc => ModalAction::Skip,
         _ => ModalAction::Ignore,
     }
 }

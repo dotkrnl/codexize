@@ -161,7 +161,11 @@ fn coder_control_paths(session_dir: &Path, round: u32) -> Vec<PathBuf> {
     }
     out
 }
-pub(crate) fn capture_coder(snapshot_dir: &Path, session_dir: &Path, round: u32) -> std::io::Result<()> {
+pub(crate) fn capture_coder(
+    snapshot_dir: &Path,
+    session_dir: &Path,
+    round: u32,
+) -> std::io::Result<()> {
     let mut control_files = BTreeMap::new();
     for p in coder_control_paths(session_dir, round) {
         if let Ok(text) = std::fs::read_to_string(&p) {

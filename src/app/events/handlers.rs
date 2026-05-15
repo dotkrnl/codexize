@@ -345,7 +345,7 @@ impl App {
                 self.pending_app_exit = true;
                 false
             }
-            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') | KeyCode::Char('Q') => {
+            KeyCode::Esc | KeyCode::Char('n' | 'q' | 'Q') => {
                 self.pending_quit_confirmation_run_id = None;
                 false
             }
@@ -391,11 +391,7 @@ impl App {
                 self.confirm_cancel_session();
                 false
             }
-            KeyCode::Esc
-            | KeyCode::Char('n')
-            | KeyCode::Char('N')
-            | KeyCode::Char('q')
-            | KeyCode::Char('Q') => {
+            KeyCode::Esc | KeyCode::Char('n' | 'N' | 'q' | 'Q') => {
                 self.pending_cancel_confirmation = false;
                 false
             }
@@ -414,7 +410,7 @@ impl App {
         key: KeyEvent,
     ) -> bool {
         match key.code {
-            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
+            KeyCode::Char('q' | 'Q') | KeyCode::Esc => true,
             KeyCode::Char('r') | KeyCode::Enter => {
                 // Operator-initiated retry of the failed stage. The modal
                 // only opens when `agent_error.is_some()` while the FSM is
@@ -436,7 +432,7 @@ impl App {
                 self.transition_to_stage_logged(Stage::IdeaInput);
                 false
             }
-            KeyCode::Char('s') | KeyCode::Char('S') if stage_id == StageId::Dreaming => {
+            KeyCode::Char('s' | 'S') if stage_id == StageId::Dreaming => {
                 if let Err(err) = self.skip_suggested_dreaming() {
                     self.record_agent_error(format!("skip dreaming failed: {err:#}"));
                 }
@@ -448,8 +444,8 @@ impl App {
     }
     pub(crate) fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
-            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+            KeyCode::Char('q' | 'Q') | KeyCode::Esc => true,
+            KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
                 if let Err(err) = self.accept_skip_to_implementation() {
                     self.record_agent_error(format!(
                         "accept skip-to-implementation failed: {err:#}"
@@ -457,7 +453,7 @@ impl App {
                 }
                 false
             }
-            KeyCode::Char('n') | KeyCode::Char('N') => {
+            KeyCode::Char('n' | 'N') => {
                 if let Err(err) = self.decline_skip_to_implementation() {
                     self.record_agent_error(format!(
                         "decline skip-to-implementation failed: {err:#}"
@@ -470,7 +466,7 @@ impl App {
     }
     pub(crate) fn handle_final_validation_blocked_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char('f') | KeyCode::Char('F') | KeyCode::Enter => {
+            KeyCode::Char('f' | 'F') | KeyCode::Enter => {
                 let _ = self
                     .state
                     .log_event("palette_invoked: command=force-ship".to_string());
@@ -480,7 +476,7 @@ impl App {
                 self.transition_to_stage_logged(Stage::Done);
                 false
             }
-            KeyCode::Char('r') | KeyCode::Char('R') => {
+            KeyCode::Char('r' | 'R') => {
                 let _ = self
                     .state
                     .log_event("palette_invoked: command=recover-from-fv-block".to_string());
@@ -492,13 +488,13 @@ impl App {
     }
     pub(crate) fn handle_dreaming_decision_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Esc => {
+            KeyCode::Char('s' | 'S') | KeyCode::Esc => {
                 if let Err(err) = self.skip_suggested_dreaming() {
                     self.record_agent_error(format!("skip dreaming failed: {err:#}"));
                 }
                 false
             }
-            KeyCode::Char('r') | KeyCode::Char('R') | KeyCode::Enter => {
+            KeyCode::Char('r' | 'R') | KeyCode::Enter => {
                 if let Err(err) = self.accept_suggested_dreaming() {
                     self.record_agent_error(format!("run dreaming failed: {err:#}"));
                 }
@@ -509,14 +505,14 @@ impl App {
     }
     pub(crate) fn handle_guard_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
-            KeyCode::Char('r') | KeyCode::Char('R') | KeyCode::Enter => {
+            KeyCode::Char('q' | 'Q') | KeyCode::Esc => true,
+            KeyCode::Char('r' | 'R') | KeyCode::Enter => {
                 if let Err(err) = self.accept_guard_reset() {
                     self.record_agent_error(format!("guard reset failed: {err:#}"));
                 }
                 false
             }
-            KeyCode::Char('k') | KeyCode::Char('K') => {
+            KeyCode::Char('k' | 'K') => {
                 if let Err(err) = self.accept_guard_keep() {
                     self.record_agent_error(format!("guard keep failed: {err:#}"));
                 }

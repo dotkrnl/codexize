@@ -168,7 +168,7 @@ impl App {
                 self.close_split();
                 false
             }
-            KeyCode::Char('q') | KeyCode::Char('Q') => false,
+            KeyCode::Char('q' | 'Q') => false,
             KeyCode::Char(':') => {
                 self.open_palette_browser();
                 false

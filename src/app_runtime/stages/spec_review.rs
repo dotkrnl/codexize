@@ -178,7 +178,7 @@ impl App {
     /// pause-modal behavior live in one file.
     pub(crate) fn handle_spec_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
+            KeyCode::Char('q' | 'Q') | KeyCode::Esc => true,
             KeyCode::Char('y') | KeyCode::Enter => {
                 self.clear_agent_error();
                 self.transition_to_stage_logged(Stage::PlanningRunning);

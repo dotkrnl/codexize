@@ -983,20 +983,16 @@ impl ConfigPanelState {
                         Some(PanelOutcome::KeepOpen)
                     }
                     KeyCode::Enter => Some(self.execute_exit_choice(EXIT_OPTIONS[selected].0)),
-                    KeyCode::Char('s') | KeyCode::Char('S') => {
-                        Some(self.execute_exit_choice(ExitChoice::Save))
-                    }
-                    KeyCode::Char('d') | KeyCode::Char('D') => {
-                        Some(self.execute_exit_choice(ExitChoice::Discard))
-                    }
-                    KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Char('q') | KeyCode::Esc => {
+                    KeyCode::Char('s' | 'S') => Some(self.execute_exit_choice(ExitChoice::Save)),
+                    KeyCode::Char('d' | 'D') => Some(self.execute_exit_choice(ExitChoice::Discard)),
+                    KeyCode::Char('c' | 'C' | 'q') | KeyCode::Esc => {
                         Some(self.execute_exit_choice(ExitChoice::Cancel))
                     }
                     _ => Some(PanelOutcome::KeepOpen),
                 }
             }
             ConflictBanner::RegenerateTopicPrompt => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
                     match notifications::generate_topic()
                         .map_err(|err| anyhow!("{err:#}"))
                         .and_then(|topic| self.set_value("ntfy.topic", &topic))
@@ -1007,7 +1003,7 @@ impl ConfigPanelState {
                     self.conflict = None;
                     Some(PanelOutcome::KeepOpen)
                 }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') | KeyCode::Esc => {
+                KeyCode::Char('n' | 'N' | 'q') | KeyCode::Esc => {
                     self.conflict = None;
                     self.status = "unchanged".to_string();
                     Some(PanelOutcome::KeepOpen)

@@ -146,7 +146,10 @@ pub(crate) fn flatten_visible_rows(
     );
     rows
 }
-pub(crate) fn active_stage_paths(nodes: &[Node], runs: &[RunRecord]) -> BTreeMap<NodeKey, NodePath> {
+pub(crate) fn active_stage_paths(
+    nodes: &[Node],
+    runs: &[RunRecord],
+) -> BTreeMap<NodeKey, NodePath> {
     let run_lookup: BTreeMap<u64, &RunRecord> = runs.iter().map(|run| (run.id, run)).collect();
     nodes
         .iter()
@@ -454,11 +457,15 @@ fn stage_status_from_runs(
     let stage_matches = matches!(
         (stage_key, state.current_stage),
         ("brainstorm", Stage::BrainstormRunning)
-            | ("spec-review", Stage::SpecReviewRunning)
-            | ("spec-review", Stage::SpecReviewPaused)
+            | (
+                "spec-review",
+                Stage::SpecReviewRunning | Stage::SpecReviewPaused
+            )
             | ("planning", Stage::PlanningRunning)
-            | ("plan-review", Stage::PlanReviewRunning)
-            | ("plan-review", Stage::PlanReviewPaused)
+            | (
+                "plan-review",
+                Stage::PlanReviewRunning | Stage::PlanReviewPaused
+            )
             | ("sharding", Stage::ShardingRunning)
             | ("coder", Stage::ImplementationRound(_))
             | ("reviewer", Stage::ReviewRound(_))

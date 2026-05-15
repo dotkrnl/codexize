@@ -145,7 +145,7 @@ impl App {
                     true
                 }
             }
-            KeyCode::Char('q') | KeyCode::Char('Q') => {
+            KeyCode::Char('q' | 'Q') => {
                 if self.has_running_agent() {
                     self.push_status(
                         "agent running — use palette commands".to_string(),

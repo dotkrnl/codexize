@@ -95,9 +95,7 @@ fn read_config() -> Result<CodexConfig> {
 }
 fn resolve_usage_identity() -> Result<UsageIdentity> {
     let access_token = env::var("CODEX_ACCESS_TOKEN").ok();
-    let account_id = env::var("CODEX_ACCOUNT_ID")
-        .ok()
-        .or_else(|| env::var("CHATGPT_ACCOUNT_ID").ok());
+    let account_id = env::var("CODEX_ACCOUNT_ID").ok();
     if let Some(access_token) = access_token {
         return Ok(UsageIdentity {
             access_token,
@@ -134,7 +132,6 @@ async fn fetch_usage_payload(identity: &UsageIdentity) -> Result<Value> {
     let base_url = normalize_base_url(
         &env::var("CODEX_BASE_URL")
             .ok()
-            .or_else(|| env::var("CODEX_CHATGPT_BASE_URL").ok())
             .unwrap_or_else(|| DEFAULT_CHATGPT_BASE_URL.to_string()),
     );
     let usage_url = if base_url.contains("/backend-api") {

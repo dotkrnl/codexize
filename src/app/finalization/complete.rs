@@ -28,35 +28,51 @@ impl App {
         if let Some(error) = failure_reason {
             return self.handle_run_finalization_failure(run, error);
         }
-        match self.state.current_stage {
-            Stage::BrainstormRunning => self.finalize_brainstorm_success(run)?,
-            Stage::SpecReviewRunning => self.finalize_spec_review_success(run)?,
-            Stage::PlanningRunning => self.finalize_planning_success(run)?,
-            Stage::PlanReviewRunning => self.finalize_plan_review_success(run)?,
-            Stage::RepoStateUpdateRunning => self.finalize_repo_state_update_success(run)?,
-            Stage::ShardingRunning => self.finalize_sharding_success(run)?,
-            Stage::ImplementationRound(round) => self.finalize_coder_success(run, round)?,
-            Stage::ReviewRound(round) => self.finalize_reviewer_success(run, round)?,
-            Stage::BuilderRecovery(round) => self.finalize_recovery_success(run, round)?,
-            Stage::BuilderRecoveryPlanReview(round) => {
-                self.handle_recovery_plan_review_completed(run, round)?;
+        let stage_id = crate::lifecycle::stage_id_for_run(&run.stage, &run.window_name);
+        match stage_id {
+            Some(crate::lifecycle::StageId::Brainstorm) => self.finalize_brainstorm_success(run)?,
+            Some(crate::lifecycle::StageId::SpecReview) => {
+                self.finalize_spec_review_success(run)?
             }
-            Stage::BuilderRecoverySharding(round) => {
-                self.handle_recovery_sharding_completed(run, round)?;
+            Some(crate::lifecycle::StageId::Planning) => self.finalize_planning_success(run)?,
+            Some(crate::lifecycle::StageId::PlanReview) => {
+                self.finalize_plan_review_success(run)?
             }
-            Stage::FinalValidation(round) => self.finalize_final_validation_success(run, round)?,
-            Stage::Simplification(round) => self.finalize_simplification_success(run, round)?,
-            Stage::Dreaming(round) => self.finalize_dreaming_success(run, round)?,
-            Stage::IdeaInput
-            | Stage::SpecReviewPaused
-            | Stage::PlanReviewPaused
-            | Stage::WaitingToImplement
-            | Stage::BlockedNeedsUser
-            | Stage::SkipToImplPending
-            | Stage::GitGuardPending
-            | Stage::DreamingPending
-            | Stage::Done
-            | Stage::Cancelled => {}
+            Some(crate::lifecycle::StageId::RepoStateUpdate) => {
+                self.finalize_repo_state_update_success(run)?
+            }
+            Some(crate::lifecycle::StageId::Sharding) => {
+                if matches!(self.state.current_stage, Stage::BuilderRecoverySharding(_)) {
+                    self.handle_recovery_sharding_completed(run, run.round)?;
+                } else {
+                    self.finalize_sharding_success(run)?;
+                }
+            }
+            Some(crate::lifecycle::StageId::Coder) => {
+                self.finalize_coder_success(run, run.round)?
+            }
+            Some(crate::lifecycle::StageId::Reviewer) => {
+                self.finalize_reviewer_success(run, run.round)?
+            }
+            Some(crate::lifecycle::StageId::Recovery) => {
+                self.finalize_recovery_success(run, run.round)?
+            }
+            Some(crate::lifecycle::StageId::RecoveryPlanReview) => {
+                self.handle_recovery_plan_review_completed(run, run.round)?;
+            }
+            Some(crate::lifecycle::StageId::RecoverySharding) => {
+                self.handle_recovery_sharding_completed(run, run.round)?;
+            }
+            Some(crate::lifecycle::StageId::FinalValidation) => {
+                self.finalize_final_validation_success(run, run.round)?
+            }
+            Some(crate::lifecycle::StageId::Simplification) => {
+                self.finalize_simplification_success(run, run.round)?
+            }
+            Some(crate::lifecycle::StageId::Dreaming) => {
+                self.finalize_dreaming_success(run, run.round)?
+            }
+            None => {}
         }
         Ok(())
     }
@@ -147,4 +163,82 @@ enum PendingAfterStop {
     GoIdle,
     Restart,
     Cancel,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::test_support::{mk_app, with_temp_root};
+    use crate::data::adapters::EffortLevel;
+    use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState};
+
+    fn run_record(id: u64, stage: &str, window_name: &str) -> RunRecord {
+        RunRecord {
+            id,
+            stage: stage.to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "test-model".to_string(),
+            subscription_label: "test-vendor".to_string(),
+            window_name: window_name.to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+            effort: EffortLevel::Normal,
+            effort_mapping: crate::data::config::schema::EffortMapping::default(),
+            effort_eligible: false,
+            modes: LaunchModes {
+                interactive: true,
+                ..LaunchModes::default()
+            },
+            hostname: None,
+            mount_device_id: None,
+            section_path: None,
+        }
+    }
+
+    #[test]
+    fn plan_review_run_finishing_after_waiting_dispatch_is_not_finalized_as_sharding() {
+        with_temp_root(|| {
+            let session_id = "20260515-101500-000000001";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_stage = Stage::ShardingRunning;
+            let run = run_record(7, "plan-review", "[Plan Review 1] test-model");
+            state.agent_runs.push(run.clone());
+            state.save().unwrap();
+
+            let mut app = mk_app(state);
+            app.complete_run_finalization(&run, None)
+                .expect("plan-review completion must not require tasks.toml");
+
+            let finished = app.state.agent_runs.iter().find(|r| r.id == 7).unwrap();
+            assert_eq!(finished.status, RunStatus::Done);
+            assert_eq!(app.state.current_stage, Stage::ShardingRunning);
+        });
+    }
+
+    #[test]
+    fn planning_run_finishing_after_stage_advance_is_not_finalized_as_plan_review() {
+        with_temp_root(|| {
+            let session_id = "20260515-101500-000000002";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_stage = Stage::PlanReviewRunning;
+            let run = run_record(8, "planning", "[Planning] test-model");
+            state.agent_runs.push(run.clone());
+            state.save().unwrap();
+            let artifacts = crate::state::session_dir(session_id).join("artifacts");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::write(artifacts.join("plan.md"), "# plan\n").unwrap();
+
+            let mut app = mk_app(state);
+            app.complete_run_finalization(&run, None)
+                .expect("planning completion should keep the already-advanced stage");
+
+            let finished = app.state.agent_runs.iter().find(|r| r.id == 8).unwrap();
+            assert_eq!(finished.status, RunStatus::Done);
+            assert_eq!(app.state.current_stage, Stage::PlanReviewRunning);
+        });
+    }
 }

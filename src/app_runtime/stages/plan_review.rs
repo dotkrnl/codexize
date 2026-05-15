@@ -209,6 +209,14 @@ impl App {
     ) -> Result<()> {
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
+        if !matches!(self.state.current_stage, Stage::PlanReviewRunning) {
+            self.append_system_message(
+                run.id,
+                MessageKind::Summary,
+                "Plan review complete.".to_string(),
+            );
+            return Ok(());
+        }
         self.transition_to_stage(Stage::PlanReviewPaused)?;
         self.append_system_message(
             run.id,

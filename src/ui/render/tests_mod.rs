@@ -2075,6 +2075,33 @@ fn spec_review_modal_is_centered_with_content_driven_height() {
 }
 
 #[test]
+fn plan_review_modal_asks_to_approve_plan_not_advance_to_sharding() {
+    let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+    app.state.current_stage = Stage::PlanReviewPaused;
+
+    let lines = app.modal_content_lines(ModalKind::PlanReviewPaused, 100);
+    let text = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        text.contains("Approve plan? y = yes, n = no (stay/rerun) · q = stay here"),
+        "modal should ask about plan approval: {text}"
+    );
+    assert!(
+        !text.contains("sharding"),
+        "plan approval modal should not describe the next action as sharding: {text}"
+    );
+}
+
+#[test]
 fn modal_dialog_uses_black_background_and_light_text() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
     app.state.current_stage = Stage::SpecReviewPaused;

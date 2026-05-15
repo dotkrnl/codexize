@@ -200,6 +200,14 @@ impl App {
     ) -> Result<()> {
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
+        if !matches!(self.state.current_stage, Stage::SpecReviewRunning) {
+            self.append_system_message(
+                run.id,
+                MessageKind::Summary,
+                "Spec review complete.".to_string(),
+            );
+            return Ok(());
+        }
         self.transition_to_stage(Stage::SpecReviewPaused)?;
         self.append_system_message(
             run.id,

@@ -153,6 +153,9 @@ impl App {
     ) -> Result<()> {
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
+        if !matches!(self.state.current_stage, Stage::PlanningRunning) {
+            return Ok(());
+        }
         let plan_path = session_state::session_dir(&self.state.session_id)
             .join("artifacts")
             .join("plan.md");

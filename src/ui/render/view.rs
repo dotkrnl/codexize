@@ -540,7 +540,7 @@ impl App {
                 Style::default().fg(Color::White),
             ))],
             ModalKind::PlanReviewPaused => vec![Line::from(Span::styled(
-                "Advance to sharding? y = yes, n = no (stay/rerun) · q = stay here".to_string(),
+                "Approve plan? y = yes, n = no (stay/rerun) · q = stay here".to_string(),
                 Style::default().fg(Color::White),
             ))],
             ModalKind::StageError(stage_id) => {

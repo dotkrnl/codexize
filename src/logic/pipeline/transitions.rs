@@ -15,27 +15,6 @@ use std::collections::BTreeSet;
 #[cfg(test)]
 #[path = "transitions_tests.rs"]
 mod transitions_tests;
-/// Errors that can occur during stage transitions.
-#[derive(Debug, thiserror::Error)]
-pub enum TransitionError {
-    #[error("Cannot transition from {from} to {to}: {reason}")]
-    InvalidTransition {
-        from: Stage,
-        to: Stage,
-        reason: String,
-    },
-}
-/// Validate that a transition from `from` to `to` is allowed.
-pub fn validate_transition(from: &Stage, to: &Stage) -> Result<(), TransitionError> {
-    if !from.can_transition_to(to) {
-        return Err(TransitionError::InvalidTransition {
-            from: *from,
-            to: *to,
-            reason: format!("Transition from {from} to {to} is not allowed"),
-        });
-    }
-    Ok(())
-}
 /// Hard cap on `FinalValidation` runs per session. The 4th attempted entry
 /// auto-routes to `BlockedNeedsUser` *before* the validator launches, with
 /// `block_origin = FinalValidation` so the operator can force-ship or rewind.
@@ -386,9 +365,8 @@ pub fn clear_pending_guard_decision(state: &mut SessionState) {
     state.pending_guard_decision = None;
 }
 pub fn restore_guard_originating_stage(state: &mut SessionState, originating: Stage) {
-    // The guard modal is an interstitial persisted stage; on "keep", finalization
-    // must resume the original running stage before applying its normal successor.
-    // Stage::can_transition_to intentionally does not list GitGuardPending back
-    // to the paused running stages, so this restore cannot use execute_transition.
+    // The guard modal is an interstitial persisted stage; on "keep",
+    // finalization resumes the original running stage before applying its
+    // normal successor.
     state.current_stage = originating;
 }

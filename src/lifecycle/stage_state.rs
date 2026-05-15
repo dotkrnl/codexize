@@ -86,10 +86,6 @@ impl Stage {
         }
     }
 
-    pub fn can_transition_to(&self, _target: &Stage) -> bool {
-        true
-    }
-
     /// True if this stage has no successor in the linear lifecycle.
     pub fn is_terminal(self) -> bool {
         matches!(self, Stage::Done | Stage::Cancelled)

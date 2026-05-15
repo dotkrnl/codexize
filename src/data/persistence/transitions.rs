@@ -7,19 +7,18 @@
 use crate::data::adapters::EffortLevel;
 use crate::logic::pipeline::stage::Stage;
 use crate::logic::pipeline::transitions::{
-    FinishedRunRecord, SIMPLIFICATION_ATTEMPT_CAP, VALIDATION_ATTEMPT_CAP, validate_transition,
+    FinishedRunRecord, SIMPLIFICATION_ATTEMPT_CAP, VALIDATION_ATTEMPT_CAP,
 };
 use crate::state::{BlockOrigin, LaunchModes, RunStatus, SectionPart, SessionState};
 use anyhow::{Context, Result};
 use chrono::Utc;
-/// Execute a validated transition, updating the state and persisting it.
+/// Execute a transition, updating the state and persisting it.
 ///
 /// Force-ship guard: `BlockedNeedsUser -> Done` is rejected at runtime unless
 /// the current `block_origin` is `FinalValidation`. The static stage graph
 /// allows the edge so the operator-facing affordance can be surfaced, but
 /// only final-validation blocks may take it.
 pub fn execute_transition(state: &mut SessionState, to: Stage) -> Result<()> {
-    validate_transition(&state.current_stage, &to).map_err(|e| anyhow::anyhow!("{e}"))?;
     if matches!(state.current_stage, Stage::BlockedNeedsUser)
         && matches!(to, Stage::Done)
         && state.block_origin != Some(BlockOrigin::FinalValidation)
@@ -84,9 +83,6 @@ pub fn enter_final_validation(
         );
     }
     let target = Stage::FinalValidation(round);
-    // Validate before incrementing so an illegal source stage cannot leak a
-    // stale attempt count into the persisted state.
-    validate_transition(&state.current_stage, &target).map_err(|e| anyhow::anyhow!("{e}"))?;
     state.validation_attempts += 1;
     let attempt = state.validation_attempts;
     execute_transition(state, target)?;
@@ -126,9 +122,6 @@ pub fn enter_simplification(state: &mut SessionState, round: u32) -> Result<Simp
         );
     }
     let target = Stage::Simplification(round);
-    // Validate before incrementing so an illegal source stage cannot leak a
-    // stale attempt count into the persisted state.
-    validate_transition(&state.current_stage, &target).map_err(|e| anyhow::anyhow!("{e}"))?;
     let next = attempts + 1;
     state.simplification_attempts.insert(round, next);
     execute_transition(state, target)?;

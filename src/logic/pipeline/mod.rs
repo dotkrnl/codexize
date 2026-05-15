@@ -7,7 +7,7 @@ pub mod stage;
 pub mod transitions;
 pub use stage::Stage;
 pub use transitions::{
-    FinishedRunRecord, TransitionError, append_final_validation_gap_tasks, append_refine_feedback,
+    FinishedRunRecord, append_final_validation_gap_tasks, append_refine_feedback,
     apply_revise_with_new_tasks, archive_session, clear_agent_error,
     clear_builder_recovery_context, clear_pending_guard_decision, clear_skip_to_impl_proposal,
     ensure_builder_task_for_round, increment_recovery_cycle_count, initialize_task_pipeline,
@@ -19,5 +19,5 @@ pub use transitions::{
     replace_recovery_pipeline, reset_builder_after_rewind, reset_recovery_cycle_count,
     restore_archived_session, restore_guard_originating_stage, set_cheap_mode,
     set_retry_reset_run_id_cutoff, set_stage_for_operator_retry, set_yolo_mode,
-    take_pending_guard_decision, take_pending_refine_feedback, validate_transition,
+    take_pending_guard_decision, take_pending_refine_feedback,
 };

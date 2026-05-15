@@ -28,9 +28,9 @@ pub use crate::logic::pipeline::transitions::{
     replace_recovery_pipeline, reset_builder_after_rewind, reset_recovery_cycle_count,
     restore_archived_session, restore_guard_originating_stage, set_cheap_mode,
     set_retry_reset_run_id_cutoff, set_stage_for_operator_retry, set_yolo_mode,
-    take_pending_guard_decision, take_pending_refine_feedback, validate_transition,
+    take_pending_guard_decision, take_pending_refine_feedback,
 };
-pub use crate::logic::pipeline::{FinishedRunRecord, Stage, TransitionError};
+pub use crate::logic::pipeline::{FinishedRunRecord, Stage};
 pub use builder::BuilderState;
 pub use resume_logic::{ResumeError, can_resume};
 pub use stage_io::{

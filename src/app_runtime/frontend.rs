@@ -103,22 +103,32 @@ pub struct RecordingFrontend {
 }
 
 #[cfg(test)]
+impl RecordingFrontend {
+    /// Record a single event after verifying the spec's sequence-ordering
+    /// invariant: `snapshot.read().seq >= event.seq`.
+    fn push_event(
+        recorded: &Arc<std::sync::Mutex<Vec<RootEvent>>>,
+        connector: &FrontendConnector,
+        event: RootEvent,
+    ) {
+        assert!(
+            connector.snapshot.read().seq >= event.seq,
+            "invariant violation: snapshot seq {} < event seq {}",
+            connector.snapshot.read().seq,
+            event.seq
+        );
+        recorded.lock().unwrap().push(event);
+    }
+}
+
+#[cfg(test)]
 impl Frontend for RecordingFrontend {
     fn run(self, connector: FrontendConnector) -> anyhow::Result<()> {
         let mut scripted = self.scripted_commands.into_iter();
 
         loop {
             while let Ok(event) = connector.events.try_recv() {
-                // Verify the spec's sequence ordering guarantee (spec §
-                // "Pull-based snapshot semantics"): when an event with seq N
-                // is observed, the snapshot must have seq >= N.
-                assert!(
-                    connector.snapshot.read().seq >= event.seq,
-                    "invariant violation: snapshot seq {} < event seq {}",
-                    connector.snapshot.read().seq,
-                    event.seq
-                );
-                self.recorded_events.lock().unwrap().push(event);
+                RecordingFrontend::push_event(&self.recorded_events, &connector, event);
             }
 
             if connector.shutdown.is_set() {
@@ -127,12 +137,10 @@ impl Frontend for RecordingFrontend {
 
             let Some(command) = scripted.next() else {
                 while let Ok(event) = connector.events.try_recv() {
-                    assert!(connector.snapshot.read().seq >= event.seq);
-                    self.recorded_events.lock().unwrap().push(event);
+                    RecordingFrontend::push_event(&self.recorded_events, &connector, event);
                 }
                 while let Ok(event) = connector.events.recv_timeout(Duration::from_millis(50)) {
-                    assert!(connector.snapshot.read().seq >= event.seq);
-                    self.recorded_events.lock().unwrap().push(event);
+                    RecordingFrontend::push_event(&self.recorded_events, &connector, event);
                 }
                 break;
             };

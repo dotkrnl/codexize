@@ -9,6 +9,7 @@ use crate::data::config::Config;
 use crate::data::config::schema::{EffortMapping, Override, ProviderEntry};
 use crate::logic::selection::baked;
 use crate::selection::{CliKind, SubscriptionKind};
+use super::pad_right;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -520,12 +521,3 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
     }
 }
 
-fn pad_right(text: &str, width: usize) -> String {
-    use unicode_width::UnicodeWidthStr;
-    let used = text.width();
-    if used >= width {
-        text.to_string()
-    } else {
-        format!("{text}{}", " ".repeat(width - used))
-    }
-}

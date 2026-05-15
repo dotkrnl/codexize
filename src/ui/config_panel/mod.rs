@@ -1964,7 +1964,7 @@ fn override_dot(is_override: bool) -> Span<'static> {
     }
 }
 
-fn pad_right(text: &str, width: usize) -> String {
+pub(crate) fn pad_right(text: &str, width: usize) -> String {
     let used = text.width();
     if used >= width {
         ellipsize_end(text, width)

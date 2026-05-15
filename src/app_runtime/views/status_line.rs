@@ -22,3 +22,6 @@ pub enum StatusSeverity {
     Warn,
     Error,
 }
+
+pub use crate::app::status_line::Severity;
+pub(crate) use crate::app::status_line::StatusLine;

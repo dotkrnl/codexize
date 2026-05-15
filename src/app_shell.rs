@@ -265,7 +265,7 @@ impl SessionSupervisor {
 
     fn replace_live_summary(&mut self, text: String) {
         if let Some(app) = self.app.as_mut() {
-            app.live_summary_cached_text = crate::ui::render::state::sanitize_live_summary(&text);
+            app.live_summary_cached_text = crate::app::render_helpers::sanitize_live_summary(&text);
         }
     }
 

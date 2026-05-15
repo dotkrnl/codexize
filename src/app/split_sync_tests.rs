@@ -1,5 +1,5 @@
-use super::split::SplitTarget;
 use super::test_support::{key, mk_app};
+use crate::app_runtime::views::split::SplitTargetView as SplitTarget;
 use crate::data::adapters::EffortLevel;
 use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState, Stage};
 

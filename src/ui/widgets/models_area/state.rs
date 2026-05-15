@@ -1,12 +1,7 @@
+pub use crate::app_runtime::views::models::ModelsAreaMode;
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ModelsAreaMode {
-    #[default]
-    FullTable,
-    CompactQuota,
-}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum QuotaColumn {
     Expanded,

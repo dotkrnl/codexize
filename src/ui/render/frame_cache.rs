@@ -33,8 +33,6 @@ pub(crate) struct PipelineLine {
 #[derive(Default)]
 struct FrameCache {
     pipeline_lines: Option<Vec<PipelineLine>>,
-    header_y_offsets: Option<(Vec<usize>, usize)>,
-    running_depth_0_header: Option<Option<(usize, usize)>>,
     /// Per-row body lines, keyed by `visible_rows` index. Both
     /// `header_y_offsets` (which needs only the body length) and
     /// `compute_pipeline_render_lines` (which extends the line list) read
@@ -116,51 +114,6 @@ where
             _ => true,
         })
         .collect()
-}
-/// Return the cached `(ys, total)` header offset table, populating via
-/// `populate` on first miss. Outside a frame guard the helper bypasses the
-/// cache.
-pub(crate) fn cached_header_y_offsets<F>(populate: F) -> (Vec<usize>, usize)
-where
-    F: FnOnce() -> (Vec<usize>, usize),
-{
-    if !in_frame() {
-        return populate();
-    }
-    let already = CACHE.with(|c| c.borrow().header_y_offsets.is_some());
-    if !already {
-        let result = populate();
-        CACHE.with(|c| c.borrow_mut().header_y_offsets = Some(result));
-    }
-    CACHE.with(|c| {
-        c.borrow()
-            .header_y_offsets
-            .as_ref()
-            .expect("just populated")
-            .clone()
-    })
-}
-/// Return the cached `running_depth_0_header` lookup, populating via
-/// `populate` on first miss. Outside a frame guard the helper bypasses the
-/// cache.
-pub(crate) fn cached_running_depth_0_header<F>(populate: F) -> Option<(usize, usize)>
-where
-    F: FnOnce() -> Option<(usize, usize)>,
-{
-    if !in_frame() {
-        return populate();
-    }
-    let already = CACHE.with(|c| c.borrow().running_depth_0_header.is_some());
-    if !already {
-        let result = populate();
-        CACHE.with(|c| c.borrow_mut().running_depth_0_header = Some(result));
-    }
-    CACHE.with(|c| {
-        *c.borrow()
-            .running_depth_0_header
-            .as_ref()
-            .expect("just populated")
-    })
 }
 /// Return the cached body lines for `index` (computed with an empty
 /// `suppressed_container_runs`), populating via `populate` on first miss.

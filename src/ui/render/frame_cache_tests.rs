@@ -1,52 +1,6 @@
 use super::*;
 
 #[test]
-fn bypasses_cache_outside_frame() {
-    // No FrameGuard active → both calls invoke the populate closure.
-    let mut count = 0;
-    let _ = cached_header_y_offsets(|| {
-        count += 1;
-        (vec![0, 1, 2], 3)
-    });
-    let _ = cached_header_y_offsets(|| {
-        count += 1;
-        (vec![0, 1, 2], 3)
-    });
-    assert_eq!(count, 2);
-}
-
-#[test]
-fn populates_once_inside_frame() {
-    let _guard = FrameGuard::enter();
-    let mut count = 0;
-    let first = cached_header_y_offsets(|| {
-        count += 1;
-        (vec![0, 5, 10], 12)
-    });
-    let second = cached_header_y_offsets(|| {
-        count += 1;
-        unreachable!("populated already")
-    });
-    assert_eq!(count, 1);
-    assert_eq!(first, second);
-}
-
-#[test]
-fn frame_guard_drop_clears_cache() {
-    {
-        let _guard = FrameGuard::enter();
-        let _ = cached_header_y_offsets(|| (vec![1], 1));
-    }
-    let mut count = 0;
-    let _guard = FrameGuard::enter();
-    let _ = cached_header_y_offsets(|| {
-        count += 1;
-        (vec![2], 2)
-    });
-    assert_eq!(count, 1, "cache must repopulate in the new frame");
-}
-
-#[test]
 fn cached_row_body_populates_each_index_once() {
     let _guard = FrameGuard::enter();
     let mut count = 0;

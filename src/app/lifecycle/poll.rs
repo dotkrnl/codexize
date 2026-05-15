@@ -1,4 +1,5 @@
-use crate::app::{App, ObservedPathState, split::SplitTarget};
+use crate::app::{App, ObservedPathState};
+use crate::app_runtime::views::split::SplitTargetView as SplitTarget;
 use crate::state::{MessageKind, SessionState};
 use std::time::{Duration, Instant};
 impl App {

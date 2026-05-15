@@ -26,3 +26,5 @@ pub enum ModelRefreshViewStatus {
     Refreshing,
     Failed,
 }
+
+pub use crate::app::models::ModelsAreaMode;

@@ -1,10 +1,10 @@
 use crate::app::prompts::plan_review_prompt;
 use crate::app::{App, guard};
+use crate::app_runtime::{UiKey, UiKeyCode};
 use crate::data::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, MessageKind, RunStatus, Stage};
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent};
 use std::path::Path;
 impl App {
     /// Extend the operator's default ACP policy so the interactive plan
@@ -180,10 +180,11 @@ impl App {
     /// Modal handler for the "plan review paused — accept verdict?" prompt.
     /// Co-located with the plan-review launch so the stage's launch and
     /// pause-modal behavior live in one file.
-    pub(crate) fn handle_plan_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_plan_review_paused_modal_key(&mut self, key: impl Into<UiKey>) -> bool {
+        let key = key.into();
         match key.code {
-            KeyCode::Char('q' | 'Q') | KeyCode::Esc => true,
-            KeyCode::Char('y') | KeyCode::Enter => {
+            UiKeyCode::Char('q' | 'Q') | UiKeyCode::Esc => true,
+            UiKeyCode::Char('y') | UiKeyCode::Enter => {
                 self.clear_agent_error();
                 self.queue_view_of_current_artifact("plan.md");
                 // Spec §Data model line 96: approved plans pause in
@@ -193,7 +194,7 @@ impl App {
                 self.transition_to_stage_logged(Stage::WaitingToImplement);
                 false
             }
-            KeyCode::Char('n') => {
+            UiKeyCode::Char('n') => {
                 self.transition_to_stage_logged(Stage::PlanReviewRunning);
                 self.launch_plan_review();
                 false

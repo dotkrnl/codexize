@@ -1,11 +1,8 @@
 use super::super::{
-    App, AppStartupOrigin,
-    models::spawn_refresh,
-    models_area, palette, startup_cache_has_expired_section,
+    App, AppStartupOrigin, models::spawn_refresh, startup_cache_has_expired_section,
     state::ModelRefreshState,
-    status_line,
-    tree::{build_tree, current_node_index, node_key_at_path},
 };
+use crate::app::tree::{build_tree, current_node_index, node_key_at_path};
 use crate::{
     data::cache,
     state::{self as session_state, SessionState, Stage},
@@ -176,9 +173,9 @@ impl App {
             #[cfg(test)]
             test_launch_harness: None,
             messages,
-            status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
-            prev_models_mode: models_area::ModelsAreaMode::default(),
-            palette: palette::PaletteState::default(),
+            status_line: Rc::new(RefCell::new(crate::app::status_line::StatusLine::new())),
+            prev_models_mode: crate::app::models::ModelsAreaMode::default(),
+            palette: crate::app::palette::PaletteState::default(),
             command_return_target: None,
             config_panel: None,
             last_config_section: None,

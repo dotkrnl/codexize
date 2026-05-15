@@ -34,13 +34,6 @@ pub(crate) fn chat_scroll_window(
         below_count: total_lines.saturating_sub(visible_end),
     })
 }
-pub(crate) fn max_chat_scroll_offset(total_lines: usize, available_height: usize) -> usize {
-    compute_max_chat_scroll_offset(
-        total_lines,
-        available_height,
-        total_lines > available_height,
-    )
-}
 fn compute_max_chat_scroll_offset(
     total_lines: usize,
     available_height: usize,

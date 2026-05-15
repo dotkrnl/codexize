@@ -1,12 +1,13 @@
 use crate::app_runtime::frontend::{Frontend, FrontendConnector};
 use crate::app_runtime::terminal::{TerminalCommandOutcome, TerminalRuntime};
+use crate::app_runtime::{AppShell, ShellCommandOutcome};
 use crate::ui::tui::{self, AppTerminal, CrosstermInputAdapter};
 use crate::ui::widgets::sidebar::view::{render_sidebar, sidebar_width};
 use anyhow::Result;
 use ratatui::layout::Rect;
 
 pub struct TerminalFrontend<'a> {
-    pub shell: &'a mut crate::app_shell::AppShell,
+    pub shell: &'a mut AppShell,
     pub terminal: &'a mut AppTerminal,
 }
 
@@ -42,7 +43,12 @@ impl Frontend for TerminalFrontend<'_> {
             app = self.shell.take_focused_app();
             if let Some(path) = app.take_pending_view_path() {
                 input.shutdown_blocking();
-                app.run_external_view_editor(self.terminal, &path);
+                app.run_external_view_editor(&path, |run_editor| {
+                    let _ = tui::run_foreground(self.terminal, || {
+                        run_editor();
+                        Ok(())
+                    });
+                });
                 input = CrosstermInputAdapter::spawn();
             }
             if app.runtime_tick_before_data_drain() {
@@ -84,11 +90,11 @@ impl Frontend for TerminalFrontend<'_> {
                         .shell
                         .handle_shell_command(command.clone(), modal_open)?
                     {
-                        crate::app_shell::ShellCommandOutcome::Consumed => {
+                        ShellCommandOutcome::Consumed => {
                             app = self.shell.swap_focused_app_if_needed(app);
                             continue;
                         }
-                        crate::app_shell::ShellCommandOutcome::Unhandled => {}
+                        ShellCommandOutcome::Unhandled => {}
                     }
                 }
 

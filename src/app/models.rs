@@ -50,6 +50,12 @@ pub(crate) fn spawn_refresh(
     }
     rx
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ModelsAreaMode {
+    #[default]
+    FullTable,
+    CompactQuota,
+}
 pub(crate) fn subscription_tag(subscription: SubscriptionKind) -> &'static str {
     match subscription {
         SubscriptionKind::Claude => "claude",

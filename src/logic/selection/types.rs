@@ -10,6 +10,31 @@ pub enum SubscriptionKind {
     OpencodeGo,
     Direct,
 }
+
+impl SubscriptionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SubscriptionKind::Claude => "claude",
+            SubscriptionKind::Codex => "codex",
+            SubscriptionKind::Gemini => "gemini",
+            SubscriptionKind::Kimi => "kimi",
+            SubscriptionKind::OpencodeGo => "opencode-go",
+            SubscriptionKind::Direct => "direct",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "claude" => Some(SubscriptionKind::Claude),
+            "codex" => Some(SubscriptionKind::Codex),
+            "gemini" => Some(SubscriptionKind::Gemini),
+            "kimi" => Some(SubscriptionKind::Kimi),
+            "opencode-go" => Some(SubscriptionKind::OpencodeGo),
+            "direct" => Some(SubscriptionKind::Direct),
+            _ => None,
+        }
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CliKind {

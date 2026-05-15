@@ -7,3 +7,5 @@ pub struct RenderView {
     /// Monotonic tick for global animations (spinners).
     pub spinner_tick: usize,
 }
+
+pub(crate) use crate::app::render_helpers::{strip_ansi, wrap_text};

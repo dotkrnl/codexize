@@ -4,8 +4,8 @@
 //! you scroll" so both `viewport.rs` clamping and the renderer can call it
 //! through the same surface.
 use crate::app::App;
+use crate::app::frame_cache::{cached_header_y_offsets, cached_running_depth_0_header};
 use crate::state::NodeStatus;
-use crate::ui::render::frame_cache::{cached_header_y_offsets, cached_running_depth_0_header};
 impl App {
     pub(crate) fn header_y_offsets(&self) -> (Vec<usize>, usize) {
         cached_header_y_offsets(|| self.compute_header_y_offsets())

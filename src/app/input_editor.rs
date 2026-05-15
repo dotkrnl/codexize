@@ -1,89 +1,83 @@
-//! Shared Unix-style readline-ish key handling for text input buffers.
-//!
-//! Tracks a cursor as a *char* index into the buffer. Callers own the
-//! `String` and `usize` cursor; this module only mutates them in response
-//! to key events. Returns `true` when a key is consumed, `false` to let
-//! the caller handle it (e.g. Enter, Esc).
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-pub fn apply(buffer: &mut String, cursor: &mut usize, key: KeyEvent) -> bool {
+fn char_to_byte(s: &str, char_idx: usize) -> usize {
+    s.char_indices().nth(char_idx).map_or(s.len(), |(i, _)| i)
+}
+pub fn apply(buffer: &mut String, cursor: &mut usize, key: crate::app_runtime::UiKey) -> bool {
     let len = buffer.chars().count();
     if *cursor > len {
         *cursor = len;
     }
     let byte_cursor = char_to_byte(buffer, *cursor);
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    let alt = key.modifiers.contains(KeyModifiers::ALT);
     match key.code {
-        KeyCode::Home => {
+        crate::app_runtime::UiKeyCode::Home => {
             *cursor = 0;
             true
         }
-        KeyCode::End => {
+        crate::app_runtime::UiKeyCode::End => {
             *cursor = len;
             true
         }
-        KeyCode::Left => {
+        crate::app_runtime::UiKeyCode::Left => {
             if *cursor > 0 {
                 *cursor -= 1;
             }
             true
         }
-        KeyCode::Right => {
+        crate::app_runtime::UiKeyCode::Right => {
             if *cursor < len {
                 *cursor += 1;
             }
             true
         }
-        KeyCode::Delete => {
+        crate::app_runtime::UiKeyCode::Delete => {
             delete_forward(buffer, cursor);
             true
         }
-        KeyCode::Backspace => {
+        crate::app_runtime::UiKeyCode::Backspace => {
             delete_backward(buffer, cursor);
             true
         }
-        KeyCode::Char('a') if ctrl => {
+        crate::app_runtime::UiKeyCode::Char('a') if key.ctrl => {
             *cursor = 0;
             true
         }
-        KeyCode::Char('e') if ctrl => {
+        crate::app_runtime::UiKeyCode::Char('e') if key.ctrl => {
             *cursor = len;
             true
         }
-        KeyCode::Char('b') if ctrl => {
+        crate::app_runtime::UiKeyCode::Char('b') if key.ctrl => {
             if *cursor > 0 {
                 *cursor -= 1;
             }
             true
         }
-        KeyCode::Char('f') if ctrl => {
+        crate::app_runtime::UiKeyCode::Char('f') if key.ctrl => {
             if *cursor < len {
                 *cursor += 1;
             }
             true
         }
-        KeyCode::Char('d') if ctrl => {
+        crate::app_runtime::UiKeyCode::Char('d') if key.ctrl => {
             delete_forward(buffer, cursor);
             true
         }
-        KeyCode::Char('h') if ctrl => {
+        crate::app_runtime::UiKeyCode::Char('h') if key.ctrl => {
             delete_backward(buffer, cursor);
             true
         }
-        KeyCode::Char('u') if ctrl => {
+        crate::app_runtime::UiKeyCode::Char('u') if key.ctrl => {
             buffer.replace_range(..byte_cursor, "");
             *cursor = 0;
             true
         }
-        KeyCode::Char('k') if ctrl => {
+        crate::app_runtime::UiKeyCode::Char('k') if key.ctrl => {
             buffer.truncate(byte_cursor);
             true
         }
-        KeyCode::Char('w') if ctrl => {
+        crate::app_runtime::UiKeyCode::Char('w') if key.ctrl => {
             delete_word_backward(buffer, cursor);
             true
         }
-        KeyCode::Char(c) if !ctrl && !alt => {
+        crate::app_runtime::UiKeyCode::Char(c) if !key.ctrl && !key.alt => {
             buffer.insert(byte_cursor, c);
             *cursor += 1;
             true
@@ -91,10 +85,18 @@ pub fn apply(buffer: &mut String, cursor: &mut usize, key: KeyEvent) -> bool {
         _ => false,
     }
 }
-pub use crate::app_runtime::views::input_editor::insert_str;
-fn char_to_byte(s: &str, char_idx: usize) -> usize {
-    s.char_indices().nth(char_idx).map_or(s.len(), |(i, _)| i)
+pub fn insert_str(buffer: &mut String, cursor: &mut usize, s: &str) {
+    let len = buffer.chars().count();
+    if *cursor > len {
+        *cursor = len;
+    }
+    let byte_cursor = char_to_byte(buffer, *cursor);
+    let normalized: String = s.replace("\r\n", "\n").replace('\r', "\n");
+    let inserted_chars = normalized.chars().count();
+    buffer.insert_str(byte_cursor, &normalized);
+    *cursor += inserted_chars;
 }
+
 fn delete_backward(buffer: &mut String, cursor: &mut usize) {
     if *cursor == 0 {
         return;
@@ -104,6 +106,7 @@ fn delete_backward(buffer: &mut String, cursor: &mut usize) {
     buffer.replace_range(prev..here, "");
     *cursor -= 1;
 }
+
 fn delete_forward(buffer: &mut String, cursor: &mut usize) {
     let len = buffer.chars().count();
     if *cursor >= len {
@@ -113,6 +116,7 @@ fn delete_forward(buffer: &mut String, cursor: &mut usize) {
     let next = char_to_byte(buffer, *cursor + 1);
     buffer.replace_range(here..next, "");
 }
+
 fn delete_word_backward(buffer: &mut String, cursor: &mut usize) {
     let chars: Vec<char> = buffer.chars().collect();
     let mut end_char = *cursor;
@@ -127,6 +131,3 @@ fn delete_word_backward(buffer: &mut String, cursor: &mut usize) {
     buffer.replace_range(start_byte..here, "");
     *cursor = end_char;
 }
-#[cfg(test)]
-#[path = "input_editor_tests.rs"]
-mod tests;

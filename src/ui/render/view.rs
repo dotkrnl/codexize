@@ -18,9 +18,7 @@ mod pipeline;
 mod split_view;
 use self::pipeline::PipelineWidget;
 use self::split_view::SplitWidget;
-pub(crate) use super::state::sanitize_live_summary;
 use super::{
-    App,
     chrome::{
         UnreadBadge, bottom_rule,
         modal::{render_modal_backdrop, render_modal_overlay},
@@ -39,6 +37,7 @@ use super::{
         skip_to_impl_content, spinner_frame, stage_error_content, status_highlight_bg,
     },
 };
+use crate::app_runtime::App;
 use crate::app_runtime::{AppView, ModalKind};
 const DEGENERATE_FLOOR: u16 = 16;
 const BODY_FLOOR_NORMAL: u16 = 8;
@@ -77,8 +76,7 @@ impl App {
         self.prev_models_mode = models_mode;
         let models_h = model_lines.len() as u16;
         // --- Status line (tick + render) ---
-        let now = std::time::Instant::now();
-        self.status_line.borrow_mut().tick(now);
+        self.status_line.borrow_mut().tick();
         let status_line_content = if degenerate {
             None
         } else {

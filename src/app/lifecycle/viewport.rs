@@ -2,7 +2,8 @@ use crate::app::tree::{
     NodeKey, active_path_keys, build_tree, current_node_index, deepest_path_for_run,
     flatten_visible_rows, node_at_path, node_key_at_path,
 };
-use crate::app::{App, ExpansionOverride, effective_expansion, split::SplitTarget};
+use crate::app::{App, ExpansionOverride, effective_expansion};
+use crate::app_runtime::views::split::SplitTargetView as SplitTarget;
 use crate::state::{Node, NodeStatus, RunStatus, Stage};
 use std::collections::BTreeSet;
 impl App {
@@ -123,10 +124,7 @@ impl App {
             self.split_scroll_offset = 0;
             return;
         }
-        let max_offset = crate::app::chat_widget_view_model::max_chat_scroll_offset(
-            content_height,
-            viewport_height,
-        );
+        let max_offset = crate::app::chat::max_chat_scroll_offset(content_height, viewport_height);
         if self.split_follow_tail {
             self.split_scroll_offset = max_offset;
             return;
@@ -237,17 +235,12 @@ impl App {
                     })
                     .cloned()
                     .collect();
-                let local_offset = chrono::Local::now().fixed_offset().offset().to_owned();
-                crate::app::chat_widget::message_lines(
+                crate::app::chat::transcript_line_count(
                     &msgs,
                     run,
-                    &local_offset,
-                    self.split_transcript_tail_line(run),
                     self.body_inner_width.max(1),
-                    self.spinner_tick,
                     true,
                 )
-                .len()
             }
             // Idea content currently does not participate in transcript-style
             // scrolling, so rebuild/sync clamps it as a fixed viewport.
@@ -352,7 +345,6 @@ impl App {
         if baseline >= self.messages.len() {
             return None;
         }
-        let local_offset = chrono::Local::now().fixed_offset().offset().to_owned();
         let available_width = self.body_inner_width.max(1);
         let (ys, _) = self.header_y_offsets();
         (0..self.visible_rows.len())
@@ -389,26 +381,18 @@ impl App {
                 if old_messages.len() == all_messages.len() {
                     return None;
                 }
-                let old_line_count = crate::app::chat_widget::message_lines(
+                let old_line_count = crate::app::chat::transcript_line_count(
                     &old_messages,
                     run,
-                    &local_offset,
-                    None,
                     available_width,
-                    0,
                     false,
-                )
-                .len();
-                let all_line_count = crate::app::chat_widget::message_lines(
+                );
+                let all_line_count = crate::app::chat::transcript_line_count(
                     &all_messages,
                     run,
-                    &local_offset,
-                    None,
                     available_width,
-                    0,
                     false,
-                )
-                .len();
+                );
                 (all_line_count > old_line_count).then_some(ys[index] + 1 + old_line_count)
             })
             .min()

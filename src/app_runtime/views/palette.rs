@@ -20,3 +20,7 @@ pub struct PaletteCommandView {
     pub help: Arc<str>,
     pub key_hint: Option<Arc<str>>,
 }
+
+pub(crate) use crate::app::palette::{
+    MatchResult, PaletteCommand, PaletteState, filter, ghost_completion, resolve, suggestion_text,
+};

@@ -26,3 +26,19 @@ pub struct ConfigFieldView {
     pub description: Arc<str>,
     pub is_secret: bool,
 }
+
+pub(crate) mod providers {
+    #[cfg(test)]
+    pub(crate) use crate::app::config_panel::providers::all_vendors;
+    pub(crate) use crate::app::config_panel::providers::{
+        AddProviderField, ProvidersEditor, ProvidersLine, get_lines,
+    };
+}
+
+#[cfg(test)]
+pub(crate) use crate::app::config_panel::field_index_for_test;
+pub(crate) use crate::app::config_panel::{
+    ConfigPanelState, ConflictBanner, EXIT_OPTIONS, Editing, FIELDS, FieldKind, FieldMeta,
+    PROVIDER_TOGGLES, PanelOutcome, ProviderToggle, SECTIONS, SectionLookup, ToggleField,
+    is_providers_section, lookup_section, section_title, terminal_too_narrow_message,
+};

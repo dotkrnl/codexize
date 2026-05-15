@@ -182,6 +182,10 @@ fn command_from_key_event(key: KeyEvent, view: &AppView) -> Option<AppCommand> {
             _ => None,
         };
     }
+    Some(AppCommand::KeyPress(ui_key_from_event(key)))
+}
+
+pub(crate) fn ui_key_from_event(key: KeyEvent) -> UiKey {
     let code = match key.code {
         KeyCode::Esc => UiKeyCode::Esc,
         KeyCode::Enter => UiKeyCode::Enter,
@@ -200,35 +204,24 @@ fn command_from_key_event(key: KeyEvent, view: &AppView) -> Option<AppCommand> {
         KeyCode::Char(c) => UiKeyCode::Char(c),
         _ => UiKeyCode::Unknown,
     };
-    Some(AppCommand::KeyPress(UiKey {
+    UiKey {
         code,
         ctrl: key.modifiers.contains(KeyModifiers::CONTROL),
         alt: key.modifiers.contains(KeyModifiers::ALT),
-    }))
+    }
+}
+
+impl From<KeyEvent> for UiKey {
+    fn from(key: KeyEvent) -> Self {
+        ui_key_from_event(key)
+    }
 }
 /// Strip ANSI escape sequences (CSI form `ESC[…<final-byte>`) from `s`.
 /// Shared across the TUI so chat transcript wrapping, validation report
 /// rendering, and live-summary sanitation all agree on what counts as a
 /// printable column.
 pub fn strip_ansi(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                while let Some(&c) = chars.peek() {
-                    chars.next();
-                    if c.is_ascii_alphabetic() {
-                        break;
-                    }
-                }
-            }
-        } else {
-            result.push(ch);
-        }
-    }
-    result
+    crate::app_runtime::views::render::strip_ansi(s)
 }
 /// Build a sequence of [`Line`]s for "<prefix><body>" where `body` is wrapped
 /// to fit and continuation lines indent to align under the body's first
@@ -282,53 +275,7 @@ pub fn wrap_lines_with_prefix(
 /// route through it so width handling stays consistent (and so a missing
 /// wrap call shows up as a search hit).
 pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
-    if width == 0 {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    for raw_line in text.split('\n') {
-        let clean = strip_ansi(raw_line);
-        if clean.is_empty() {
-            out.push(String::new());
-            continue;
-        }
-        let mut current = String::new();
-        let mut current_len = 0usize;
-        for word in clean.split_inclusive(' ') {
-            let word_len = word.chars().count();
-            if current_len + word_len <= width {
-                current.push_str(word);
-                current_len += word_len;
-                continue;
-            }
-            if !current.is_empty() {
-                out.push(std::mem::take(&mut current));
-                current_len = 0;
-            }
-            if word_len <= width {
-                current.push_str(word);
-                current_len = word_len;
-            } else {
-                let mut remaining: &str = word;
-                while remaining.chars().count() > width {
-                    let split_at = remaining
-                        .char_indices()
-                        .nth(width)
-                        .map_or(remaining.len(), |(i, _)| i);
-                    out.push(remaining[..split_at].to_string());
-                    remaining = &remaining[split_at..];
-                }
-                if !remaining.is_empty() {
-                    current.push_str(remaining);
-                    current_len = remaining.chars().count();
-                }
-            }
-        }
-        if !current.is_empty() {
-            out.push(current);
-        }
-    }
-    out
+    crate::app_runtime::views::render::wrap_text(text, width)
 }
 #[cfg(test)]
 #[path = "tui_tests.rs"]

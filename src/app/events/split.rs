@@ -1,8 +1,9 @@
 use super::super::App;
 use super::super::CommandReturnTarget;
-use super::super::split::SplitTarget;
+use crate::app_runtime::UiKey;
+use crate::app_runtime::UiKeyCode;
+use crate::app_runtime::views::split::SplitTargetView as SplitTarget;
 use crate::state::Stage;
-use crossterm::event::{KeyCode, KeyEvent};
 impl App {
     /// Resolve the currently selected visible row to a split target, if any.
     ///
@@ -136,24 +137,24 @@ impl App {
         let step = self.split_viewport_height().saturating_sub(1).max(1) as isize;
         self.scroll_split_by_lines(delta.saturating_mul(step));
     }
-    pub(super) fn handle_split_key(&mut self, key: KeyEvent) -> bool {
+    pub(super) fn handle_split_key(&mut self, key: UiKey) -> bool {
         if self.split_owns_input() {
             self.input_mode = true;
             match key.code {
-                KeyCode::Esc | KeyCode::Enter => return self.handle_input_key(key),
-                KeyCode::Up => {
+                UiKeyCode::Esc | UiKeyCode::Enter => return self.handle_input_key(key),
+                UiKeyCode::Up => {
                     self.scroll_split_by_lines(-1);
                     return false;
                 }
-                KeyCode::Down => {
+                UiKeyCode::Down => {
                     self.scroll_split_by_lines(1);
                     return false;
                 }
-                KeyCode::PageUp => {
+                UiKeyCode::PageUp => {
                     self.scroll_split_by_page(-1);
                     return false;
                 }
-                KeyCode::PageDown => {
+                UiKeyCode::PageDown => {
                     self.scroll_split_by_page(1);
                     return false;
                 }
@@ -164,38 +165,38 @@ impl App {
             }
         }
         match key.code {
-            KeyCode::Esc => {
+            UiKeyCode::Esc => {
                 self.close_split();
                 false
             }
-            KeyCode::Char(':') => {
+            UiKeyCode::Char(':') => {
                 self.open_palette_browser();
                 false
             }
-            KeyCode::Up => {
+            UiKeyCode::Up => {
                 self.scroll_split_by_lines(-1);
                 false
             }
-            KeyCode::Down => {
+            UiKeyCode::Down => {
                 self.scroll_split_by_lines(1);
                 false
             }
-            KeyCode::PageUp => {
+            UiKeyCode::PageUp => {
                 self.scroll_split_by_page(-1);
                 false
             }
-            KeyCode::PageDown => {
+            UiKeyCode::PageDown => {
                 self.scroll_split_by_page(1);
                 false
             }
-            KeyCode::Enter
-            | KeyCode::Char('q' | 'Q' | _)
-            | KeyCode::Backspace
-            | KeyCode::Delete
-            | KeyCode::Left
-            | KeyCode::Right
-            | KeyCode::Home
-            | KeyCode::End => false,
+            UiKeyCode::Enter
+            | UiKeyCode::Char('q' | 'Q' | _)
+            | UiKeyCode::Backspace
+            | UiKeyCode::Delete
+            | UiKeyCode::Left
+            | UiKeyCode::Right
+            | UiKeyCode::Home
+            | UiKeyCode::End => false,
             _ => false,
         }
     }

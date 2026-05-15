@@ -16,7 +16,6 @@ use crate::{
         self as session_state, BlockOrigin, DreamingDecisionKind, MessageKind, RunStatus, Stage,
     },
     tasks,
-    ui::tui::AppTerminal,
 };
 use anyhow::Result;
 use std::time::Duration;
@@ -390,18 +389,18 @@ impl App {
     /// runtime arranges that around the call.
     pub(crate) fn run_external_view_editor(
         &mut self,
-        terminal: &mut AppTerminal,
         path: &std::path::Path,
+        run_foreground: impl FnOnce(&mut dyn FnMut()),
     ) {
         let banner_inserted = prepend_review_banner(path);
-        let _ = crate::ui::tui::run_foreground(terminal, || {
+        let mut run_editor = || {
             let _ = std::process::Command::new(
                 std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string()),
             )
             .arg(path)
             .status();
-            Ok(())
-        });
+        };
+        run_foreground(&mut run_editor);
         if banner_inserted {
             let _ = strip_review_banner(path);
         }

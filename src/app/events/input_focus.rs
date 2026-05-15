@@ -1,8 +1,9 @@
 use super::super::{App, ExpansionOverride};
+use crate::app_runtime::{UiKey, UiKeyCode};
 use crate::state::{NodeStatus, Stage};
-use crossterm::event::{KeyCode, KeyEvent};
+
 impl App {
-    pub(crate) fn handle_input_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_input_key(&mut self, key: UiKey) -> bool {
         if self.interactive_run_active() && !self.interactive_run_waiting_for_input() {
             self.input_mode = false;
             return false;
@@ -11,14 +12,14 @@ impl App {
             return self.handle_palette_key(key);
         }
         match key.code {
-            KeyCode::Esc => {
+            UiKeyCode::Esc => {
                 self.input_mode = false;
                 if self.is_split_open() {
                     self.close_split();
                 }
                 return false;
             }
-            KeyCode::Enter => {
+            UiKeyCode::Enter => {
                 let keep_input_open = self.interactive_run_waiting_for_input();
                 let trimmed = self.input_buffer.trim().to_string();
                 if !trimmed.is_empty() {
@@ -61,7 +62,8 @@ impl App {
             }
             _ => {}
         }
-        let _ = crate::ui::input_editor::apply(&mut self.input_buffer, &mut self.input_cursor, key);
+        let _ =
+            crate::app::input_editor::apply(&mut self.input_buffer, &mut self.input_cursor, key);
         let _ = self.maybe_enter_command_mode_from_input_buffer();
         false
     }

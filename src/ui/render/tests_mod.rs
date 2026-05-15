@@ -98,7 +98,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         test_launch_harness: None,
         messages,
         status_line: std::rc::Rc::new(std::cell::RefCell::new(
-            super::super::status_line::StatusLine::new(),
+            crate::app_runtime::views::status_line::StatusLine::new(),
         )),
         prev_models_mode: models_area::ModelsAreaMode::default(),
         palette: super::super::palette::PaletteState::default(),

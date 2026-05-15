@@ -1,22 +1,30 @@
 mod builder_recovery;
+mod chat;
+pub(crate) mod config_panel;
 mod events;
 mod expansion;
 mod finalization;
 pub(crate) use finalization::Reason;
+mod frame_cache;
 pub(crate) mod guard;
+pub(crate) mod input_editor;
 mod lifecycle;
 pub(crate) mod models;
 mod notifications;
 mod observation;
+pub(crate) mod palette;
 pub(crate) mod prior_attempts;
 mod prompt_builders;
 mod prompt_ctx;
 pub(crate) mod prompts;
+pub(crate) mod render_helpers;
 mod retry_policy;
 mod review_banner;
 mod run_helpers;
+mod split;
 mod stage_support;
 mod state;
+pub(crate) mod status_line;
 #[cfg(test)]
 #[path = "tests_support.rs"]
 pub(crate) mod test_support;
@@ -31,22 +39,14 @@ mod tests_split_sync;
 pub(crate) mod watchdog;
 mod yolo_exit;
 pub(crate) use self::state::ModelRefreshState;
+pub(crate) mod tree;
+use self::models::ModelsAreaMode;
+use self::status_line::Severity;
 use self::tree::{NodeKey, VisibleNodeRow};
-use crate::ui::config_panel;
-use crate::ui::palette;
-use crate::ui::render::view as render;
-use crate::ui::split;
-use crate::ui::status_line;
-use crate::ui::widgets::chat::state as chat_widget_view_model;
-use crate::ui::widgets::chat::view as chat_widget;
-use crate::ui::widgets::models_area::view as models_area;
-use crate::ui::widgets::tree::view as tree;
-use crate::{
-    data::cache,
-    selection::{CachedModel, QuotaError, SubscriptionKind},
-    state::{Message, Node, SessionState},
-};
-use status_line::{Severity, StatusLine};
+use crate::app_runtime::views::split::SplitTargetView as SplitTarget;
+use crate::data::cache;
+use crate::selection::{CachedModel, QuotaError, SubscriptionKind};
+use crate::state::{Message, Node, SessionState};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -240,7 +240,7 @@ pub struct App {
     pub(crate) tail_detach_baseline: Option<usize>,
     pub(crate) body_inner_height: usize,
     pub(crate) body_inner_width: usize,
-    pub(crate) split_target: Option<split::SplitTarget>,
+    pub(crate) split_target: Option<SplitTarget>,
     /// When true, the split transcript snaps to the latest visible tail on
     /// content/viewport changes. Manual split scrolling flips this off until
     /// the operator returns to the bottom of the transcript.
@@ -345,11 +345,11 @@ pub struct App {
     #[cfg(test)]
     pub(crate) test_launch_harness: Option<std::sync::Arc<std::sync::Mutex<TestLaunchHarness>>>,
     pub(crate) messages: Vec<Message>,
-    pub(crate) status_line: Rc<RefCell<StatusLine>>,
-    pub(crate) prev_models_mode: models_area::ModelsAreaMode,
-    pub(crate) palette: palette::PaletteState,
+    pub(crate) status_line: Rc<RefCell<self::status_line::StatusLine>>,
+    pub(crate) prev_models_mode: ModelsAreaMode,
+    pub(crate) palette: self::palette::PaletteState,
     pub(crate) command_return_target: Option<CommandReturnTarget>,
-    pub(crate) config_panel: Option<config_panel::ConfigPanelState>,
+    pub(crate) config_panel: Option<self::config_panel::ConfigPanelState>,
     /// Section name surfaced the last time the config panel closed, so
     /// reopening it within the same App restores that context. Reset to
     /// None across launches; the panel falls back to the default section

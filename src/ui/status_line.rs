@@ -1,13 +1,21 @@
 use super::clock::{Clock, WallClock};
+pub use crate::app_runtime::views::status_line::Severity;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use std::time::{Duration, Instant};
-/// Severity drives both color and replacement priority.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Severity {
-    Info,
-    Warn,
-    Error,
+impl crate::app_runtime::views::status_line::StatusLine {
+    pub(crate) fn render(&self) -> Option<Line<'static>> {
+        let msg = self.current_message()?;
+        let color = match msg.severity {
+            Severity::Info => Color::Gray,
+            Severity::Warn => Color::Yellow,
+            Severity::Error => Color::Red,
+        };
+        Some(Line::from(Span::styled(
+            msg.text.clone(),
+            Style::default().fg(color),
+        )))
+    }
 }
 /// A single transient status message with a TTL.
 #[derive(Debug)]
@@ -44,10 +52,6 @@ impl<C> StatusLine<C>
 where
     C: Clock,
 {
-    pub(crate) fn current_message(&self) -> Option<&StatusMessage> {
-        self.current.as_ref()
-    }
-
     pub fn with_clock(clock: C) -> Self {
         Self {
             current: None,

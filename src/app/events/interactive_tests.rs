@@ -568,7 +568,8 @@ fn ctrl_s_with_invalid_inline_buffer_aborts_save_and_keeps_edit() {
     let panel = app.config_panel.as_mut().expect("panel open");
     // Focus retry_attempts (Integer field with min=1) and stage an edit
     // that violates the minimum.
-    let field_idx = crate::ui::config_panel::field_index_for_test("ntfy.retry_attempts");
+    let field_idx =
+        crate::app_runtime::views::config_panel::field_index_for_test("ntfy.retry_attempts");
     panel.set_focus_for_test(field_idx);
     panel.dirty = true;
     panel.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -658,7 +659,7 @@ fn palette_config_refuses_too_narrow_terminal() {
         .render()
         .expect("status line")
         .to_string();
-    assert!(status.contains(crate::ui::config_panel::terminal_too_narrow_message()));
+    assert!(status.contains(crate::app::config_panel::terminal_too_narrow_message()));
 }
 
 #[test]

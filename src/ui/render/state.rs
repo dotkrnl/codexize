@@ -1,6 +1,8 @@
 use crate::app_runtime::{ModalKind, StageId};
 use crate::state::{NodeStatus, PendingGuardDecision};
-use crate::ui::tui::{strip_ansi, wrap_lines_with_prefix, wrap_text};
+#[cfg(test)]
+use crate::ui::tui::strip_ansi;
+use crate::ui::tui::{wrap_lines_with_prefix, wrap_text};
 use crate::ui::widgets::tree::view::VisibleNodeRow;
 use ratatui::{
     style::{Color, Modifier, Style},
@@ -215,6 +217,7 @@ fn push_wrapped_field(
         width,
     ));
 }
+#[cfg(test)]
 pub(crate) fn sanitize_live_summary(text: &str) -> String {
     let stripped = strip_ansi(text);
     let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");

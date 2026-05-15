@@ -1,9 +1,10 @@
-use super::super::palette::{self, PaletteCommand};
 use super::super::status_line::Severity;
 use super::super::{App, ModalKind, StageId};
+use crate::app::palette::{self, PaletteCommand};
+use crate::app_runtime::{UiKey, UiKeyCode};
 use crate::state::Stage;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::time::Duration;
+
 impl App {
     pub(crate) fn palette_commands(&self) -> Vec<PaletteCommand> {
         // Direct keys in the running app (see `handle_key`): `Esc` quits the
@@ -115,25 +116,26 @@ impl App {
         }
         commands
     }
-    pub(crate) fn handle_palette_key(&mut self, key: KeyEvent) -> bool {
+
+    pub(crate) fn handle_palette_key(&mut self, key: UiKey) -> bool {
         match key.code {
-            KeyCode::Esc => {
+            UiKeyCode::Esc => {
                 self.close_palette(true);
                 false
             }
-            KeyCode::Enter => {
+            UiKeyCode::Enter => {
                 let input = self.palette.buffer.clone();
                 self.close_palette(false);
                 self.execute_palette_input(&input)
             }
-            KeyCode::Tab => {
+            UiKeyCode::Tab => {
                 let commands = self.palette_commands();
                 if let Some(ghost) = palette::ghost_completion(&self.palette.buffer, &commands) {
                     self.palette.accept_ghost(ghost);
                 }
                 false
             }
-            KeyCode::Backspace => {
+            UiKeyCode::Backspace => {
                 if self.palette.buffer.is_empty() {
                     self.close_palette(true);
                 } else {
@@ -157,7 +159,7 @@ impl App {
                 }
                 false
             }
-            KeyCode::Char(c) => {
+            UiKeyCode::Char(c) => {
                 let byte = self
                     .palette
                     .buffer
@@ -171,6 +173,7 @@ impl App {
             _ => false,
         }
     }
+
     pub(crate) fn execute_palette_input(&mut self, input: &str) -> bool {
         if input.trim() == "/exit" && self.interactive_run_active() {
             self.exit_interactive_run_locally();
@@ -209,6 +212,7 @@ impl App {
             }
         }
     }
+
     pub(crate) fn execute_palette_command(&mut self, name: &str, args: &str) -> bool {
         match name {
             "quit" => {
@@ -298,7 +302,9 @@ impl App {
             _ => false,
         }
     }
-    pub(crate) fn handle_modal_key(&mut self, modal: ModalKind, key: KeyEvent) -> bool {
+
+    pub(crate) fn handle_modal_key(&mut self, modal: ModalKind, key: impl Into<UiKey>) -> bool {
+        let key = key.into();
         match modal {
             ModalKind::SkipToImpl => self.handle_skip_to_impl_modal_key(key),
             ModalKind::GitGuard => self.handle_guard_modal_key(key),
@@ -314,28 +320,26 @@ impl App {
             ModalKind::DreamingDecision => self.handle_dreaming_decision_modal_key(key),
         }
     }
+
     pub(crate) fn dismiss_interactive_exit_prompt(&mut self) {
         if let Some(key) = self.interactive_exit_prompt_key() {
             self.interactive_exit_prompt_dismissed_at = Some(key);
         }
     }
-    pub(crate) fn handle_interactive_exit_prompt_modal_key(&mut self, key: KeyEvent) -> bool {
+
+    pub(crate) fn handle_interactive_exit_prompt_modal_key(&mut self, key: UiKey) -> bool {
         match key.code {
-            KeyCode::Enter => {
+            UiKeyCode::Enter => {
                 self.interactive_exit_prompt_dismissed_at = None;
                 self.exit_interactive_run_locally();
                 false
             }
-            KeyCode::Esc => {
+            UiKeyCode::Esc => {
                 self.dismiss_interactive_exit_prompt();
                 self.input_mode = true;
                 false
             }
-            KeyCode::Char(_)
-                if !key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-            {
+            UiKeyCode::Char(_) if !key.ctrl && !key.alt => {
                 self.dismiss_interactive_exit_prompt();
                 self.input_mode = true;
                 self.handle_input_key(key)
@@ -343,9 +347,10 @@ impl App {
             _ => false,
         }
     }
-    pub(crate) fn handle_quit_running_agent_modal_key(&mut self, key: KeyEvent) -> bool {
+
+    pub(crate) fn handle_quit_running_agent_modal_key(&mut self, key: UiKey) -> bool {
         match key.code {
-            KeyCode::Enter | KeyCode::Char('y') => {
+            UiKeyCode::Enter | UiKeyCode::Char('y') => {
                 if self.pending_quit_confirmation_run_id.take().is_none() {
                     return false;
                 }
@@ -357,16 +362,18 @@ impl App {
                 self.pending_app_exit = true;
                 false
             }
-            KeyCode::Esc | KeyCode::Char('n' | 'q' | 'Q') => {
+            UiKeyCode::Esc | UiKeyCode::Char('n' | 'q' | 'Q') => {
                 self.pending_quit_confirmation_run_id = None;
                 false
             }
             _ => false,
         }
     }
+
     fn cancel_command_available(&self) -> bool {
         !matches!(self.state.current_stage, Stage::Done | Stage::Cancelled)
     }
+
     fn open_cancel_session_modal(&mut self) {
         if !self.cancel_command_available() {
             self.push_status(
@@ -396,34 +403,33 @@ impl App {
         }
         self.pending_cancel_confirmation = true;
     }
-    pub(crate) fn handle_cancel_session_modal_key(&mut self, key: KeyEvent) -> bool {
+
+    pub(crate) fn handle_cancel_session_modal_key(&mut self, key: UiKey) -> bool {
         match key.code {
-            KeyCode::Enter => {
+            UiKeyCode::Enter => {
                 self.pending_cancel_confirmation = false;
                 self.confirm_cancel_session();
                 false
             }
-            KeyCode::Esc | KeyCode::Char('n' | 'N' | 'q' | 'Q') => {
+            UiKeyCode::Esc | UiKeyCode::Char('n' | 'N' | 'q' | 'Q') => {
                 self.pending_cancel_confirmation = false;
                 false
             }
             _ => false,
         }
     }
+
     fn confirm_cancel_session(&mut self) {
         if !self.cancel_command_available() {
             return;
         }
         self.run_lifecycle_op("cancel", crate::lifecycle::LifecycleOps::cancel);
     }
-    pub(crate) fn handle_stage_error_modal_key(
-        &mut self,
-        stage_id: StageId,
-        key: KeyEvent,
-    ) -> bool {
+
+    pub(crate) fn handle_stage_error_modal_key(&mut self, stage_id: StageId, key: UiKey) -> bool {
         match key.code {
-            KeyCode::Char('q' | 'Q') | KeyCode::Esc => true,
-            KeyCode::Char('r') | KeyCode::Enter => {
+            UiKeyCode::Char('q' | 'Q') | UiKeyCode::Esc => true,
+            UiKeyCode::Char('r') | UiKeyCode::Enter => {
                 // Operator-initiated retry of the failed stage. The modal
                 // only opens when `agent_error.is_some()` while the FSM is
                 // Idle; clear the error and synthesize a [`StageSpec`] for
@@ -440,11 +446,11 @@ impl App {
                 self.retry_failed_stage(stage_id);
                 false
             }
-            KeyCode::Char('e') if stage_id == StageId::Brainstorm => {
+            UiKeyCode::Char('e') if stage_id == StageId::Brainstorm => {
                 self.transition_to_stage_logged(Stage::IdeaInput);
                 false
             }
-            KeyCode::Char('s' | 'S') if stage_id == StageId::Dreaming => {
+            UiKeyCode::Char('s' | 'S') if stage_id == StageId::Dreaming => {
                 if let Err(err) = self.skip_suggested_dreaming() {
                     self.record_agent_error(format!("skip dreaming failed: {err:#}"));
                 }
@@ -454,10 +460,11 @@ impl App {
             _ => false,
         }
     }
-    pub(crate) fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {
+
+    pub(crate) fn handle_skip_to_impl_modal_key(&mut self, key: UiKey) -> bool {
         match key.code {
-            KeyCode::Char('q' | 'Q') | KeyCode::Esc => true,
-            KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
+            UiKeyCode::Char('q' | 'Q') | UiKeyCode::Esc => true,
+            UiKeyCode::Char('y' | 'Y') | UiKeyCode::Enter => {
                 if let Err(err) = self.accept_skip_to_implementation() {
                     self.record_agent_error(format!(
                         "accept skip-to-implementation failed: {err:#}"
@@ -465,7 +472,7 @@ impl App {
                 }
                 false
             }
-            KeyCode::Char('n' | 'N') => {
+            UiKeyCode::Char('n' | 'N') => {
                 if let Err(err) = self.decline_skip_to_implementation() {
                     self.record_agent_error(format!(
                         "decline skip-to-implementation failed: {err:#}"
@@ -476,9 +483,10 @@ impl App {
             _ => false,
         }
     }
-    pub(crate) fn handle_final_validation_blocked_modal_key(&mut self, key: KeyEvent) -> bool {
+
+    pub(crate) fn handle_final_validation_blocked_modal_key(&mut self, key: UiKey) -> bool {
         match key.code {
-            KeyCode::Char('f' | 'F') | KeyCode::Enter => {
+            UiKeyCode::Char('f' | 'F') | UiKeyCode::Enter => {
                 let _ = self
                     .state
                     .log_event("palette_invoked: command=force-ship".to_string());
@@ -488,7 +496,7 @@ impl App {
                 self.transition_to_stage_logged(Stage::Done);
                 false
             }
-            KeyCode::Char('r' | 'R') => {
+            UiKeyCode::Char('r' | 'R') => {
                 let _ = self
                     .state
                     .log_event("palette_invoked: command=recover-from-fv-block".to_string());
@@ -498,15 +506,16 @@ impl App {
             _ => false,
         }
     }
-    pub(crate) fn handle_dreaming_decision_modal_key(&mut self, key: KeyEvent) -> bool {
+
+    pub(crate) fn handle_dreaming_decision_modal_key(&mut self, key: UiKey) -> bool {
         match key.code {
-            KeyCode::Char('s' | 'S') | KeyCode::Esc => {
+            UiKeyCode::Char('s' | 'S') | UiKeyCode::Esc => {
                 if let Err(err) = self.skip_suggested_dreaming() {
                     self.record_agent_error(format!("skip dreaming failed: {err:#}"));
                 }
                 false
             }
-            KeyCode::Char('r' | 'R') | KeyCode::Enter => {
+            UiKeyCode::Char('r' | 'R') | UiKeyCode::Enter => {
                 if let Err(err) = self.accept_suggested_dreaming() {
                     self.record_agent_error(format!("run dreaming failed: {err:#}"));
                 }
@@ -515,16 +524,17 @@ impl App {
             _ => false,
         }
     }
-    pub(crate) fn handle_guard_modal_key(&mut self, key: KeyEvent) -> bool {
+
+    pub(crate) fn handle_guard_modal_key(&mut self, key: UiKey) -> bool {
         match key.code {
-            KeyCode::Char('q' | 'Q') | KeyCode::Esc => true,
-            KeyCode::Char('r' | 'R') | KeyCode::Enter => {
+            UiKeyCode::Char('q' | 'Q') | UiKeyCode::Esc => true,
+            UiKeyCode::Char('r' | 'R') | UiKeyCode::Enter => {
                 if let Err(err) = self.accept_guard_reset() {
                     self.record_agent_error(format!("guard reset failed: {err:#}"));
                 }
                 false
             }
-            KeyCode::Char('k' | 'K') => {
+            UiKeyCode::Char('k' | 'K') => {
                 if let Err(err) = self.accept_guard_keep() {
                     self.record_agent_error(format!("guard keep failed: {err:#}"));
                 }

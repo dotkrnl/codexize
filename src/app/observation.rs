@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::render_helpers as render;
 /// Pure helper: decide whether a freshly-sanitized live-summary payload
 /// represents real operator progress (i.e. should reset the watchdog idle
 /// clock) given the last cached payload. Empty or duplicate payloads return

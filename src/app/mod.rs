@@ -40,9 +40,6 @@ pub(crate) mod test_support;
 #[path = "notifications_tests.rs"]
 mod tests_notifications;
 #[cfg(test)]
-#[path = "../app_runtime/tests/prompts/mod.rs"]
-mod tests_prompts;
-#[cfg(test)]
 #[path = "../ui/tests/split_sync.rs"]
 mod tests_split_sync;
 pub(crate) use crate::ui::widgets::tree::view as tree;

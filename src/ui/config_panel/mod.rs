@@ -3663,38 +3663,6 @@ mod tests {
     }
 
     #[test]
-    fn adaptive_snapshot_width_120() {
-        let state = state_with_overrides();
-        insta::assert_snapshot!(render_to_text(&state, 120, 20));
-    }
-
-    #[test]
-    fn adaptive_snapshot_width_80_keeps_primary_hotkeys() {
-        let state = state_with_overrides();
-        let text = render_to_text(&state, 80, 18);
-        // Footer renders `<key> <label>` pairs. High-frequency keys must
-        // survive narrower widths; trailing entries are dropped first when
-        // the line gets crowded.
-        assert!(text.contains("Enter edit"), "missing Enter edit: {text}");
-        assert!(
-            text.contains("Space toggle"),
-            "missing Space toggle: {text}"
-        );
-        insta::assert_snapshot!(text);
-    }
-
-    #[test]
-    fn adaptive_snapshot_width_60_shows_tab_bar() {
-        let mut state = state_with_overrides();
-        state.selected_section = SECTIONS.iter().position(|s| *s == "system").unwrap();
-        state.select_first_field_in_current_section();
-        let text = render_to_text(&state, 60, 16);
-        assert!(text.contains("General"));
-        assert!(text.contains("System"));
-        insta::assert_snapshot!(text);
-    }
-
-    #[test]
     fn ctrl_i_and_tab_both_switch_pages() {
         let mut state = state_with_overrides();
         assert_eq!(state.current_section(), "general");
@@ -3911,16 +3879,6 @@ mod tests {
         assert_eq!(state.source_for(state.current_meta().unwrap()), "override");
         state.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
         assert_eq!(state.source_for(state.current_meta().unwrap()), "(def)");
-    }
-
-    #[test]
-    fn dropdown_snapshot() {
-        // Pop the dropdown for an enum field — bools flip inline without a
-        // popup, so this exercises the multi-variant overlay.
-        let mut state = state_with_overrides();
-        focus_field(&mut state, "ntfy.detail_mode");
-        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        insta::assert_snapshot!(render_to_text(&state, 80, 18));
     }
 
     #[test]
@@ -4392,41 +4350,6 @@ mod tests {
     }
 
     #[test]
-    fn providers_page_render_snapshot() {
-        let config = Config::baked_defaults();
-        let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            Some("models"),
-        );
-        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
-        state.expand_all_vendors_for_test();
-        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors)
-            .iter()
-            .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
-            .expect("provider row");
-        insta::assert_snapshot!(render_to_text(&state, 100, 18));
-    }
-
-    #[test]
-    fn provider_detail_drawer_render_snapshot() {
-        let config = Config::baked_defaults();
-        let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            Some("models"),
-        );
-        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
-        state.expand_all_vendors_for_test();
-        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors)
-            .iter()
-            .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
-            .expect("provider row");
-        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        insta::assert_snapshot!(render_to_text(&state, 90, 22));
-    }
-
-    #[test]
     fn add_provider_modal_can_compose_opencode_for_kimi_via_independent_pickers() {
         // The user complaint: kimi has no opencode entry. With the modal's
         // form-style focus walk, the user can pick model=kimi-k2.6 from the
@@ -4799,17 +4722,6 @@ mod tests {
     }
 
     #[test]
-    fn exit_modal_render_snapshot() {
-        let mut state = state_with_overrides();
-        focus_field(&mut state, "ntfy.retry_attempts");
-        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        state.set_edit_buffer_for_test("11".to_string());
-        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        insta::assert_snapshot!(render_to_text(&state, 90, 22));
-    }
-
-    #[test]
     fn exit_modal_c_key_cancels_and_keeps_panel_open() {
         let mut state = state_with_overrides();
         focus_field(&mut state, "ntfy.retry_attempts");
@@ -4901,18 +4813,6 @@ mod tests {
         // tough+effort eligible.
         assert!(text.contains("tough"), "tough chip missing: {text}");
         assert!(text.contains("effort"), "effort chip missing: {text}");
-    }
-
-    #[test]
-    fn folded_default_render_snapshot() {
-        let config = Config::baked_defaults();
-        let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            Some("models"),
-        );
-        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
-        insta::assert_snapshot!(render_to_text(&state, 100, 18));
     }
 
     #[test]

@@ -34,6 +34,5 @@ uuid = { version = "1.18.1", features = ["v4"] }
 toml_edit = "0.25.11"
 
 [dev-dependencies]
-insta = "1.42"
 serial_test = "3.2"
 tempfile = "3.14"

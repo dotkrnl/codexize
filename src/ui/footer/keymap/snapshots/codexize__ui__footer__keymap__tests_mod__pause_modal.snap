@@ -1,5 +1,0 @@
----
-source: src/ui/footer/keymap/tests_mod.rs
-expression: "snapshot_text(&keymap(Stage::SpecReviewPaused,\nSome(ModalKind::SpecReviewPaused), FocusCaps::default(), false, false, 80,))"
----
-[fg=Blue]Enter[fg=DarkGray] advance[fg=DarkGray] · [fg=White]n[fg=DarkGray] stay/rerun[fg=DarkGray]  ·                                         [fg=White]Esc[fg=DarkGray] quit

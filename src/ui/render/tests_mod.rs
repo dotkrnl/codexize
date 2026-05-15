@@ -1114,7 +1114,7 @@ fn completed_run_renders_history_without_running_tail_in_main_panel() {
 #[test]
 fn container_row_running_tail_keeps_tree_shape_spinner() {
     // Container with visible children: the root row's body (if any) keeps
-    // the old tree-shape spinner while children render their own
+    // the tree-shaped spinner while children render their own
     // live-agent-message tails.
     let nodes = vec![node(
         "Root",

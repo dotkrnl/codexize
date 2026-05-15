@@ -3801,9 +3801,8 @@ mod tests {
 
     #[test]
     fn horizontal_arrows_dont_cycle_enum_values() {
-        // Defensive check: with the old keymap, h/l flipped the focused
-        // enum value. They now switch sections instead — the original
-        // value lives on whichever section the cursor leaves behind.
+        // Horizontal movement switches sections, so the original value lives
+        // on whichever section the cursor leaves behind.
         let mut state = state_with_overrides();
         focus_field(&mut state, "ntfy.detail_mode");
         let value_before = state.value_for(state.current_meta().unwrap());

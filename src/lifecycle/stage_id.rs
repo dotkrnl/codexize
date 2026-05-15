@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn stage_id_for_run_maps_stage_strings() {
         assert_eq!(
-            stage_id_for_run("coder", "[Builder r1]"),
+            stage_id_for_run("coder", "[Round 1 Coder]"),
             Some(StageId::Coder)
         );
         assert_eq!(

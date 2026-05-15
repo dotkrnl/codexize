@@ -1,9 +1,8 @@
 //! Pending operator-decision state.
 //!
-//! Replaces the `*Paused` / `*Pending` variants on the old `Stage` enum. Each
-//! field is `Some(_)` when the lifecycle is waiting on the operator for that
-//! decision. The marker `*Data` structs are intentionally empty named-field
-//! structs (for TOML serialization).
+//! Each field is `Some(_)` when the lifecycle is waiting on the operator for
+//! that decision. The marker `*Data` structs are intentionally empty
+//! named-field structs for TOML serialization.
 use serde::{Deserialize, Serialize};
 
 /// Operator decision payload for the git-guard modal (`HEAD` moved under

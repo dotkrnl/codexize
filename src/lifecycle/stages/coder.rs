@@ -4,8 +4,8 @@
 //! stays on [`Stage::Implementation(r)`] while more tasks are pending; once
 //! every task is Done it moves the lifecycle to [`Stage::Review(r)`].
 //!
-//! Window labels follow the persisted `launch_coder`'s `[Round {r} Coder]` —
-//! the older `[Builder r{r}]` cancel-match prefix in `retry.rs` is stale.
+//! Window labels follow the persisted `launch_coder` base:
+//! `[Round {r} Coder]`.
 use super::next_attempt;
 use crate::lifecycle::Stage;
 use crate::lifecycle::fsm::Outcome;
@@ -49,7 +49,7 @@ impl StageDriver for CoderStage {
     }
 
     fn window_name(&self, round: u32, _task: Option<u32>) -> String {
-        // Matches `launch_coder` line 98. The per-task suffix is appended
+        // Matches the `launch_coder` base label. The per-task suffix is appended
         // by the launcher elsewhere; window_name returns the round-scoped
         // base label.
         format!("[Round {round} Coder]")

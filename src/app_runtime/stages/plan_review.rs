@@ -1,6 +1,6 @@
 use crate::app::prompts::plan_review_prompt;
 use crate::app::{App, guard};
-use crate::app_runtime::{UiKey, UiKeyCode};
+use crate::app_runtime::{ModalAction, ModalCommand};
 use crate::data::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, MessageKind, RunStatus, Stage};
@@ -180,11 +180,10 @@ impl App {
     /// Modal handler for the "plan review paused — accept verdict?" prompt.
     /// Co-located with the plan-review launch so the stage's launch and
     /// pause-modal behavior live in one file.
-    pub(crate) fn handle_plan_review_paused_modal_key(&mut self, key: impl Into<UiKey>) -> bool {
-        let key = key.into();
-        match key.code {
-            UiKeyCode::Char('q' | 'Q') | UiKeyCode::Esc => true,
-            UiKeyCode::Char('y') | UiKeyCode::Enter => {
+    pub(crate) fn handle_plan_review_paused_modal_command(&mut self, cmd: ModalCommand) -> bool {
+        match cmd {
+            ModalCommand::Cancel => true,
+            ModalCommand::Confirm => {
                 self.clear_agent_error();
                 self.queue_view_of_current_artifact("plan.md");
                 // Spec §Data model line 96: approved plans pause in
@@ -194,12 +193,11 @@ impl App {
                 self.transition_to_stage_logged(Stage::WaitingToImplement);
                 false
             }
-            UiKeyCode::Char('n') => {
+            ModalCommand::Action(ModalAction::RejectPausedReview) => {
                 self.transition_to_stage_logged(Stage::PlanReviewRunning);
                 self.launch_plan_review();
                 false
             }
-            // Consume all other keys so the UI is genuinely modal.
             _ => false,
         }
     }
@@ -235,9 +233,9 @@ impl App {
 mod tests {
     use super::App;
     use crate::app::test_support::{mk_app, with_temp_root};
+    use crate::app_runtime::ModalCommand;
     use crate::data::acp::AcpLaunchPolicy;
     use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState, Stage};
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::path::PathBuf;
 
     fn plan_review_run() -> RunRecord {
@@ -276,11 +274,8 @@ mod tests {
             state.agent_runs.push(plan_review_run());
             state.save().unwrap();
             let mut app = mk_app(state);
-            let consumed = app.handle_plan_review_paused_modal_key(KeyEvent::new(
-                KeyCode::Enter,
-                KeyModifiers::NONE,
-            ));
-            assert!(!consumed, "Enter must dismiss the modal (returns false)");
+            let consumed = app.handle_plan_review_paused_modal_command(ModalCommand::Confirm);
+            assert!(!consumed, "Confirm must dismiss the modal (returns false)");
             assert_eq!(app.state.current_stage, Stage::WaitingToImplement);
         });
     }
@@ -294,10 +289,7 @@ mod tests {
             state.agent_runs.push(plan_review_run());
             state.save().unwrap();
             let mut app = mk_app(state);
-            app.handle_plan_review_paused_modal_key(KeyEvent::new(
-                KeyCode::Char('y'),
-                KeyModifiers::NONE,
-            ));
+            app.handle_plan_review_paused_modal_command(ModalCommand::Confirm);
             assert_eq!(app.state.current_stage, Stage::WaitingToImplement);
         });
     }

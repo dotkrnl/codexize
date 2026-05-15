@@ -182,6 +182,11 @@ impl App {
                 yolo: self.state.modes.yolo,
                 cheap: self.state.modes.cheap,
             },
+            config_panel: self
+                .config_panel
+                .as_ref()
+                .map(|p| p.current_view())
+                .unwrap_or_default(),
         }
     }
 

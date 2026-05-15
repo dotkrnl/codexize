@@ -35,9 +35,14 @@ pub enum SessionCommand {
     /// palette buffer, but kept as a discrete variant because the legacy
     /// `SubmitInput` command shape is widely used in tests and other
     /// non-typed entry points.
-    SubmitInput { text: String },
+    SubmitInput {
+        text: String,
+    },
     /// Run a named palette command directly (skipping the buffer round
     /// trip). Useful for non-key surfaces (mouse, headless scripted
     /// flows).
-    PaletteCommand { name: String, args: String },
+    PaletteCommand {
+        name: String,
+        args: String,
+    },
 }

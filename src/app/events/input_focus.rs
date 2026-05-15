@@ -1,5 +1,5 @@
 use super::super::{App, ExpansionOverride};
-use crate::app_runtime::{UiKey, UiKeyCode};
+use crate::app::keys::{UiKey, UiKeyCode};
 use crate::state::{NodeStatus, Stage};
 
 impl App {

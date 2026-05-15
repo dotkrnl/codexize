@@ -4,6 +4,7 @@ pub(crate) mod config_panel;
 mod events;
 mod expansion;
 mod finalization;
+pub(crate) mod keys;
 pub(crate) use finalization::Reason;
 mod frame_cache;
 pub(crate) mod guard;

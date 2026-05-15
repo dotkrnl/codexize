@@ -675,12 +675,11 @@ fn bridged_tab_keeps_config_panel_open_and_switches_page() {
         "general"
     );
 
-    let quit = app.handle_app_command(crate::app_runtime::AppCommand::KeyPress(
-        crate::app_runtime::UiKey {
-            code: crate::app_runtime::UiKeyCode::Tab,
-            ctrl: false,
-            alt: false,
-        },
+    let quit = app.handle_app_command(crate::app_runtime::AppCommand::Session(
+        std::sync::Arc::from(app.state.session_id.clone()),
+        crate::app_runtime::SessionCommand::ConfigPanel(
+            crate::app_runtime::ConfigPanelCommand::NextSection,
+        ),
     ));
 
     assert!(!quit, "tab inside config panel must not quit the app");

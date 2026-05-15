@@ -1,7 +1,10 @@
+#[cfg(test)]
+use super::super::ModalKind;
 use super::super::status_line::Severity;
-use super::super::{App, ModalKind, StageId};
+use super::super::{App, StageId};
+use crate::app::keys::{UiKey, UiKeyCode};
 use crate::app::palette::{self, PaletteCommand};
-use crate::app_runtime::{UiKey, UiKeyCode};
+use crate::app_runtime::commands::{ModalAction, ModalCommand};
 use crate::state::Stage;
 use std::time::Duration;
 
@@ -303,6 +306,7 @@ impl App {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn handle_modal_key(&mut self, modal: ModalKind, key: impl Into<UiKey>) -> bool {
         let key = key.into();
         match modal {
@@ -311,8 +315,12 @@ impl App {
             ModalKind::QuitRunningAgent => self.handle_quit_running_agent_modal_key(key),
             ModalKind::CancelSession => self.handle_cancel_session_modal_key(key),
             ModalKind::InteractiveExitPrompt => self.handle_interactive_exit_prompt_modal_key(key),
-            ModalKind::SpecReviewPaused => self.handle_spec_review_paused_modal_key(key),
-            ModalKind::PlanReviewPaused => self.handle_plan_review_paused_modal_key(key),
+            ModalKind::SpecReviewPaused => {
+                self.handle_spec_review_paused_modal_command(modal_key_to_command(key))
+            }
+            ModalKind::PlanReviewPaused => {
+                self.handle_plan_review_paused_modal_command(modal_key_to_command(key))
+            }
             ModalKind::StageError(stage_id) => self.handle_stage_error_modal_key(stage_id, key),
             ModalKind::FinalValidationBlocked => {
                 self.handle_final_validation_blocked_modal_key(key)
@@ -326,7 +334,27 @@ impl App {
             self.interactive_exit_prompt_dismissed_at = Some(key);
         }
     }
+}
 
+#[cfg(test)]
+fn modal_key_to_command(key: UiKey) -> ModalCommand {
+    match key.code {
+        UiKeyCode::Enter => ModalCommand::Confirm,
+        UiKeyCode::Esc => ModalCommand::Cancel,
+        UiKeyCode::Char(':') => ModalCommand::Action(ModalAction::OpenPaletteFromPaused),
+        UiKeyCode::Char('n') => ModalCommand::Action(ModalAction::RejectPausedReview),
+        UiKeyCode::Char(c) => ModalAction::InteractiveExitInsertChar(c).into(),
+        _ => ModalCommand::Cancel,
+    }
+}
+
+impl From<ModalAction> for ModalCommand {
+    fn from(action: ModalAction) -> Self {
+        ModalCommand::Action(action)
+    }
+}
+
+impl App {
     pub(crate) fn handle_interactive_exit_prompt_modal_key(&mut self, key: UiKey) -> bool {
         match key.code {
             UiKeyCode::Enter => {
@@ -348,6 +376,7 @@ impl App {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn handle_quit_running_agent_modal_key(&mut self, key: UiKey) -> bool {
         match key.code {
             UiKeyCode::Enter | UiKeyCode::Char('y') => {

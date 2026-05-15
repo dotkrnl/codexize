@@ -26,6 +26,22 @@ pub mod stage;
 pub mod status;
 pub mod tree;
 
+use crate::app_runtime::root_view::SessionId;
+use serde::{Deserialize, Serialize};
+
+/// Operator-intent commands the UI emits back to the runtime.
+///
+/// The shape is intentionally UI-neutral: it never carries terminal
+/// keysyms, crossterm event types, or scroll deltas in pixels. Each
+/// frontend translates its native input into one of the typed variants
+/// below before the value crosses the runtime seam.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AppCommand {
+    Global(GlobalCommand),
+    Shell(ShellCommand),
+    Session(SessionId, SessionCommand),
+}
+
 pub use chat::ChatCommand;
 pub use config_panel::ConfigPanelCommand;
 pub use global::GlobalCommand;

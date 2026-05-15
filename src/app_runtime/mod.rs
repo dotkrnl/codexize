@@ -37,7 +37,12 @@ pub use crate::app::AppStartupOrigin;
 #[cfg(test)]
 pub(crate) use crate::app::{ExpansionOverride, ModelRefreshState, watchdog};
 pub(crate) use crate::app_shell::{AppShell, ShellCommandOutcome};
-pub use command::{AppCommand, UiKey, UiKeyCode};
+pub use command::AppCommand;
+pub use commands::{
+    ChatCommand, ConfigPanelCommand, CursorMove, GlobalCommand, InputCommand, ModalAction,
+    ModalCommand, ModesCommand, PaletteCommand, PickerCommand, SessionCommand, SheetCommand,
+    ShellCommand, SplitCommand, StageCommand, StatusCommand, TreeCommand,
+};
 pub use frontend::{Frontend, FrontendConnector, ShutdownSignal, SnapshotHandle};
 pub use root_view::{
     RootEvent, RootEventPayload, RootView, SessionId, SessionViewDelta, ShellViewDelta,
@@ -63,6 +68,7 @@ pub struct AppView {
     pub follow_tail: bool,
     pub agent_running: bool,
     pub modes: ModeFlags,
+    pub config_panel: views::config_panel::ConfigPanelView,
 }
 
 impl AppView {
@@ -76,6 +82,7 @@ impl AppView {
             follow_tail: true,
             agent_running: false,
             modes: ModeFlags::default(),
+            config_panel: views::config_panel::ConfigPanelView::default(),
         }
     }
 }

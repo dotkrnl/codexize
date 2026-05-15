@@ -1,6 +1,6 @@
 use crate::app::prompts::spec_review_prompt;
 use crate::app::{App, guard};
-use crate::app_runtime::{UiKey, UiKeyCode};
+use crate::app_runtime::{ModalAction, ModalCommand};
 use crate::data::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, MessageKind, RunStatus, Stage};
@@ -176,21 +176,20 @@ impl App {
     /// Modal handler for the "spec review paused — accept verdict?" prompt.
     /// Co-located with the spec-review launch so the stage's launch and
     /// pause-modal behavior live in one file.
-    pub(crate) fn handle_spec_review_paused_modal_key(&mut self, key: impl Into<UiKey>) -> bool {
-        let key = key.into();
-        match key.code {
-            UiKeyCode::Char('q' | 'Q') | UiKeyCode::Esc => true,
-            UiKeyCode::Char('y') | UiKeyCode::Enter => {
+    pub(crate) fn handle_spec_review_paused_modal_command(&mut self, cmd: ModalCommand) -> bool {
+        match cmd {
+            ModalCommand::Cancel => true,
+            ModalCommand::Confirm => {
                 self.clear_agent_error();
                 self.transition_to_stage_logged(Stage::PlanningRunning);
                 false
             }
-            UiKeyCode::Char('n') => {
+            ModalCommand::Action(ModalAction::RejectPausedReview) => {
                 self.transition_to_stage_logged(Stage::SpecReviewRunning);
                 self.launch_spec_review();
                 false
             }
-            // Consume all other keys so the UI is genuinely modal.
+            // Consume all other commands so the UI is genuinely modal.
             _ => false,
         }
     }

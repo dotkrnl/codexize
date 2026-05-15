@@ -7,9 +7,9 @@
 //! workspaces through an in-process event path.
 
 use crate::app::{App, AppStartupOrigin};
+use crate::app_runtime::AppCommand;
 pub use crate::app_runtime::views::shell::ShellFocus;
 use crate::app_runtime::views::shell::ShellView;
-use crate::app_runtime::{AppCommand, UiKeyCode};
 use crate::data::app_lock::AppLockGuard;
 use crate::data::config::Config;
 use crate::data::session_index::SessionIndex;
@@ -450,42 +450,46 @@ impl AppShell {
         command: AppCommand,
         modal_open: bool,
     ) -> Result<ShellCommandOutcome> {
-        let AppCommand::KeyPress(key) = command else {
+        use crate::app_runtime::commands::ShellCommand;
+
+        let AppCommand::Shell(shell_cmd) = command else {
             return Ok(ShellCommandOutcome::Unhandled);
         };
-        if key.ctrl || key.alt {
-            return Ok(ShellCommandOutcome::Unhandled);
-        }
-        match key.code {
-            UiKeyCode::Left | UiKeyCode::Right if self.sidebar.visible => {
-                self.toggle_sidebar_focus();
-                Ok(ShellCommandOutcome::Consumed)
-            }
-            UiKeyCode::Up if self.sidebar.visible && self.sidebar.focus == ShellFocus::Sidebar => {
-                self.move_sidebar_selection(-1);
-                Ok(ShellCommandOutcome::Consumed)
-            }
-            UiKeyCode::Down
-                if self.sidebar.visible && self.sidebar.focus == ShellFocus::Sidebar =>
-            {
-                self.move_sidebar_selection(1);
-                Ok(ShellCommandOutcome::Consumed)
-            }
-            UiKeyCode::Enter
-                if self.sidebar.visible && self.sidebar.focus == ShellFocus::Sidebar =>
-            {
-                self.open_selected_sidebar_session()?;
-                Ok(ShellCommandOutcome::Consumed)
-            }
-            UiKeyCode::Esc if self.sidebar.focus == ShellFocus::Sidebar => {
-                if modal_open {
-                    // Esc is owned by the App modal; do not hide the sidebar.
-                    return Ok(ShellCommandOutcome::Unhandled);
+
+        match shell_cmd {
+            ShellCommand::ToggleSidebarFocus => {
+                if self.sidebar.visible {
+                    self.toggle_sidebar_focus();
+                    Ok(ShellCommandOutcome::Consumed)
+                } else {
+                    Ok(ShellCommandOutcome::Unhandled)
                 }
-                self.sidebar.visible = false;
-                self.sidebar.focus = ShellFocus::Workspace;
-                self.sidebar.mark_dirty();
-                Ok(ShellCommandOutcome::Consumed)
+            }
+            ShellCommand::MoveSidebarSelection { delta } => {
+                if self.sidebar.visible && self.sidebar.focus == ShellFocus::Sidebar {
+                    self.move_sidebar_selection(delta);
+                    Ok(ShellCommandOutcome::Consumed)
+                } else {
+                    Ok(ShellCommandOutcome::Unhandled)
+                }
+            }
+            ShellCommand::OpenSelectedSidebarSession => {
+                if self.sidebar.visible && self.sidebar.focus == ShellFocus::Sidebar {
+                    self.open_selected_sidebar_session()?;
+                    Ok(ShellCommandOutcome::Consumed)
+                } else {
+                    Ok(ShellCommandOutcome::Unhandled)
+                }
+            }
+            ShellCommand::CloseSidebar => {
+                if self.sidebar.focus == ShellFocus::Sidebar && !modal_open {
+                    self.sidebar.visible = false;
+                    self.sidebar.focus = ShellFocus::Workspace;
+                    self.sidebar.mark_dirty();
+                    Ok(ShellCommandOutcome::Consumed)
+                } else {
+                    Ok(ShellCommandOutcome::Unhandled)
+                }
             }
             _ => Ok(ShellCommandOutcome::Unhandled),
         }
@@ -903,7 +907,8 @@ mod tests {
     use super::*;
     use crate::app::test_support::with_temp_root;
     use crate::app::{TestLaunchHarness, TestLaunchOutcome};
-    use crate::app_runtime::{AppCommand, UiKey, UiKeyCode};
+    use crate::app_runtime::AppCommand;
+    use crate::app_runtime::commands::ShellCommand;
     use crate::logic::selection::{
         CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind,
     };
@@ -1055,11 +1060,7 @@ estimated_tokens = 100
             shell
                 .select_sidebar_session("20260511-091000-000000001")
                 .expect("select");
-            let enter = AppCommand::KeyPress(UiKey {
-                code: UiKeyCode::Enter,
-                ctrl: false,
-                alt: false,
-            });
+            let enter = AppCommand::Shell(ShellCommand::OpenSelectedSidebarSession);
             assert_eq!(
                 shell.handle_shell_command(enter, false).expect("enter"),
                 ShellCommandOutcome::Consumed

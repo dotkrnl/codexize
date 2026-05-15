@@ -1,5 +1,6 @@
 use super::*;
-use crate::app_runtime::{AgentRunSummary, AppCommand, AppView, ModalKind};
+use crate::app_runtime::commands::{GlobalCommand, ModalCommand, SessionCommand};
+use crate::app_runtime::{AgentRunSummary, AppCommand, AppView, ModalKind, SessionId};
 use crate::data::events::{DataEvent, DataOutcome, DataRequest, LiveSummaryEvents};
 use crate::state::RunStatus;
 use std::sync::Arc;
@@ -22,9 +23,10 @@ fn confirm_quit_running_agent_routes_termination_through_data_without_app_mutati
     let mut runtime = TerminalRuntime::default();
     let view = running_view();
 
-    let quit = runtime.route_command_with_dispatch(AppCommand::Quit, &view, |_| {
-        panic!("opening the runtime modal must not perform data side effects")
-    });
+    let quit =
+        runtime.route_command_with_dispatch(AppCommand::Global(GlobalCommand::Quit), &view, |_| {
+            panic!("opening the runtime modal must not perform data side effects")
+        });
     assert_eq!(quit, TerminalCommandOutcome::HandledContinue);
     assert_eq!(
         runtime.view_for_render(view.clone()).modal,
@@ -32,10 +34,17 @@ fn confirm_quit_running_agent_routes_termination_through_data_without_app_mutati
     );
 
     let mut requests = Vec::new();
-    let confirm = runtime.route_command_with_dispatch(AppCommand::ConfirmModal, &view, |request| {
-        requests.push(request);
-        DataOutcome::Terminated(true)
-    });
+    let confirm = runtime.route_command_with_dispatch(
+        AppCommand::Session(
+            SessionId::from("terminal-runtime-test"),
+            SessionCommand::Modal(ModalCommand::Confirm),
+        ),
+        &view,
+        |request| {
+            requests.push(request);
+            DataOutcome::Terminated(true)
+        },
+    );
 
     assert_eq!(confirm, TerminalCommandOutcome::HandledExit);
     assert_eq!(requests, vec![DataRequest::TerminateRun { run_id: 7 }]);
@@ -51,10 +60,17 @@ fn confirm_app_owned_quit_modal_routes_termination_through_runtime() {
     view.modal = Some(ModalKind::QuitRunningAgent);
 
     let mut requests = Vec::new();
-    let confirm = runtime.route_command_with_dispatch(AppCommand::ConfirmModal, &view, |request| {
-        requests.push(request);
-        DataOutcome::Terminated(true)
-    });
+    let confirm = runtime.route_command_with_dispatch(
+        AppCommand::Session(
+            SessionId::from("terminal-runtime-test"),
+            SessionCommand::Modal(ModalCommand::Confirm),
+        ),
+        &view,
+        |request| {
+            requests.push(request);
+            DataOutcome::Terminated(true)
+        },
+    );
 
     assert_eq!(confirm, TerminalCommandOutcome::HandledExit);
     assert_eq!(requests, vec![DataRequest::TerminateRun { run_id: 7 }]);

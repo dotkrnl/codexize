@@ -1,4 +1,8 @@
-use crate::app_runtime::{AppCommand, AppView, ModalKind, UiKey, UiKeyCode};
+use crate::app::keys::{UiKey, UiKeyCode};
+use crate::app_runtime::commands::{
+    GlobalCommand, InputCommand, ModalAction, ModalCommand, SessionCommand, ShellCommand,
+};
+use crate::app_runtime::{AppCommand, AppView, ModalKind};
 use anyhow::Result;
 use crossterm::{
     event::{
@@ -162,7 +166,10 @@ impl Drop for CrosstermInputAdapter {
 pub fn command_from_event(event: Event, view: &AppView) -> Option<AppCommand> {
     match event {
         Event::Key(key) => command_from_key_event(key, view),
-        Event::Paste(text) => Some(AppCommand::PasteInput { text }),
+        Event::Paste(text) => Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::Input(InputCommand::InsertText(text)),
+        )),
         _ => None,
     }
 }
@@ -170,6 +177,7 @@ fn command_from_key_event(key: KeyEvent, view: &AppView) -> Option<AppCommand> {
     if key.kind != KeyEventKind::Press {
         return None;
     }
+    let session_id = view.session_id.clone();
     // Esc on the quit-confirmation modal is unambiguously "cancel the
     // confirmation": the modal handler clears `pending_quit_confirmation_run_id`
     // and stays on screen. Translating it at the seam exercises an
@@ -177,12 +185,209 @@ fn command_from_key_event(key: KeyEvent, view: &AppView) -> Option<AppCommand> {
     // generic `KeyPress` bridge.
     if matches!(view.modal, Some(ModalKind::QuitRunningAgent)) && key.modifiers.is_empty() {
         return match key.code {
-            KeyCode::Enter | KeyCode::Char('y' | 'Y') => Some(AppCommand::ConfirmModal),
-            KeyCode::Esc | KeyCode::Char('n' | 'N' | 'q' | 'Q') => Some(AppCommand::CancelModal),
+            KeyCode::Enter | KeyCode::Char('y' | 'Y') => Some(AppCommand::Session(
+                session_id,
+                SessionCommand::Modal(ModalCommand::Confirm),
+            )),
+            KeyCode::Esc | KeyCode::Char('n' | 'N' | 'q' | 'Q') => Some(AppCommand::Session(
+                session_id,
+                SessionCommand::Modal(ModalCommand::Cancel),
+            )),
             _ => None,
         };
     }
-    Some(AppCommand::KeyPress(ui_key_from_event(key)))
+    translate_key_to_command(ui_key_from_event(key), view)
+}
+
+fn translate_key_to_command(key: UiKey, view: &AppView) -> Option<AppCommand> {
+    let session_id = view.session_id.clone();
+
+    // Truly global keys
+    if key.code == UiKeyCode::Char('c') && key.ctrl {
+        return Some(AppCommand::Global(GlobalCommand::StopRunningAgent));
+    }
+
+    // Modal-specific translation
+    if let Some(modal) = view.modal {
+        match modal {
+            ModalKind::QuitRunningAgent
+            | ModalKind::CancelSession
+            | ModalKind::GitGuard
+            | ModalKind::SkipToImpl
+            | ModalKind::StageError(_)
+            | ModalKind::FinalValidationBlocked
+            | ModalKind::DreamingDecision
+            | ModalKind::SpecReviewPaused
+            | ModalKind::PlanReviewPaused => match key.code {
+                UiKeyCode::Enter => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Confirm),
+                    ));
+                }
+                UiKeyCode::Esc => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Cancel),
+                    ));
+                }
+                _ => {}
+            },
+            ModalKind::InteractiveExitPrompt => match key.code {
+                UiKeyCode::Enter => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Confirm),
+                    ));
+                }
+                UiKeyCode::Esc => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Cancel),
+                    ));
+                }
+                UiKeyCode::Char(c) if !key.ctrl && !key.alt => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Action(
+                            ModalAction::InteractiveExitInsertChar(c),
+                        )),
+                    ));
+                }
+                _ => {}
+            },
+        }
+    }
+
+    // Palette toggle
+    if key.code == UiKeyCode::Char(':') && !key.ctrl && !key.alt {
+        return Some(AppCommand::Session(
+            session_id,
+            SessionCommand::Palette(crate::app_runtime::commands::PaletteCommand::Open),
+        ));
+    }
+
+    // Palette ghost completion (Tab)
+    if key.code == UiKeyCode::Tab && !key.ctrl && !key.alt {
+        return Some(AppCommand::Session(
+            session_id,
+            SessionCommand::Palette(crate::app_runtime::commands::PaletteCommand::AcceptGhost),
+        ));
+    }
+
+    // Shell-level navigation (sidebar)
+    match key.code {
+        UiKeyCode::Left | UiKeyCode::Right if !key.ctrl && !key.alt => {
+            return Some(AppCommand::Shell(ShellCommand::ToggleSidebarFocus));
+        }
+        UiKeyCode::Up if !key.ctrl && !key.alt => {
+            return Some(AppCommand::Shell(ShellCommand::MoveSidebarSelection {
+                delta: -1,
+            }));
+        }
+        UiKeyCode::Down if !key.ctrl && !key.alt => {
+            return Some(AppCommand::Shell(ShellCommand::MoveSidebarSelection {
+                delta: 1,
+            }));
+        }
+        UiKeyCode::Enter if !key.ctrl && !key.alt => {
+            return Some(AppCommand::Shell(ShellCommand::OpenSelectedSidebarSession));
+        }
+        UiKeyCode::Esc if !key.ctrl && !key.alt => {
+            return Some(AppCommand::Shell(ShellCommand::CloseSidebar));
+        }
+        _ => {}
+    }
+
+    // App-level navigation (tree)
+    match key.code {
+        UiKeyCode::Up => {
+            return Some(AppCommand::Session(
+                session_id,
+                SessionCommand::Tree(
+                    crate::app_runtime::commands::TreeCommand::ScrollOrMoveFocus { delta: -1 },
+                ),
+            ));
+        }
+        UiKeyCode::Down => {
+            return Some(AppCommand::Session(
+                session_id,
+                SessionCommand::Tree(
+                    crate::app_runtime::commands::TreeCommand::ScrollOrMoveFocus { delta: 1 },
+                ),
+            ));
+        }
+        UiKeyCode::PageUp => {
+            return Some(AppCommand::Session(
+                session_id,
+                SessionCommand::Tree(
+                    crate::app_runtime::commands::TreeCommand::ScrollViewportPage { delta: -1 },
+                ),
+            ));
+        }
+        UiKeyCode::PageDown => {
+            return Some(AppCommand::Session(
+                session_id,
+                SessionCommand::Tree(
+                    crate::app_runtime::commands::TreeCommand::ScrollViewportPage { delta: 1 },
+                ),
+            ));
+        }
+        UiKeyCode::Char(' ') if !key.ctrl && !key.alt => {
+            return Some(AppCommand::Session(
+                session_id,
+                SessionCommand::Tree(crate::app_runtime::commands::TreeCommand::ToggleExpand),
+            ));
+        }
+        UiKeyCode::Enter if !key.ctrl && !key.alt => {
+            return Some(AppCommand::Session(
+                session_id,
+                SessionCommand::Tree(crate::app_runtime::commands::TreeCommand::ActivateFocused),
+            ));
+        }
+        _ => {}
+    }
+
+    // Input editing fallback
+    match key.code {
+        UiKeyCode::Char(c) if !key.ctrl && !key.alt => Some(AppCommand::Session(
+            session_id,
+            SessionCommand::Input(InputCommand::InsertText(c.to_string())),
+        )),
+        UiKeyCode::Backspace => Some(AppCommand::Session(
+            session_id,
+            SessionCommand::Input(InputCommand::Backspace),
+        )),
+        UiKeyCode::Delete => Some(AppCommand::Session(
+            session_id,
+            SessionCommand::Input(InputCommand::DeleteForward),
+        )),
+        UiKeyCode::Left => Some(AppCommand::Session(
+            session_id,
+            SessionCommand::Input(InputCommand::MoveCursor(
+                crate::app_runtime::commands::CursorMove::Left,
+            )),
+        )),
+        UiKeyCode::Right => Some(AppCommand::Session(
+            session_id,
+            SessionCommand::Input(InputCommand::MoveCursor(
+                crate::app_runtime::commands::CursorMove::Right,
+            )),
+        )),
+        UiKeyCode::Home => Some(AppCommand::Session(
+            session_id,
+            SessionCommand::Input(InputCommand::MoveCursor(
+                crate::app_runtime::commands::CursorMove::Home,
+            )),
+        )),
+        UiKeyCode::End => Some(AppCommand::Session(
+            session_id,
+            SessionCommand::Input(InputCommand::MoveCursor(
+                crate::app_runtime::commands::CursorMove::End,
+            )),
+        )),
+        _ => None,
+    }
 }
 
 pub(crate) fn ui_key_from_event(key: KeyEvent) -> UiKey {

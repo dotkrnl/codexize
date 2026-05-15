@@ -1,4 +1,5 @@
 use super::*;
+use crate::app_runtime::commands::{ModalCommand, PaletteCommand, SessionCommand};
 
 #[test]
 fn restore_terminal_after_failed_start_is_idempotent() {
@@ -24,11 +25,17 @@ fn quit_running_agent_modal_keys_become_domain_commands() {
 
     assert_eq!(
         command_from_event(enter, &view),
-        Some(AppCommand::ConfirmModal)
+        Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::Modal(ModalCommand::Confirm)
+        ))
     );
     assert_eq!(
         command_from_event(cancel, &view),
-        Some(AppCommand::CancelModal)
+        Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::Modal(ModalCommand::Cancel)
+        ))
     );
 }
 
@@ -41,20 +48,12 @@ fn tab_keys_survive_terminal_command_bridge() {
 
     assert_eq!(
         command_from_event(tab, &view),
-        Some(AppCommand::KeyPress(UiKey {
-            code: UiKeyCode::Tab,
-            ctrl: false,
-            alt: false,
-        }))
+        Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::Palette(PaletteCommand::AcceptGhost)
+        ))
     );
-    assert_eq!(
-        command_from_event(back_tab, &view),
-        Some(AppCommand::KeyPress(UiKey {
-            code: UiKeyCode::BackTab,
-            ctrl: false,
-            alt: false,
-        }))
-    );
+    assert_eq!(command_from_event(back_tab, &view), None);
 }
 
 #[test]

@@ -47,7 +47,39 @@ pub(crate) use crate::app_runtime::views::config_panel::{
 impl ConfigPanelState {
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> PanelOutcome {
         let ui_key = crate::ui::tui::ui_key_from_event(key);
-        self.handle_ui_key(ui_key)
+        // In editing or search mode most character keys must be treated as
+        // literal text input, not as the navigation shortcuts they are when
+        // the panel is in navigation mode.
+        let cmd = if self.editing.is_some() || self.searching.is_some() {
+            match ui_key.code {
+                crate::app::keys::UiKeyCode::Esc => {
+                    crate::app_runtime::commands::ConfigPanelCommand::Close
+                }
+                crate::app::keys::UiKeyCode::Enter => {
+                    crate::app_runtime::commands::ConfigPanelCommand::Activate
+                }
+                crate::app::keys::UiKeyCode::Up => {
+                    crate::app_runtime::commands::ConfigPanelCommand::MoveUp
+                }
+                crate::app::keys::UiKeyCode::Down => {
+                    crate::app_runtime::commands::ConfigPanelCommand::MoveDown
+                }
+                crate::app::keys::UiKeyCode::Backspace => {
+                    crate::app_runtime::commands::ConfigPanelCommand::Edit(
+                        crate::app_runtime::commands::InputCommand::Backspace,
+                    )
+                }
+                crate::app::keys::UiKeyCode::Char(c) if !ui_key.ctrl && !ui_key.alt => {
+                    crate::app_runtime::commands::ConfigPanelCommand::Edit(
+                        crate::app_runtime::commands::InputCommand::InsertText(c.to_string()),
+                    )
+                }
+                _ => crate::app::config_panel::config_panel_key_to_command(ui_key),
+            }
+        } else {
+            crate::app::config_panel::config_panel_key_to_command(ui_key)
+        };
+        self.handle_command(cmd)
     }
 }
 

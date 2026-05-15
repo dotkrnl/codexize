@@ -1,4 +1,8 @@
-use crate::app_runtime::{UiKey, UiKeyCode};
+use crate::app::keys::{UiKey, UiKeyCode};
+use crate::app_runtime::commands::{ConfigPanelCommand, CursorMove, InputCommand};
+use crate::app_runtime::views::config_panel::{
+    ConfigFieldView, ConfigPanelView, ConfigSectionView,
+};
 use crate::data::config::{
     Config, Override,
     loader::load_from_path,
@@ -10,6 +14,7 @@ use anyhow::{Result, anyhow};
 use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 pub(crate) mod providers;
@@ -625,12 +630,116 @@ pub(crate) fn source_override<T>(o: &Override<T>) -> &'static str {
     if o.is_explicit() { "override" } else { "(def)" }
 }
 
+/// Translate a TUI-shaped key into the corresponding config-panel command.
+///
+/// This bridges the legacy key path (still exercised by test code) into the
+/// typed `ConfigPanelCommand` surface.  Production input now crosses the seam
+/// as `ConfigPanelCommand` directly (see `ui/tui.rs`).
+pub(crate) fn config_panel_key_to_command(key: UiKey) -> ConfigPanelCommand {
+    use crate::app_runtime::commands::CursorMove;
+
+    if key.ctrl {
+        return match key.code {
+            UiKeyCode::Char('s') => ConfigPanelCommand::Save,
+            UiKeyCode::Char('c') => ConfigPanelCommand::Cancel,
+            UiKeyCode::Char('d') => ConfigPanelCommand::HalfPageDown,
+            UiKeyCode::Char('u') => ConfigPanelCommand::HalfPageUp,
+            UiKeyCode::Char('i') => ConfigPanelCommand::NextSection,
+            UiKeyCode::Char('h') => ConfigPanelCommand::Edit(InputCommand::Backspace),
+            UiKeyCode::Char(c) => ConfigPanelCommand::Edit(InputCommand::InsertText(c.to_string())),
+            _ => ConfigPanelCommand::Edit(InputCommand::InsertText(String::new())),
+        };
+    }
+
+    match key.code {
+        UiKeyCode::Esc | UiKeyCode::Char('q') => ConfigPanelCommand::Close,
+        UiKeyCode::Up | UiKeyCode::Char('k') => ConfigPanelCommand::MoveUp,
+        UiKeyCode::Down | UiKeyCode::Char('j') => ConfigPanelCommand::MoveDown,
+        UiKeyCode::Left | UiKeyCode::Char('h') => ConfigPanelCommand::PrevSection,
+        UiKeyCode::Right | UiKeyCode::Char('l') => ConfigPanelCommand::NextSection,
+        UiKeyCode::Enter => ConfigPanelCommand::Activate,
+        UiKeyCode::Char(' ') => ConfigPanelCommand::Toggle,
+        UiKeyCode::Char('n') => ConfigPanelCommand::AddProvider,
+        UiKeyCode::Char('x') => ConfigPanelCommand::DeleteProvider,
+        UiKeyCode::Char('d') => ConfigPanelCommand::DeleteEntry,
+        UiKeyCode::Char('r') => ConfigPanelCommand::ToggleSecretReveal,
+        UiKeyCode::Char('R') => ConfigPanelCommand::RemoveSavedSecret,
+        UiKeyCode::Tab => ConfigPanelCommand::NextSection,
+        UiKeyCode::BackTab => ConfigPanelCommand::PrevSection,
+        UiKeyCode::Char('[') => ConfigPanelCommand::PrevSectionBracket,
+        UiKeyCode::Char(']') => ConfigPanelCommand::NextSectionBracket,
+        UiKeyCode::Char('g') => ConfigPanelCommand::JumpTop,
+        UiKeyCode::Char('G') => ConfigPanelCommand::JumpBottom,
+        UiKeyCode::PageDown => ConfigPanelCommand::HalfPageDown,
+        UiKeyCode::PageUp => ConfigPanelCommand::HalfPageUp,
+        UiKeyCode::Char('/') => ConfigPanelCommand::Edit(InputCommand::InsertText("/".to_string())),
+        UiKeyCode::Backspace => ConfigPanelCommand::Edit(InputCommand::Backspace),
+        UiKeyCode::Delete => ConfigPanelCommand::Edit(InputCommand::DeleteForward),
+        UiKeyCode::Home => ConfigPanelCommand::Edit(InputCommand::MoveCursor(CursorMove::Home)),
+        UiKeyCode::End => ConfigPanelCommand::Edit(InputCommand::MoveCursor(CursorMove::End)),
+        UiKeyCode::Char(c) => ConfigPanelCommand::Edit(InputCommand::InsertText(c.to_string())),
+        _ => ConfigPanelCommand::Edit(InputCommand::InsertText(String::new())),
+    }
+}
+
 impl ConfigPanelState {
-    pub(crate) fn handle_ui_key(&mut self, key: UiKey) -> PanelOutcome {
-        if self.searching.is_some() {
-            return self.handle_search_key(key);
+    pub(crate) fn current_view(&self) -> ConfigPanelView {
+        let mut sections = Vec::with_capacity(SECTIONS.len());
+        for &section in SECTIONS {
+            let mut fields = Vec::new();
+            for idx in field_indices_for(section) {
+                let meta = FIELDS[idx];
+                let value = self.value_for(&meta);
+                fields.push(ConfigFieldView {
+                    label: Arc::from(meta.label),
+                    value: Arc::from(value),
+                    description: Arc::from(meta.description),
+                    is_secret: meta.secret,
+                });
+            }
+            sections.push(ConfigSectionView {
+                title: Arc::from(section_title(section)),
+                fields: Arc::from(fields),
+            });
         }
-        if key.ctrl && key.code == UiKeyCode::Char('s') {
+
+        ConfigPanelView {
+            is_open: true,
+            is_searching: self.searching.is_some(),
+            is_editing: self.editing.is_some(),
+            sections: Arc::from(sections),
+            selected_section_index: self.selected_section,
+            selected_field_index: self.selected_field,
+        }
+    }
+
+    pub(crate) fn handle_command(&mut self, cmd: ConfigPanelCommand) -> PanelOutcome {
+        if let Some(mut search) = self.searching.take() {
+            let mapped = match &cmd {
+                ConfigPanelCommand::Edit(input_cmd) => Some(input_cmd.clone()),
+                ConfigPanelCommand::Close => Some(InputCommand::Cancel),
+                ConfigPanelCommand::Activate => Some(InputCommand::Submit),
+                ConfigPanelCommand::MoveUp => Some(InputCommand::MoveCursor(CursorMove::LineUp)),
+                ConfigPanelCommand::MoveDown => {
+                    Some(InputCommand::MoveCursor(CursorMove::LineDown))
+                }
+                _ => None,
+            };
+            if let Some(input_cmd) = mapped {
+                // Cancel and Submit close the search overlay; keep the state
+                // alive for all other commands.
+                let closes_overlay =
+                    matches!(input_cmd, InputCommand::Cancel | InputCommand::Submit);
+                let outcome = self.handle_search_command(&mut search, input_cmd);
+                if !closes_overlay {
+                    self.searching = Some(search);
+                }
+                return outcome;
+            }
+            self.searching = Some(search);
+        }
+
+        if matches!(cmd, ConfigPanelCommand::Save) {
             self.save(false);
             let saved =
                 self.editing.is_none() && self.conflict.is_none() && self.save_error.is_none();
@@ -640,18 +749,44 @@ impl ConfigPanelState {
                 PanelOutcome::KeepOpen
             };
         }
-        if key.ctrl && key.code == UiKeyCode::Char('c') {
+        if matches!(cmd, ConfigPanelCommand::Cancel) {
             return PanelOutcome::Close;
         }
-        if let Some(outcome) = self.handle_banner_key(key) {
+
+        if let Some(conflict) = self.conflict.clone()
+            && let Some(outcome) = self.handle_banner_command(conflict, cmd.clone())
+        {
             return outcome;
         }
-        if self.editing.is_some() {
-            self.handle_edit_key(key);
-            return PanelOutcome::KeepOpen;
+
+        if let Some(editing) = self.editing.take() {
+            let mapped = match &cmd {
+                ConfigPanelCommand::Edit(input_cmd) => Some(input_cmd.clone()),
+                ConfigPanelCommand::Close => Some(InputCommand::Cancel),
+                ConfigPanelCommand::Activate => Some(InputCommand::Submit),
+                ConfigPanelCommand::MoveDown | ConfigPanelCommand::NextSection => {
+                    Some(InputCommand::MoveCursor(CursorMove::LineDown))
+                }
+                ConfigPanelCommand::MoveUp | ConfigPanelCommand::PrevSection => {
+                    Some(InputCommand::MoveCursor(CursorMove::LineUp))
+                }
+                _ => None,
+            };
+            if let Some(input_cmd) = mapped {
+                self.handle_edit_command(editing, input_cmd);
+                return PanelOutcome::KeepOpen;
+            }
+            self.editing = Some(editing);
         }
-        match key.code {
-            UiKeyCode::Esc | UiKeyCode::Char('q') => {
+
+        match cmd {
+            ConfigPanelCommand::Edit(InputCommand::InsertText(ref text))
+                if text == "/" && self.searching.is_none() && self.editing.is_none() =>
+            {
+                self.open_search();
+                PanelOutcome::KeepOpen
+            }
+            ConfigPanelCommand::Close => {
                 if self.dirty {
                     self.conflict = Some(ConflictBanner::ExitPrompt {
                         selected: EXIT_DEFAULT_SELECTION,
@@ -662,23 +797,33 @@ impl ConfigPanelState {
                     PanelOutcome::Close
                 }
             }
-            UiKeyCode::Up | UiKeyCode::Char('k') => {
+            ConfigPanelCommand::MoveUp => {
                 self.move_field(-1);
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Down | UiKeyCode::Char('j') => {
+            ConfigPanelCommand::MoveDown => {
                 self.move_field(1);
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Left | UiKeyCode::Char('h') => {
+            ConfigPanelCommand::PrevSection => {
                 self.move_section(-1);
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Right | UiKeyCode::Char('l') => {
+            ConfigPanelCommand::NextSection => {
                 self.move_section(1);
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Enter => {
+            ConfigPanelCommand::PrevSectionBracket => {
+                self.selected_section = 0;
+                self.select_first_field_in_current_section();
+                PanelOutcome::KeepOpen
+            }
+            ConfigPanelCommand::NextSectionBracket => {
+                self.selected_section = SECTIONS.len().saturating_sub(1);
+                self.select_first_field_in_current_section();
+                PanelOutcome::KeepOpen
+            }
+            ConfigPanelCommand::Activate => {
                 if is_providers_section(self.current_section()) {
                     self.activate_provider_line();
                 } else {
@@ -686,7 +831,7 @@ impl ConfigPanelState {
                 }
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Char(' ') => {
+            ConfigPanelCommand::Toggle => {
                 if is_providers_section(self.current_section()) {
                     self.activate_provider_line();
                 } else if let Some(meta) = self.current_meta().copied()
@@ -696,31 +841,33 @@ impl ConfigPanelState {
                 }
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Char('n') if is_providers_section(self.current_section()) => {
+            ConfigPanelCommand::AddProvider if is_providers_section(self.current_section()) => {
                 self.open_add_provider_editor();
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Char('x') if is_providers_section(self.current_section()) => {
+            ConfigPanelCommand::DeleteProvider if is_providers_section(self.current_section()) => {
                 self.remove_selected_provider();
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Char('d') if key.ctrl => {
+            ConfigPanelCommand::HalfPageDown => {
                 if is_providers_section(self.current_section()) {
                     self.move_providers_page(1);
                 }
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Char('u') if key.ctrl => {
+            ConfigPanelCommand::HalfPageUp => {
                 if is_providers_section(self.current_section()) {
                     self.move_providers_page(-1);
                 }
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Char('d') => {
+            ConfigPanelCommand::DeleteEntry => {
                 self.reset_field();
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Char('r') if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") => {
+            ConfigPanelCommand::ToggleSecretReveal
+                if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") =>
+            {
                 self.reveal_topic = !self.reveal_topic;
                 self.status = if self.reveal_topic {
                     "topic revealed".to_string()
@@ -729,34 +876,14 @@ impl ConfigPanelState {
                 };
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Char('R') if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") => {
+            ConfigPanelCommand::RemoveSavedSecret
+                if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") =>
+            {
                 self.conflict = Some(ConflictBanner::RegenerateTopicPrompt);
                 self.status = "regenerate topic? y/n".to_string();
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Tab => {
-                self.move_section(1);
-                PanelOutcome::KeepOpen
-            }
-            UiKeyCode::Char('i') if key.ctrl => {
-                self.move_section(1);
-                PanelOutcome::KeepOpen
-            }
-            UiKeyCode::BackTab => {
-                self.move_section(-1);
-                PanelOutcome::KeepOpen
-            }
-            UiKeyCode::Char('[') => {
-                self.selected_section = 0;
-                self.select_first_field_in_current_section();
-                PanelOutcome::KeepOpen
-            }
-            UiKeyCode::Char(']') => {
-                self.selected_section = SECTIONS.len().saturating_sub(1);
-                self.select_first_field_in_current_section();
-                PanelOutcome::KeepOpen
-            }
-            UiKeyCode::Char('g') => {
+            ConfigPanelCommand::JumpTop => {
                 if is_providers_section(self.current_section()) {
                     self.providers_cursor = 0;
                     self.providers_scroll.set(0);
@@ -767,29 +894,13 @@ impl ConfigPanelState {
                 }
                 PanelOutcome::KeepOpen
             }
-            UiKeyCode::Char('G') => {
+            ConfigPanelCommand::JumpBottom => {
                 if is_providers_section(self.current_section()) {
                     let len = providers::get_lines(&self.config, &self.folded_vendors).len();
                     self.providers_cursor = len.saturating_sub(1);
                 } else if let Some(last) = field_indices_for(self.current_section()).last() {
                     self.selected_field = *last;
                 }
-                PanelOutcome::KeepOpen
-            }
-            UiKeyCode::PageDown => {
-                if is_providers_section(self.current_section()) {
-                    self.move_providers_page(1);
-                }
-                PanelOutcome::KeepOpen
-            }
-            UiKeyCode::PageUp => {
-                if is_providers_section(self.current_section()) {
-                    self.move_providers_page(-1);
-                }
-                PanelOutcome::KeepOpen
-            }
-            UiKeyCode::Char('/') => {
-                self.open_search();
                 PanelOutcome::KeepOpen
             }
             _ => PanelOutcome::KeepOpen,
@@ -938,16 +1049,18 @@ impl ConfigPanelState {
         }
     }
 
-    fn handle_search_key(&mut self, key: UiKey) -> PanelOutcome {
-        let Some(mut search) = self.searching.take() else {
-            return PanelOutcome::KeepOpen;
-        };
-        match key.code {
-            UiKeyCode::Esc => {
+    fn handle_search_command(
+        &mut self,
+        search: &mut SearchState,
+        cmd: InputCommand,
+    ) -> PanelOutcome {
+        match cmd {
+            InputCommand::Cancel => {
                 self.status = "search cancelled".to_string();
+                self.searching = None;
                 return PanelOutcome::KeepOpen;
             }
-            UiKeyCode::Enter => {
+            InputCommand::Submit => {
                 if let Some(idx) = search.results.get(search.selected).copied() {
                     let meta = FIELDS[idx];
                     if let Some(section_idx) = SECTIONS.iter().position(|s| *s == meta.section) {
@@ -958,25 +1071,31 @@ impl ConfigPanelState {
                 } else {
                     self.status = "no match".to_string();
                 }
+                self.searching = None;
                 return PanelOutcome::KeepOpen;
             }
-            UiKeyCode::Up if !search.results.is_empty() => {
+            InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::LineUp)
+            | InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::Left)
+                if !search.results.is_empty() =>
+            {
                 search.selected = wrap_index(search.selected, search.results.len(), -1);
             }
-            UiKeyCode::Down if !search.results.is_empty() => {
+            InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::LineDown)
+            | InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::Right)
+                if !search.results.is_empty() =>
+            {
                 search.selected = wrap_index(search.selected, search.results.len(), 1);
             }
-            UiKeyCode::Backspace => {
+            InputCommand::Backspace => {
                 search.query.pop();
-                Self::recompute_search_results(&mut search);
+                Self::recompute_search_results(search);
             }
-            UiKeyCode::Char(c) if !key.ctrl && !key.alt => {
-                search.query.push(c);
-                Self::recompute_search_results(&mut search);
+            InputCommand::InsertText(text) => {
+                search.query.push_str(&text);
+                Self::recompute_search_results(search);
             }
             _ => {}
         }
-        self.searching = Some(search);
         PanelOutcome::KeepOpen
     }
 
@@ -1008,11 +1127,14 @@ impl ConfigPanelState {
         }
     }
 
-    fn handle_banner_key(&mut self, key: UiKey) -> Option<PanelOutcome> {
-        let banner = self.conflict.clone()?;
+    fn handle_banner_command(
+        &mut self,
+        banner: ConflictBanner,
+        cmd: ConfigPanelCommand,
+    ) -> Option<PanelOutcome> {
         match banner {
-            ConflictBanner::MtimeAdvanced => match key.code {
-                UiKeyCode::Char('r') => {
+            ConflictBanner::MtimeAdvanced => match cmd {
+                ConfigPanelCommand::Activate => {
                     match load_from_path(&self.path) {
                         Ok(config) => {
                             self.config = config;
@@ -1026,12 +1148,38 @@ impl ConfigPanelState {
                     self.conflict = None;
                     Some(PanelOutcome::KeepOpen)
                 }
-                UiKeyCode::Char('o') => {
+                ConfigPanelCommand::Save => {
                     self.conflict = None;
                     self.save(true);
                     Some(PanelOutcome::KeepOpen)
                 }
-                UiKeyCode::Esc | UiKeyCode::Char('q') => {
+                ConfigPanelCommand::Cancel | ConfigPanelCommand::Close => {
+                    self.conflict = None;
+                    self.status = "kept editing".to_string();
+                    Some(PanelOutcome::KeepOpen)
+                }
+                ConfigPanelCommand::Edit(InputCommand::InsertText(ref text)) if text == "r" => {
+                    match load_from_path(&self.path) {
+                        Ok(config) => {
+                            self.config = config;
+                            self.opened_mtime = mtime(&self.path);
+                            self.dirty = false;
+                            self.status = "reloaded config".to_string();
+                            self.save_error = None;
+                        }
+                        Err(err) => self.save_error = Some(err.to_string()),
+                    }
+                    self.conflict = None;
+                    Some(PanelOutcome::KeepOpen)
+                }
+                ConfigPanelCommand::Edit(InputCommand::InsertText(ref text)) if text == "o" => {
+                    self.conflict = None;
+                    self.save(true);
+                    Some(PanelOutcome::KeepOpen)
+                }
+                ConfigPanelCommand::Edit(InputCommand::InsertText(ref text))
+                    if text == "c" || text == "q" =>
+                {
                     self.conflict = None;
                     self.status = "kept editing".to_string();
                     Some(PanelOutcome::KeepOpen)
@@ -1040,30 +1188,47 @@ impl ConfigPanelState {
             },
             ConflictBanner::ExitPrompt { selected } => {
                 let len = EXIT_OPTIONS.len();
-                match key.code {
-                    UiKeyCode::Up | UiKeyCode::Char('k') => {
+                match cmd {
+                    ConfigPanelCommand::MoveUp => {
                         let next = wrap_index(selected, len, -1);
                         self.conflict = Some(ConflictBanner::ExitPrompt { selected: next });
                         Some(PanelOutcome::KeepOpen)
                     }
-                    UiKeyCode::Down | UiKeyCode::Char('j') => {
+                    ConfigPanelCommand::MoveDown => {
                         let next = wrap_index(selected, len, 1);
                         self.conflict = Some(ConflictBanner::ExitPrompt { selected: next });
                         Some(PanelOutcome::KeepOpen)
                     }
-                    UiKeyCode::Enter => Some(self.execute_exit_choice(EXIT_OPTIONS[selected].0)),
-                    UiKeyCode::Char('s' | 'S') => Some(self.execute_exit_choice(ExitChoice::Save)),
-                    UiKeyCode::Char('d' | 'D') => {
+                    ConfigPanelCommand::Activate => {
+                        Some(self.execute_exit_choice(EXIT_OPTIONS[selected].0))
+                    }
+                    ConfigPanelCommand::Save => Some(self.execute_exit_choice(ExitChoice::Save)),
+                    ConfigPanelCommand::DeleteEntry => {
                         Some(self.execute_exit_choice(ExitChoice::Discard))
                     }
-                    UiKeyCode::Char('c' | 'C' | 'q') | UiKeyCode::Esc => {
+                    ConfigPanelCommand::Cancel | ConfigPanelCommand::Close => {
+                        Some(self.execute_exit_choice(ExitChoice::Cancel))
+                    }
+                    ConfigPanelCommand::Edit(InputCommand::InsertText(ref text))
+                        if text == "s" || text == "S" =>
+                    {
+                        Some(self.execute_exit_choice(ExitChoice::Save))
+                    }
+                    ConfigPanelCommand::Edit(InputCommand::InsertText(ref text))
+                        if text == "d" || text == "D" =>
+                    {
+                        Some(self.execute_exit_choice(ExitChoice::Discard))
+                    }
+                    ConfigPanelCommand::Edit(InputCommand::InsertText(ref text))
+                        if text == "c" || text == "C" || text == "q" =>
+                    {
                         Some(self.execute_exit_choice(ExitChoice::Cancel))
                     }
                     _ => Some(PanelOutcome::KeepOpen),
                 }
             }
-            ConflictBanner::RegenerateTopicPrompt => match key.code {
-                UiKeyCode::Char('y' | 'Y') | UiKeyCode::Enter => {
+            ConflictBanner::RegenerateTopicPrompt => match cmd {
+                ConfigPanelCommand::Activate => {
                     match notifications::generate_topic()
                         .map_err(|err| anyhow!("{err:#}"))
                         .and_then(|topic| self.set_value("ntfy.topic", &topic))
@@ -1074,7 +1239,27 @@ impl ConfigPanelState {
                     self.conflict = None;
                     Some(PanelOutcome::KeepOpen)
                 }
-                UiKeyCode::Char('n' | 'N' | 'q') | UiKeyCode::Esc => {
+                ConfigPanelCommand::Cancel | ConfigPanelCommand::Close => {
+                    self.conflict = None;
+                    self.status = "unchanged".to_string();
+                    Some(PanelOutcome::KeepOpen)
+                }
+                ConfigPanelCommand::Edit(InputCommand::InsertText(ref text))
+                    if text == "y" || text == "Y" =>
+                {
+                    match notifications::generate_topic()
+                        .map_err(|err| anyhow!("{err:#}"))
+                        .and_then(|topic| self.set_value("ntfy.topic", &topic))
+                    {
+                        Ok(()) => self.status = "regenerated ntfy.topic".to_string(),
+                        Err(err) => self.status = err.to_string(),
+                    }
+                    self.conflict = None;
+                    Some(PanelOutcome::KeepOpen)
+                }
+                ConfigPanelCommand::Edit(InputCommand::InsertText(ref text))
+                    if text == "n" || text == "N" || text == "q" =>
+                {
                     self.conflict = None;
                     self.status = "unchanged".to_string();
                     Some(PanelOutcome::KeepOpen)
@@ -1084,162 +1269,183 @@ impl ConfigPanelState {
         }
     }
 
-    fn handle_edit_key(&mut self, key: UiKey) {
-        if let Some(Editing::AddProvider(_)) = self.editing {
-            self.handle_add_provider_key(key);
-            return;
+    fn handle_edit_command(&mut self, editing: Editing, cmd: InputCommand) {
+        match editing {
+            Editing::AddProvider(mut editor) => {
+                if self.handle_add_provider_command(&mut editor, cmd) {
+                    self.editing = Some(Editing::AddProvider(editor));
+                }
+                return;
+            }
+            Editing::ProviderDetail { cursor } => {
+                self.handle_provider_detail_command(cursor, cmd);
+                return;
+            }
+            Editing::Choice {
+                key,
+                options,
+                selected,
+            } => {
+                self.handle_choice_command(key, options, selected, cmd);
+                return;
+            }
+            _ => {
+                self.editing = Some(editing);
+            }
         }
-        if matches!(self.editing, Some(Editing::ProviderDetail { .. })) {
-            self.handle_provider_detail_key(key);
-            return;
-        }
-        if matches!(self.editing, Some(Editing::Choice { .. })) {
-            self.handle_choice_key(key);
-            return;
-        }
-        match key.code {
-            UiKeyCode::Esc => {
+
+        match cmd {
+            InputCommand::Cancel => {
                 self.editing = None;
                 self.status = "edit cancelled".to_string();
             }
-            UiKeyCode::Enter | UiKeyCode::Tab => {
+            InputCommand::Submit => {
                 self.accept_edit();
             }
-            UiKeyCode::Backspace => {
+            InputCommand::Backspace => {
                 self.edit_buffer.pop();
             }
-            UiKeyCode::Char(c) if !key.ctrl && !key.alt => {
+            InputCommand::InsertText(text) => {
                 if matches!(self.editing, Some(Editing::Integer)) {
-                    if c.is_ascii_digit() {
-                        self.edit_buffer.push(c);
+                    for c in text.chars() {
+                        if c.is_ascii_digit() {
+                            self.edit_buffer.push(c);
+                        }
                     }
                 } else {
-                    self.edit_buffer.push(c);
+                    self.edit_buffer.push_str(&text);
                 }
             }
-            UiKeyCode::Up if matches!(self.editing, Some(Editing::Integer)) => {
-                self.nudge_integer(1);
+            InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::LineUp)
+            | InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::Left) => {
+                if matches!(self.editing, Some(Editing::Integer)) {
+                    self.nudge_integer(1);
+                }
             }
-            UiKeyCode::Down if matches!(self.editing, Some(Editing::Integer)) => {
-                self.nudge_integer(-1);
+            InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::LineDown)
+            | InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::Right) => {
+                if matches!(self.editing, Some(Editing::Integer)) {
+                    self.nudge_integer(-1);
+                }
             }
             _ => {}
         }
     }
 
-    fn handle_add_provider_key(&mut self, key: UiKey) {
-        let Some(Editing::AddProvider(ref mut editor)) = self.editing else {
-            return;
-        };
-
+    fn handle_add_provider_command(
+        &mut self,
+        editor: &mut providers::ProvidersEditor,
+        cmd: InputCommand,
+    ) -> bool {
         if let Some(target) = editor.open_dropdown {
             let options = editor.dropdown_options(target);
             let len = options.len();
-            match key.code {
-                UiKeyCode::Esc | UiKeyCode::Char('q') => editor.close_dropdown(),
-                UiKeyCode::Up | UiKeyCode::Char('k') if len > 0 => {
+            match cmd {
+                InputCommand::Cancel => editor.close_dropdown(),
+                InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::LineUp)
+                    if len > 0 =>
+                {
                     editor.dropdown_cursor = wrap_index(editor.dropdown_cursor, len, -1);
                 }
-                UiKeyCode::Down | UiKeyCode::Char('j') if len > 0 => {
+                InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::LineDown)
+                    if len > 0 =>
+                {
                     editor.dropdown_cursor = wrap_index(editor.dropdown_cursor, len, 1);
                 }
-                UiKeyCode::Enter => editor.commit_dropdown(),
+                InputCommand::Submit => editor.commit_dropdown(),
                 _ => {}
             }
-            return;
+            return true;
         }
 
-        match key.code {
-            UiKeyCode::Esc | UiKeyCode::Char('q')
-                if !matches!(editor.focus, providers::AddProviderField::LaunchName) =>
-            {
+        match cmd {
+            InputCommand::Cancel => {
                 self.editing = None;
                 self.status = "add cancelled".to_string();
+                false
             }
-            UiKeyCode::Esc => {
-                self.editing = None;
-                self.status = "add cancelled".to_string();
-            }
-            UiKeyCode::Tab => editor.focus = editor.focus.next(),
-            UiKeyCode::BackTab => editor.focus = editor.focus.prev(),
-            UiKeyCode::Up | UiKeyCode::Char('k')
-                if !matches!(editor.focus, providers::AddProviderField::LaunchName) =>
-            {
+            InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::LineUp) => {
                 editor.focus = editor.focus.prev();
+                true
             }
-            UiKeyCode::Down | UiKeyCode::Char('j')
-                if !matches!(editor.focus, providers::AddProviderField::LaunchName) =>
-            {
+            InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::LineDown) => {
                 editor.focus = editor.focus.next();
+                true
             }
-            UiKeyCode::Enter => match editor.focus {
+            InputCommand::Submit => match editor.focus {
                 providers::AddProviderField::Model
                 | providers::AddProviderField::Subscription
                 | providers::AddProviderField::Cli => {
                     editor.open_dropdown(editor.focus);
+                    true
                 }
                 providers::AddProviderField::Official => {
                     editor.official = !editor.official;
+                    true
                 }
                 providers::AddProviderField::Free => {
                     editor.free = !editor.free;
+                    true
                 }
                 providers::AddProviderField::LaunchName => {
                     if editor.commit(&mut self.config) {
                         self.dirty = true;
                         self.status = "provider added".to_string();
                         self.editing = None;
+                        false
                     } else {
                         self.status =
                             "invalid provider data (duplicate or empty fields)".to_string();
+                        true
                     }
                 }
             },
-            UiKeyCode::Char(' ') => match editor.focus {
-                providers::AddProviderField::Model
-                | providers::AddProviderField::Subscription
-                | providers::AddProviderField::Cli => editor.open_dropdown(editor.focus),
-                providers::AddProviderField::Official => editor.official = !editor.official,
-                providers::AddProviderField::Free => editor.free = !editor.free,
-                providers::AddProviderField::LaunchName => editor.launch_name.push(' '),
-            },
-            UiKeyCode::Backspace => {
+            InputCommand::InsertText(text) => {
+                if matches!(editor.focus, providers::AddProviderField::LaunchName) {
+                    editor.launch_name.push_str(&text);
+                } else if text == " " {
+                    match editor.focus {
+                        providers::AddProviderField::Model
+                        | providers::AddProviderField::Subscription
+                        | providers::AddProviderField::Cli => editor.open_dropdown(editor.focus),
+                        providers::AddProviderField::Official => editor.official = !editor.official,
+                        providers::AddProviderField::Free => editor.free = !editor.free,
+                        providers::AddProviderField::LaunchName => editor.launch_name.push(' '),
+                    }
+                }
+                true
+            }
+            InputCommand::Backspace => {
                 if matches!(editor.focus, providers::AddProviderField::LaunchName) {
                     editor.launch_name.pop();
                 }
+                true
             }
-            UiKeyCode::Char(c) if !key.ctrl && !key.alt => {
-                if matches!(editor.focus, providers::AddProviderField::LaunchName) {
-                    editor.launch_name.push(c);
-                }
-            }
-            _ => {}
+            _ => true,
         }
     }
 
-    fn handle_choice_key(&mut self, key: UiKey) {
-        let Some(Editing::Choice {
-            key: field_key,
-            options,
-            selected,
-        }) = self.editing.clone()
-        else {
-            return;
-        };
-        match key.code {
-            UiKeyCode::Esc | UiKeyCode::Char('q') => {
+    fn handle_choice_command(
+        &mut self,
+        field_key: &'static str,
+        options: Vec<String>,
+        selected: usize,
+        cmd: InputCommand,
+    ) {
+        match cmd {
+            InputCommand::Cancel => {
                 self.editing = None;
                 self.status = "edit cancelled".to_string();
             }
-            UiKeyCode::Up | UiKeyCode::Char('k') => {
+            InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::LineUp) => {
                 let next = wrap_index(selected, options.len(), -1);
                 self.set_choice_selected(next);
             }
-            UiKeyCode::Down | UiKeyCode::Char('j') => {
+            InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::LineDown) => {
                 let next = wrap_index(selected, options.len(), 1);
                 self.set_choice_selected(next);
             }
-            UiKeyCode::Enter => {
+            InputCommand::Submit => {
                 let value = options.get(selected).cloned().unwrap_or_default();
                 match self.set_value(field_key, &value) {
                     Ok(()) => {
@@ -1422,34 +1628,32 @@ impl ConfigPanelState {
         self.status = format!("{} toggled", toggle.label);
     }
 
-    fn handle_provider_detail_key(&mut self, key: UiKey) {
-        let Some(Editing::ProviderDetail { cursor }) = self.editing else {
-            return;
-        };
+    fn handle_provider_detail_command(&mut self, cursor: usize, cmd: InputCommand) {
         let lines = providers::get_lines(&self.config, &self.folded_vendors);
         let is_baked = matches!(
             lines.get(self.providers_cursor),
             Some(providers::ProvidersLine::Provider { is_baked: true, .. })
         );
-        match key.code {
-            UiKeyCode::Esc | UiKeyCode::Char('q') => {
+        match cmd {
+            InputCommand::Cancel => {
                 self.editing = None;
                 self.status = "closed details".to_string();
             }
-            UiKeyCode::Up | UiKeyCode::Char('k') => {
+            InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::LineUp) => {
                 let next = step_toggle(cursor, is_baked, -1);
                 self.editing = Some(Editing::ProviderDetail { cursor: next });
             }
-            UiKeyCode::Down | UiKeyCode::Char('j') => {
+            InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::LineDown) => {
                 let next = step_toggle(cursor, is_baked, 1);
                 self.editing = Some(Editing::ProviderDetail { cursor: next });
             }
-            UiKeyCode::Char(' ') | UiKeyCode::Enter => {
+            InputCommand::Submit => {
                 self.toggle_provider_property(cursor);
+                self.editing = Some(Editing::ProviderDetail { cursor });
             }
-            UiKeyCode::Char('x') => {
-                self.editing = None;
-                self.remove_selected_provider();
+            InputCommand::InsertText(text) if text == " " => {
+                self.toggle_provider_property(cursor);
+                self.editing = Some(Editing::ProviderDetail { cursor });
             }
             _ => {}
         }

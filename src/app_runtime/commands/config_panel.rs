@@ -55,4 +55,6 @@ pub enum ConfigPanelCommand {
     ToggleSecretReveal,
     /// Remove the saved secret value (`R`).
     RemoveSavedSecret,
+    /// Search or edit field via typed input command.
+    Edit(crate::app_runtime::commands::InputCommand),
 }

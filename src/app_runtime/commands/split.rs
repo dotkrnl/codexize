@@ -8,6 +8,10 @@ pub enum SplitCommand {
     /// Open the split on whatever the focused tree row resolves to.
     OpenFocused,
     Close,
-    ScrollLines { delta: isize },
-    ScrollPages { delta: isize },
+    ScrollLines {
+        delta: isize,
+    },
+    ScrollPages {
+        delta: isize,
+    },
 }

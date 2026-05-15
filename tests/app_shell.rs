@@ -1,5 +1,5 @@
 use codexize::app::AppStartupOrigin;
-use codexize::app_runtime::{AppCommand, UiKey, UiKeyCode};
+use codexize::app_runtime::{AppCommand, ShellCommand};
 use codexize::app_shell::{
     AppShell, ShellCommandOutcome, ShellEvent, ShellFocus, ShellImplementationAction,
 };
@@ -70,12 +70,16 @@ fn shell_for(initial: SessionState) -> AppShell {
     AppShell::new(initial, AppStartupOrigin::Default, Arc::new(config)).expect("shell")
 }
 
-fn key(code: UiKeyCode) -> AppCommand {
-    AppCommand::KeyPress(UiKey {
-        code,
-        ctrl: false,
-        alt: false,
-    })
+fn key(code: &str) -> AppCommand {
+    match code {
+        "right" => AppCommand::Shell(ShellCommand::ToggleSidebarFocus),
+        "left" => AppCommand::Shell(ShellCommand::ToggleSidebarFocus),
+        "down" => AppCommand::Shell(ShellCommand::MoveSidebarSelection { delta: 1 }),
+        "up" => AppCommand::Shell(ShellCommand::MoveSidebarSelection { delta: -1 }),
+        "enter" => AppCommand::Shell(ShellCommand::OpenSelectedSidebarSession),
+        "esc" => AppCommand::Shell(ShellCommand::CloseSidebar),
+        _ => panic!("unknown test key: {code}"),
+    }
 }
 
 #[test]
@@ -305,7 +309,7 @@ fn sidebar_focus_switching_is_active_only_while_sidebar_visible() {
 
         assert_eq!(
             shell
-                .handle_shell_command(key(UiKeyCode::Right), false)
+                .handle_shell_command(key("right"), false)
                 .expect("right"),
             ShellCommandOutcome::Unhandled
         );
@@ -314,7 +318,7 @@ fn sidebar_focus_switching_is_active_only_while_sidebar_visible() {
         shell.toggle_sessions_sidebar().expect("toggle");
         assert_eq!(
             shell
-                .handle_shell_command(key(UiKeyCode::Right), false)
+                .handle_shell_command(key("right"), false)
                 .expect("right"),
             ShellCommandOutcome::Consumed
         );
@@ -322,7 +326,7 @@ fn sidebar_focus_switching_is_active_only_while_sidebar_visible() {
 
         assert_eq!(
             shell
-                .handle_shell_command(key(UiKeyCode::Left), false)
+                .handle_shell_command(key("left"), false)
                 .expect("left"),
             ShellCommandOutcome::Consumed
         );
@@ -345,21 +349,19 @@ fn sidebar_keyboard_navigation_selects_and_opens_without_eager_loading() {
         assert_eq!(shell.open_workspace_count(), 1);
 
         shell
-            .handle_shell_command(key(UiKeyCode::Down), false)
+            .handle_shell_command(key("down"), false)
             .expect("down");
         assert_eq!(shell.sidebar_view().selected_index, 1);
         assert_eq!(shell.open_workspace_count(), 1);
 
-        shell
-            .handle_shell_command(key(UiKeyCode::Up), false)
-            .expect("up");
+        shell.handle_shell_command(key("up"), false).expect("up");
         assert_eq!(shell.sidebar_view().selected_index, 0);
 
         shell
-            .handle_shell_command(key(UiKeyCode::Down), false)
+            .handle_shell_command(key("down"), false)
             .expect("down");
         shell
-            .handle_shell_command(key(UiKeyCode::Enter), false)
+            .handle_shell_command(key("enter"), false)
             .expect("enter");
 
         assert_eq!(shell.focused_session_id(), "20260511-091000-000000001");
@@ -379,16 +381,12 @@ fn esc_from_sidebar_focus_hides_sidebar_after_modal_gets_first_chance() {
         shell.focus_sidebar();
 
         // Esc with modal_open=true should NOT hide sidebar (modal gets precedence)
-        shell
-            .handle_shell_command(key(UiKeyCode::Esc), true)
-            .expect("esc");
+        shell.handle_shell_command(key("esc"), true).expect("esc");
         assert!(shell.sidebar_view().visible);
         assert_eq!(shell.sidebar_view().focus, ShellFocus::Sidebar);
 
         // Esc with modal_open=false SHOULD hide sidebar
-        shell
-            .handle_shell_command(key(UiKeyCode::Esc), false)
-            .expect("esc");
+        shell.handle_shell_command(key("esc"), false).expect("esc");
         assert!(!shell.sidebar_view().visible);
         assert_eq!(shell.sidebar_view().focus, ShellFocus::Workspace);
     });

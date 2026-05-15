@@ -36,6 +36,8 @@ pub enum ModalAction {
     AcceptSkipToImpl,
     /// Skip-to-impl modal: decline (`n`).
     DeclineSkipToImpl,
+    /// Spec/Plan-review-paused modal: reject the verdict (`n`).
+    RejectPausedReview,
     /// Dreaming-decision modal: run dreaming (`r` / Enter).
     RunDreaming,
     /// Spec/Plan-review-paused modal: open palette (`:`).

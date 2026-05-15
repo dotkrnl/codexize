@@ -6,6 +6,8 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ConfigPanelView {
     pub is_open: bool,
+    pub is_searching: bool,
+    pub is_editing: bool,
     pub sections: Arc<[ConfigSectionView]>,
     pub selected_section_index: usize,
     pub selected_field_index: usize,

@@ -62,37 +62,50 @@ impl TerminalRuntime {
     where
         F: FnMut(DataRequest) -> DataOutcome,
     {
+        use crate::app_runtime::commands::{GlobalCommand, ModalCommand, SessionCommand};
+
         match command {
-            AppCommand::Quit if view.agent_running => {
+            AppCommand::Global(GlobalCommand::Quit) if view.agent_running => {
                 self.modal_override = Some(ModalKind::QuitRunningAgent);
                 TerminalCommandOutcome::HandledContinue
             }
             // Quit confirmation must converge whether the modal was opened
-            // by the runtime (`AppCommand::Quit`) or the App-owned `:quit`
+            // by the runtime (`GlobalCommand::Quit`) or the App-owned `:quit`
             // command path (which sets only `view.modal`). Both emit
-            // `ConfirmModal` from the UI; the runtime owns the termination
+            // `Confirm` from the UI; the runtime owns the termination
             // dispatch in either case so App never has to round-trip back
             // through the runtime.
-            AppCommand::ConfirmModal
-                if matches!(
-                    self.modal_override.or(view.modal),
-                    Some(ModalKind::QuitRunningAgent)
-                ) =>
+            AppCommand::Session(
+                _,
+                SessionCommand::Modal(ModalCommand::Confirm | ModalCommand::Cancel),
+            ) if matches!(
+                self.modal_override.or(view.modal),
+                Some(ModalKind::QuitRunningAgent)
+            ) =>
             {
-                for run in view
-                    .agent_runs
-                    .iter()
-                    .filter(|run| run.status == RunStatus::Running)
-                {
-                    let _ = dispatch(DataRequest::TerminateRun { run_id: run.id });
+                let is_confirm = matches!(
+                    command,
+                    AppCommand::Session(_, SessionCommand::Modal(ModalCommand::Confirm))
+                );
+
+                if is_confirm {
+                    for run in view
+                        .agent_runs
+                        .iter()
+                        .filter(|run| run.status == RunStatus::Running)
+                    {
+                        let _ = dispatch(DataRequest::TerminateRun { run_id: run.id });
+                    }
+                    TerminalCommandOutcome::HandledExit
+                } else {
+                    if self.modal_override.is_some() {
+                        self.modal_override = None;
+                    }
+                    // Even if we cleared a runtime override, we still return
+                    // HandledContinue so the App doesn't try to handle a
+                    // Cancel that was meant for the quit modal.
+                    TerminalCommandOutcome::HandledContinue
                 }
-                TerminalCommandOutcome::HandledExit
-            }
-            AppCommand::CancelModal
-                if matches!(self.modal_override, Some(ModalKind::QuitRunningAgent)) =>
-            {
-                self.modal_override = None;
-                TerminalCommandOutcome::HandledContinue
             }
             other => TerminalCommandOutcome::AppOwned(other),
         }

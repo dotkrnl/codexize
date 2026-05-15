@@ -1,7 +1,9 @@
 use super::super::App;
 use super::super::CommandReturnTarget;
-use crate::app_runtime::UiKey;
-use crate::app_runtime::UiKeyCode;
+#[cfg(test)]
+use crate::app::keys::UiKey;
+#[cfg(test)]
+use crate::app::keys::UiKeyCode;
 use crate::app_runtime::views::split::SplitTargetView as SplitTarget;
 use crate::state::Stage;
 impl App {
@@ -137,6 +139,7 @@ impl App {
         let step = self.split_viewport_height().saturating_sub(1).max(1) as isize;
         self.scroll_split_by_lines(delta.saturating_mul(step));
     }
+    #[cfg(test)]
     pub(super) fn handle_split_key(&mut self, key: UiKey) -> bool {
         if self.split_owns_input() {
             self.input_mode = true;

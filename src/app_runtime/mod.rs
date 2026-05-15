@@ -28,6 +28,7 @@ pub mod command;
 pub mod commands;
 pub mod frontend;
 pub mod root_view;
+pub mod run;
 pub(crate) mod stages;
 pub mod terminal;
 pub mod view;
@@ -40,6 +41,7 @@ pub use root_view::{
     RootEvent, RootEventPayload, RootView, SessionId, SessionView, SessionViewDelta, ShellFocus,
     ShellView, ShellViewDelta, SidebarRow,
 };
+pub use run::{RuntimePublisher, TerminalFrontend, build_connector, run_frontend};
 pub use terminal::run_terminal_app;
 pub use view::{
     AgentRunSummary, AppView, ModalKind, ModeFlags, StageId, StatusMessage, StatusSeverity,

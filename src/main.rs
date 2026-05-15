@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use codexize::{
-    app, app_shell,
+    app, app_runtime, app_shell,
     data::{app_lock, config::cli as config_cli},
     state::{self},
     ui::{preflight, tui, widgets::picker::state as picker},
@@ -306,7 +306,15 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
         Some(app_lock_guard),
     )?;
     let mut terminal = terminal_guard.into_terminal();
-    let result = shell.run_focused_terminal_app(&mut terminal);
+    // Route the existing TUI launch through the new frontend seam helper.
+    // `run_frontend` builds the `FrontendConnector`, emits the spec-pinned
+    // initial Snapshot, then hands off to `TerminalFrontend`, which today
+    // is a thin shim around `AppShell::run_focused_terminal_app`. No
+    // operator-visible behavior changes.
+    let result = app_runtime::run_frontend(app_runtime::TerminalFrontend {
+        shell: &mut shell,
+        terminal: &mut terminal,
+    });
     tui::stop(&mut terminal)?;
     result
 }

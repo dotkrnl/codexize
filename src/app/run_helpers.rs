@@ -20,7 +20,7 @@ impl App {
     }
 
     /// Resolve the session directory from the loaded `[paths]` config.
-    /// Mirrors the picker fallback in `main.rs`: only honor the
+    /// Mirrors the picker's root resolution in `main.rs`: only honor the
     /// `paths.sessions_root` view when the operator set the value
     /// explicitly. Otherwise use `state::codexize_root().join("sessions")`
     /// so the App reads from the same project-local `.codexize/sessions`

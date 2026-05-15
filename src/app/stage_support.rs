@@ -17,7 +17,7 @@ pub(crate) fn task_toml_for(session_dir: &std::path::Path, task_id: u32) -> anyh
 pub(crate) fn task_effort_for(session_dir: &std::path::Path, task_id: u32) -> EffortLevel {
     let tasks_path = session_dir.join("artifacts").join("tasks.toml");
     let Ok(parsed) = tasks::validate(&tasks_path) else {
-        // Preserve the launch fallback when task metadata is unavailable.
+        // Missing task metadata means no task-specific tough marker exists.
         return EffortLevel::Normal;
     };
     parsed

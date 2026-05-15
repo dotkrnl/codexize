@@ -92,7 +92,7 @@ pub fn delete_session(session_id: &str) -> Result<()> {
     fs::remove_dir_all(state::session_dir(session_id))?;
     Ok(())
 }
-/// Shared sidebar/picker fallback for a session whose title is empty.
+/// Shared sidebar/picker title text for a session whose title is empty.
 ///
 /// Lives here (the original home of the picker's `idea_summary` formatting)
 /// so the session-index sidebar projection in

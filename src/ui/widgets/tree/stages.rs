@@ -418,8 +418,8 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
                 task_node.children.insert(insert_pos, recovery_node);
             }
         } else {
-            let fallback_pos = state.builder.done_task_ids().len().min(children.len());
-            children.insert(fallback_pos, recovery_node);
+            let insertion_pos = state.builder.done_task_ids().len().min(children.len());
+            children.insert(insertion_pos, recovery_node);
         }
     }
     node(

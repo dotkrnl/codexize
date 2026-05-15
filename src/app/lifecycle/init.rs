@@ -62,9 +62,9 @@ impl App {
         let memory_view = config.memory_view();
         let ui_view = config.ui_view();
         if state.builder.task_titles.is_empty() {
-            // Same fallback as `App::session_dir`: only honor the
-            // configured `sessions_root` when explicit, otherwise read
-            // from the project-local `.codexize/sessions` the runner uses.
+            // Same root resolution as `App::session_dir`: only honor the
+            // configured `sessions_root` when explicit; otherwise read from
+            // the project-local `.codexize/sessions` the runner uses.
             let tasks_path = if config.paths.sessions_root.is_explicit() {
                 paths_view.sessions_root.join(&state.session_id)
             } else {

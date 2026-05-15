@@ -1398,8 +1398,7 @@ mod tests {
     #[test]
     fn validation_runs_after_decode() {
         // retry_attempts = 0 must trip the schema validator.
-        let err =
-            load_str("[meta]\nversion = 1\n\n[ntfy]\nretry_attempts = 0\n").unwrap_err();
+        let err = load_str("[meta]\nversion = 1\n\n[ntfy]\nretry_attempts = 0\n").unwrap_err();
         match err {
             LoadError::Validation(msg) => assert!(msg.contains("retry_attempts"), "{msg}"),
             other => panic!("wrong error: {other:?}"),

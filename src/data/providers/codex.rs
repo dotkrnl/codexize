@@ -161,7 +161,11 @@ fn record_rate_limit(quotas: &mut BTreeMap<String, ModelQuota>, name: &str, rate
     for key in ["primary_window", "secondary_window"] {
         let window = rate_limit.get(key);
         let used_percent = window
-            .and_then(|window| window.get("used_percent").or_else(|| window.get("usedPercent")))
+            .and_then(|window| {
+                window
+                    .get("used_percent")
+                    .or_else(|| window.get("usedPercent"))
+            })
             .and_then(Value::as_f64);
         if let Some(used_percent) = used_percent {
             let remaining = (100.0 - used_percent).clamp(0.0, 100.0);

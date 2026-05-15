@@ -495,79 +495,6 @@ impl TestFsLock {
         }
     }
 }
-mod stage_compat {
-    use crate::lifecycle::Stage;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub(super) fn serialize<S: Serializer>(stage: &Stage, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_some(stage)
-    }
-
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Stage, D::Error> {
-        use serde::de::Error;
-
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum LegacyOrNew {
-            New(Stage),
-            String(String),
-            Map(serde_json::Value),
-        }
-
-        let val = LegacyOrNew::deserialize(d)
-            .map_err(|e| D::Error::custom(format!("failed to deserialize current_stage: {e}")))?;
-
-        match val {
-            LegacyOrNew::New(s) => Ok(s),
-            LegacyOrNew::String(s) => migrate_legacy_stage(&s).map_err(D::Error::custom),
-            LegacyOrNew::Map(v) => {
-                if let Some(round) = v.as_object().and_then(|m| {
-                    let (key, val) = m.iter().next()?;
-                    let r = val.as_u64()? as u32;
-                    match key.as_str() {
-                        "Implementation" => Some(Stage::Implementation(r)),
-                        "Review" => Some(Stage::Review(r)),
-                        _ => None,
-                    }
-                }) {
-                    Ok(round)
-                } else {
-                    Ok(Stage::Idea)
-                }
-            }
-        }
-    }
-
-    fn migrate_legacy_stage(s: &str) -> Result<Stage, String> {
-        Ok(match s {
-            "IdeaInput" | "BrainstormRunning" => Stage::Idea,
-            "SpecReviewRunning" | "SpecReviewPaused" => Stage::Spec,
-            "PlanningRunning"
-            | "PlanReviewRunning"
-            | "PlanReviewPaused"
-            | "ShardingRunning"
-            | "RepoStateUpdateRunning"
-            | "WaitingToImplement"
-            | "SkipToImplPending" => Stage::Plan,
-            "ImplementationRound" => Stage::Implementation(1),
-            "ReviewRound" => Stage::Review(1),
-            "BuilderRecovery" | "BuilderRecoveryPlanReview" | "BuilderRecoverySharding" => {
-                Stage::Implementation(1)
-            }
-            "GitGuardPending" => Stage::Plan,
-            "FinalValidation" => Stage::Finalization,
-            "DreamingPending" | "Dreaming" => Stage::Finalization,
-            "Simplification" => Stage::Review(1),
-            "Done" => Stage::Done,
-            "Cancelled" => Stage::Cancelled,
-            "BlockedNeedsUser" => Stage::Blocked,
-            other => {
-                return Err(format!("unknown legacy stage: {other}"));
-            }
-        })
-    }
-}
-
 impl Serialize for SessionState {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         #[derive(Serialize)]
@@ -578,7 +505,6 @@ impl Serialize for SessionState {
             modes: &'a Modes,
             #[serde(default)]
             agent_runs: &'a Vec<RunRecord>,
-            #[serde(with = "stage_compat")]
             current_stage: Stage,
             #[serde(default)]
             idea_text: &'a Option<String>,
@@ -661,7 +587,6 @@ impl<'de> Deserialize<'de> for SessionState {
             modes: Modes,
             #[serde(default)]
             agent_runs: Vec<RunRecord>,
-            #[serde(with = "stage_compat")]
             current_stage: Stage,
             #[serde(default)]
             idea_text: Option<String>,

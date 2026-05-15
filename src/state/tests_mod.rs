@@ -15,6 +15,34 @@ current_stage = "IdeaInput"
 }
 
 #[test]
+fn legacy_stage_names_are_rejected() {
+    let toml_text = r#"
+session_id = "abc"
+schema_version = 4
+current_stage = "ImplementationRound"
+"#;
+    let err = toml::from_str::<SessionState>(toml_text).unwrap_err();
+    assert!(
+        err.to_string().contains("ImplementationRound"),
+        "legacy stage must not be migrated silently: {err}"
+    );
+}
+
+#[test]
+fn malformed_stage_maps_are_rejected() {
+    let toml_text = r#"
+session_id = "abc"
+schema_version = 4
+current_stage = { Unknown = 1 }
+"#;
+    let err = toml::from_str::<SessionState>(toml_text).unwrap_err();
+    assert!(
+        err.to_string().contains("Unknown"),
+        "unknown stage map must not fall back to Idea: {err}"
+    );
+}
+
+#[test]
 fn session_modes_round_trip() {
     let mut state = SessionState::new("s".to_string());
     state.modes.yolo = true;

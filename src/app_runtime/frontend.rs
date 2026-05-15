@@ -105,34 +105,39 @@ pub struct RecordingFrontend {
 #[cfg(test)]
 impl Frontend for RecordingFrontend {
     fn run(self, connector: FrontendConnector) -> anyhow::Result<()> {
-        let FrontendConnector {
-            events,
-            commands,
-            shutdown,
-            ..
-        } = connector;
         let mut scripted = self.scripted_commands.into_iter();
 
         loop {
-            while let Ok(event) = events.try_recv() {
+            while let Ok(event) = connector.events.try_recv() {
+                // Verify the spec's sequence ordering guarantee (spec §
+                // "Pull-based snapshot semantics"): when an event with seq N
+                // is observed, the snapshot must have seq >= N.
+                assert!(
+                    connector.snapshot.read().seq >= event.seq,
+                    "invariant violation: snapshot seq {} < event seq {}",
+                    connector.snapshot.read().seq,
+                    event.seq
+                );
                 self.recorded_events.lock().unwrap().push(event);
             }
 
-            if shutdown.is_set() {
+            if connector.shutdown.is_set() {
                 break;
             }
 
             let Some(command) = scripted.next() else {
-                while let Ok(event) = events.try_recv() {
+                while let Ok(event) = connector.events.try_recv() {
+                    assert!(connector.snapshot.read().seq >= event.seq);
                     self.recorded_events.lock().unwrap().push(event);
                 }
-                while let Ok(event) = events.recv_timeout(Duration::from_millis(50)) {
+                while let Ok(event) = connector.events.recv_timeout(Duration::from_millis(50)) {
+                    assert!(connector.snapshot.read().seq >= event.seq);
                     self.recorded_events.lock().unwrap().push(event);
                 }
                 break;
             };
 
-            commands.send(command).map_err(|err| {
+            connector.commands.send(command).map_err(|err| {
                 anyhow::anyhow!("recording frontend command channel closed: {err}")
             })?;
         }

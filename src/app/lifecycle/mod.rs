@@ -935,7 +935,7 @@ impl App {
         let spec = crate::lifecycle::StageSpec::from_run_record(&run)
             .expect("known stage_id_for_run must build a StageSpec");
         debug_assert_eq!(spec.stage_id, stage_id);
-        if self.sync_fsm_start(spec.clone()).is_err() {
+        if self.sync_fsm_start(spec).is_err() {
             return;
         }
         let active = crate::lifecycle::ActiveRun::from_run_record(&run)

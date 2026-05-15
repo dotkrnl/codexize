@@ -1,5 +1,6 @@
 use super::*;
-use crate::app_runtime::commands::{ModalCommand, PaletteCommand, SessionCommand};
+use crate::app_runtime::commands::{ModalAction, ModalCommand, PaletteCommand, SessionCommand};
+use crate::app_runtime::views::modal::StageId;
 
 #[test]
 fn restore_terminal_after_failed_start_is_idempotent() {
@@ -35,6 +36,24 @@ fn quit_running_agent_modal_keys_become_domain_commands() {
         Some(AppCommand::Session(
             view.session_id.clone(),
             SessionCommand::Modal(ModalCommand::Cancel)
+        ))
+    );
+}
+
+#[test]
+fn stage_error_retry_key_becomes_modal_retry_action() {
+    let mut view = AppView::empty("ui-command-test");
+    view.modal = Some(ModalKind::StageError(StageId::FinalValidation));
+
+    let retry = Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+
+    assert_eq!(
+        command_from_event(retry, &view),
+        Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::Modal(ModalCommand::Action(ModalAction::RetryStage(
+                StageId::FinalValidation
+            )))
         ))
     );
 }

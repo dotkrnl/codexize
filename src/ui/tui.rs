@@ -210,6 +210,89 @@ fn translate_key_to_command(key: UiKey, view: &AppView) -> Option<AppCommand> {
     // Modal-specific translation
     if let Some(modal) = view.modal {
         match modal {
+            ModalKind::StageError(stage_id) if !key.ctrl && !key.alt => match key.code {
+                UiKeyCode::Char('r' | 'R') => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Action(ModalAction::RetryStage(
+                            stage_id,
+                        ))),
+                    ));
+                }
+                UiKeyCode::Char('e' | 'E') => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Action(ModalAction::EditIdea)),
+                    ));
+                }
+                UiKeyCode::Char('s' | 'S') => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Action(ModalAction::SkipDreaming)),
+                    ));
+                }
+                _ => {}
+            },
+            ModalKind::FinalValidationBlocked if !key.ctrl && !key.alt => match key.code {
+                UiKeyCode::Char('f' | 'F') => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Action(ModalAction::ForceShip)),
+                    ));
+                }
+                UiKeyCode::Char('r' | 'R') => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Action(ModalAction::RecoverFromBlock)),
+                    ));
+                }
+                _ => {}
+            },
+            ModalKind::GitGuard if !key.ctrl && !key.alt => match key.code {
+                UiKeyCode::Char('r' | 'R') => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Action(ModalAction::GuardReset)),
+                    ));
+                }
+                UiKeyCode::Char('k' | 'K') => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Action(ModalAction::GuardKeep)),
+                    ));
+                }
+                _ => {}
+            },
+            ModalKind::SkipToImpl if !key.ctrl && !key.alt => match key.code {
+                UiKeyCode::Char('y' | 'Y') => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Action(ModalAction::AcceptSkipToImpl)),
+                    ));
+                }
+                UiKeyCode::Char('n' | 'N') => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Action(ModalAction::DeclineSkipToImpl)),
+                    ));
+                }
+                _ => {}
+            },
+            ModalKind::DreamingDecision if !key.ctrl && !key.alt => match key.code {
+                UiKeyCode::Char('r' | 'R') => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Action(ModalAction::RunDreaming)),
+                    ));
+                }
+                UiKeyCode::Char('s' | 'S') => {
+                    return Some(AppCommand::Session(
+                        session_id.clone(),
+                        SessionCommand::Modal(ModalCommand::Action(ModalAction::SkipDreaming)),
+                    ));
+                }
+                _ => {}
+            },
             ModalKind::QuitRunningAgent
             | ModalKind::CancelSession
             | ModalKind::GitGuard

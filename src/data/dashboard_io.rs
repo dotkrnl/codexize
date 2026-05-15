@@ -50,8 +50,7 @@ async fn load_scores(client: &Client) -> Result<Vec<ScoreEntry>> {
         .context("ipbr scoreboard response body unreadable")?;
     parse_ipbr_scoreboard(&body)
 }
-/// TOML schema for the ipbr scoreboard. Unknown fields are ignored by
-/// serde for forward compatibility per spec §"Error Handling".
+/// TOML fields codexize consumes from the ipbr scoreboard.
 #[derive(Debug, Deserialize, Default)]
 struct IpbrScoreboard {
     #[serde(default)]
@@ -85,9 +84,7 @@ fn parse_ipbr_scoreboard(body: &str) -> Result<Vec<ScoreEntry>> {
         // `example-1.0` and `example-1-0` are different ids.
         let display_key = row.display_name.trim().to_ascii_lowercase();
         if display_key.is_empty() {
-            // No usable display_name: cannot index this row. Skip rather
-            // than abort the whole feed; spec §"Error Handling" only
-            // forces failure for malformed feed-level structure.
+            // No usable display_name: cannot index this row.
             continue;
         }
         let scores_row = row.scores.unwrap_or_default();

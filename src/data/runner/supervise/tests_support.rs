@@ -182,8 +182,7 @@ pub fn drain_test_input_receiver_for(window_name: &str) -> Vec<(&'static str, St
 
 /// Test-only: observe whether the per-window cancel signal has been raised.
 /// Returns the recorded reason once and clears it from the observer slot so
-/// repeat calls without a fresh signal return empty, matching the previous
-/// `try_recv()`-based assertion shape.
+/// repeat calls without a fresh signal return empty.
 pub fn drain_test_cancel_receiver_for(window_name: &str) -> Vec<&'static str> {
     let mut out = Vec::new();
     if let Some(entry) = test_cancel_observers().get(window_name) {

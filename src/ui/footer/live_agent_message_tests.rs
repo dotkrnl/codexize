@@ -192,7 +192,7 @@ fn running_message_body_gradient_moves_between_50ms_frames() {
 }
 
 #[test]
-fn running_message_fallback_when_empty() {
+fn running_message_uses_stage_label_when_summary_empty() {
     let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let clock = TestClock::at(base);
     let fetcher = CachedSummaryFetcher::new("", "Brainstorm");

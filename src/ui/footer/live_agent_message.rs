@@ -73,7 +73,7 @@ impl Default for TranscriptLeafMarker {
 pub trait LiveSummaryFetcher {
     /// Fetch the current short title from the live summary file.
     ///
-    /// Returns the cached short title or the fallback stage label when:
+    /// Returns the cached short title or the stage label when:
     /// - No live summary file exists
     /// - The file is being rewritten (partial read)
     fn fetch(&self) -> String;
@@ -87,20 +87,20 @@ pub trait LiveSummaryFetcher {
 /// extracts the short title, avoiding filesystem I/O on the render path.
 pub struct CachedSummaryFetcher<'a> {
     cached_text: &'a str,
-    stage_fallback: &'a str,
+    stage_label: &'a str,
 }
 impl<'a> CachedSummaryFetcher<'a> {
-    pub fn new(cached_text: &'a str, stage_fallback: &'a str) -> Self {
+    pub fn new(cached_text: &'a str, stage_label: &'a str) -> Self {
         Self {
             cached_text,
-            stage_fallback,
+            stage_label,
         }
     }
 }
 impl LiveSummaryFetcher for CachedSummaryFetcher<'_> {
     fn fetch(&self) -> String {
         if self.cached_text.is_empty() {
-            self.stage_fallback.to_string()
+            self.stage_label.to_string()
         } else {
             extract_short_title(self.cached_text)
         }

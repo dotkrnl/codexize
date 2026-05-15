@@ -154,8 +154,8 @@ pub fn drain_live_summary_file(path: &Path) -> Option<LiveSummarySnapshot> {
     content.map(|content| LiveSummarySnapshot { mtime, content })
 }
 /// Read a prompt-body file from disk. Returns `None` when the file is
-/// missing or unreadable; the watchdog warning path substitutes a
-/// documented fallback string in that case (spec §3.4).
+/// missing or unreadable; the watchdog warning path substitutes
+/// [`crate::app::watchdog::PROMPT_UNAVAILABLE_BODY`] in that case.
 pub fn read_prompt_body(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }

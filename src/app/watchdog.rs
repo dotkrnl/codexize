@@ -11,7 +11,7 @@ use tokio::time::Instant;
 /// Identifier used by the watchdog to key per-run state. Mirrors the App's
 /// existing `u64` run id (see `state::RunRecord::id`).
 pub(super) type RunId = u64;
-/// Production thresholds (spec §3.1). The `_TOUGH` variants apply when
+/// Production thresholds. The `_TOUGH` variants apply when
 /// `EffortLevel == Tough` (1.5×).
 pub(crate) const WARN_AFTER_NORMAL: Duration = Duration::from_secs(10 * 60);
 pub(crate) const KILL_AFTER_NORMAL: Duration = Duration::from_secs(20 * 60);
@@ -109,7 +109,7 @@ impl WatchdogState {
     }
     /// Decide whether the idle-adjusted clock has crossed a threshold at
     /// `now`. Kill fires even when `warned == false` so a starved App tick
-    /// can skip the courtesy warning (spec §3.3 last paragraph).
+    /// can skip the courtesy warning.
     pub(crate) fn evaluate(&mut self, now: Instant) -> WatchdogDecision {
         let elapsed = self.idle_elapsed(now);
         if elapsed >= self.kill_threshold {
@@ -210,8 +210,8 @@ do not acknowledge this warning beyond updating the live summary file.\n\n\
         body = prompt_body,
     )
 }
-/// Documented degraded fallback when `run.prompt_path` cannot be read —
-/// still send a warning rather than silently skipping (spec §3.4).
+/// Placeholder used when `run.prompt_path` cannot be read. The warning still
+/// fires so the run does not silently bypass liveness checks.
 pub(crate) const PROMPT_UNAVAILABLE_BODY: &str =
     "the original prompt is unavailable on disk; resume the task as best you can.";
 #[cfg(test)]

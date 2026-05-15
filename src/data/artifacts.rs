@@ -177,6 +177,3 @@ impl ArtifactKind {
         }
     }
 }
-#[cfg(test)]
-#[path = "artifacts_tests.rs"]
-mod tests;

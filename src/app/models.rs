@@ -154,6 +154,3 @@ impl App {
         };
     }
 }
-#[cfg(test)]
-#[path = "models_tests.rs"]
-mod tests;

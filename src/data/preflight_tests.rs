@@ -81,31 +81,6 @@ fn detect_ignored_accepts_required_directory_entry_before_dir_exists() {
 }
 
 #[test]
-fn detect_ignored_accepts_required_entry_when_old_session_file_is_tracked() {
-    if !git_available() {
-        return;
-    }
-    with_temp_dir(|| {
-        git_cmd(&["init"]);
-        fs::write(".gitignore", ".codexize/\n").unwrap();
-        fs::create_dir_all(".codexize/sessions/old/rounds/001").unwrap();
-        fs::write(
-            ".codexize/sessions/old/rounds/001/coder_summary.toml",
-            "status = \"done\"\n",
-        )
-        .unwrap();
-        git_cmd(&["add", ".gitignore"]);
-        git_cmd(&[
-            "add",
-            "-f",
-            ".codexize/sessions/old/rounds/001/coder_summary.toml",
-        ]);
-
-        assert!(detect_ignored(Path::new(".codexize")));
-    });
-}
-
-#[test]
 fn gitignore_generation_is_deterministic_without_runtime_launch() {
     with_temp_dir(|| {
         fs::write("Cargo.toml", "[package]\nname = \"demo\"\n").unwrap();

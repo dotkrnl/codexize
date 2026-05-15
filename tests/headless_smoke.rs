@@ -35,7 +35,10 @@ fn headless_emits_snapshot_and_handles_commands_and_sigint() {
     let mut stdin = child.stdin.take().expect("stdin");
     writeln!(stdin, r#"{{"Global":"Quit"}}"#).expect("write valid command");
     stdin.flush().expect("flush stdin");
-    drop(stdin);
+    // Keep stdin open until after SIGINT to avoid a race between EOF
+    // (triggers non-zero "stdin closed" exit) and SIGINT (clean exit 0).
+    // The headless frontend loops until shutdown, so the pipe must stay
+    // open or the EOF path may win under load.
 
     // We cannot wait for a granular delta here, because the runtime update loop
     // isn't implemented in this task (run_frontend just blocks on frontend.run).

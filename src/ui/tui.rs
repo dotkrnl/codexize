@@ -79,7 +79,7 @@ where
     terminal.clear()?;
     outcome
 }
-pub fn render_app<F>(terminal: &mut AppTerminal, _view: &AppView, draw: F) -> Result<()>
+pub fn render_app<F>(terminal: &mut AppTerminal, draw: F) -> Result<()>
 where
     F: FnOnce(&mut ratatui::Frame<'_>),
 {

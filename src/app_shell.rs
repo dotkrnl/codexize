@@ -469,7 +469,7 @@ impl AppShell {
             app.runtime_tick_after_data_drain();
             let view = runtime.view_for_render(app.current_app_view());
 
-            crate::ui::tui::render_app(terminal, &view, |frame| {
+            crate::ui::tui::render_app(terminal, |frame| {
                 let full_area = frame.area();
                 if self.sidebar.visible {
                     let sidebar_w = crate::ui::widgets::sidebar::view::sidebar_width()

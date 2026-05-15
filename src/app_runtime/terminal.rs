@@ -124,7 +124,7 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
         // rule's mode badges are now derived from the seam, so the runtime
         // wiring carries real rendering data instead of being derived and
         // discarded.
-        crate::ui::tui::render_app(terminal, &view, |frame| app.draw(frame, &view))?;
+        crate::ui::tui::render_app(terminal, |frame| app.draw(frame, &view))?;
         app.on_frame_drawn();
         if let Some(command) = input.next_command(app.event_poll_duration(), &view)? {
             let outcome = runtime.route_command_with_dispatch(command, &view, |request| {

@@ -142,3 +142,41 @@ fn row_style(row: &SidebarRow) -> Style {
     }
     style
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_runtime::RootView;
+
+    fn line_text(buf: &Buffer, y: u16, width: u16) -> String {
+        (0..width).map(|x| buf[(x, y)].symbol()).collect()
+    }
+
+    #[test]
+    fn renders_sidebar_from_root_view_shell_snapshot() {
+        let mut root = RootView::initial();
+        root.shell = ShellView {
+            visible: true,
+            focus: ShellFocus::Sidebar,
+            selected_index: 0,
+            rows: vec![SidebarRow {
+                session_id: "session-1".to_string(),
+                date_label: "2026-05-15".to_string(),
+                title: "Runtime seam".to_string(),
+                stage: Stage::BrainstormRunning,
+                focused: true,
+                open: true,
+                running: true,
+            }],
+        };
+        let area = Rect::new(0, 0, 32, 6);
+        let mut buf = Buffer::empty(area);
+
+        render_sidebar(area, &mut buf, &root.shell);
+
+        assert!(line_text(&buf, 0, 32).contains("Sessions"));
+        let row = line_text(&buf, 2, 32);
+        assert!(row.contains("2026-05-15 Runtime seam"));
+        assert!(row.starts_with(">"));
+    }
+}

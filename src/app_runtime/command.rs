@@ -12,7 +12,7 @@
 //! (e.g. Esc on the quit-running-agent modal becomes
 //! [`AppCommand::CancelModal`]). Remaining focus-local key handling still
 //! lives in `app/`.
-use super::view::StageId;
+use super::views::modal::StageId;
 /// UI-neutral key action emitted by terminal input collection.
 ///
 /// This intentionally mirrors only operator-visible key intent, not the

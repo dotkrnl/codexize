@@ -13,6 +13,7 @@ mod stage_graph;
     PartialEq,
     Eq,
     Hash,
+    Default,
     strum::Display,
     strum::IntoStaticStr,
     strum::EnumDiscriminants,
@@ -20,6 +21,7 @@ mod stage_graph;
 #[strum_discriminants(name(StageKind))]
 pub enum Stage {
     #[strum(to_string = "Idea Input")]
+    #[default]
     IdeaInput,
     #[strum(to_string = "Brainstorming")]
     BrainstormRunning,

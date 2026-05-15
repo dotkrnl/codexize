@@ -16,7 +16,8 @@ pub fn config_path() -> PathBuf {
     home.join(".codexize").join(CONFIG_FILE_NAME)
 }
 
-/// Expand a leading `$HOME` or `~/` against the current `HOME` env var.
+/// Expand an exact `$HOME`, `$HOME/`, `~`, or `~/` against the current
+/// `HOME` env var.
 /// Used by the loader to resolve `[paths]` and `[acp.install]` values
 /// at load time per spec §3.
 pub fn expand_home(value: &str) -> String {
@@ -26,8 +27,11 @@ pub fn expand_home(value: &str) -> String {
     if home.is_empty() {
         return value.to_string();
     }
-    if let Some(rest) = value.strip_prefix("$HOME") {
-        return format!("{home}{rest}");
+    if value == "$HOME" {
+        return home;
+    }
+    if let Some(rest) = value.strip_prefix("$HOME/") {
+        return format!("{home}/{rest}");
     }
     if let Some(rest) = value.strip_prefix("~/") {
         return format!("{home}/{rest}");
@@ -52,6 +56,7 @@ mod tests {
             std::env::set_var("HOME", "/tmp/fakehome");
         }
         assert_eq!(expand_home("$HOME/x"), "/tmp/fakehome/x");
+        assert_eq!(expand_home("$HOME_suffix"), "$HOME_suffix");
         assert_eq!(expand_home("~/y"), "/tmp/fakehome/y");
         assert_eq!(expand_home("~"), "/tmp/fakehome");
         assert_eq!(expand_home("/abs"), "/abs");

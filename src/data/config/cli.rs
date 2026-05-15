@@ -243,9 +243,9 @@ fn mutation_to_anyhow(err: MutationError) -> anyhow::Error {
 
 #[cfg(test)]
 mod tests {
-    //! These snapshot tests run against `effective_path()` via the
-    //! `CODEXIZE_CONFIG` env override; they're serialized so the env
-    //! mutation doesn't bleed across the suite.
+    //! These tests run against `effective_path()` via the `CODEXIZE_CONFIG`
+    //! env override; they're serialized so the env mutation doesn't bleed
+    //! across the suite.
 
     use super::*;
     use serial_test::serial;

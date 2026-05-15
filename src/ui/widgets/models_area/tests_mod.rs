@@ -1034,7 +1034,7 @@ fn full_table_model_row_caps_displayed_quota_at_99() {
 
 #[test]
 fn snapshot_matrix_heights_drives_mode() {
-    // Task: snapshot tests at heights 30, 20, 15, 12, 10 (terminal
+    // Height-mode matrix at terminal heights 30, 20, 15, 12, 10 (terminal
     // heights, not pre-computed budgets). Below 50 rows the fixed compact
     // threshold wins over the normal budget hysteresis:
     //   term_h=30 → compact

@@ -63,15 +63,6 @@ pub async fn assemble_models_async(
     )
 }
 
-pub fn assemble_from_cached_only(
-    cache_dir: &Path,
-    available_clis: &BTreeSet<CliKind>,
-    providers: &[ProviderEntry],
-) -> Vec<CachedModel> {
-    let loaded = cache::load(cache_dir);
-    assemble_from_loaded_with_available(&loaded, available_clis, providers)
-}
-
 pub fn assemble_from_loaded(
     loaded: &LoadedCache,
     available_clis: &BTreeSet<CliKind>,

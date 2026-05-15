@@ -445,30 +445,4 @@ fn assemble_models_uses_supplied_cache_dir_when_fresh() {
     });
 }
 
-#[test]
-fn assemble_from_cached_only_returns_empty_when_no_cache() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let cache_dir = temp.path().join(".codexize").join("cache");
-    let models = assemble_from_cached_only(
-        &cache_dir,
-        &crate::data::acp::AcpConfig::default().available_clis(),
-        &[],
-    );
-    assert!(models.is_empty(), "no cache should yield empty model list");
-}
 
-#[test]
-fn assemble_from_cached_only_yields_models_when_cache_is_present() {
-    let dashboard = vec![make_entry("claude-sonnet-4.6", "claude")];
-    let quotas = make_quota_payload(&[("claude", "claude-shared", Some(80))]);
-    with_temp_home_cache(dashboard, quotas, |cache_dir| {
-        let models = assemble_from_cached_only(
-            cache_dir,
-            &crate::data::acp::AcpConfig::default().available_clis(),
-            &[],
-        );
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].name, "claude-sonnet-4.6");
-        assert_eq!(models[0].quota_percent, Some(80));
-    });
-}

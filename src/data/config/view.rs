@@ -133,15 +133,6 @@ impl Config {
         }
     }
 
-    pub fn acp_agent_view(&self, agent: &super::schema::AcpAgentSection) -> AcpAgentView {
-        AcpAgentView {
-            enabled: *agent.enabled.value(),
-            program: agent.program.value().clone(),
-            args: agent.args.value().clone(),
-            env: agent.env.value().clone(),
-        }
-    }
-
     pub fn runner_view(&self) -> RunnerView {
         RunnerView {
             full_review_interval: *self.runner.full_review_interval.value(),

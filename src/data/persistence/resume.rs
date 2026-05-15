@@ -40,34 +40,28 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
                         tracing::warn!("resume: failed to save skip-to-impl artifact state: {e}");
                     }
                 }
-                Ok((_, warnings)) => {
+                Ok((Some(_), warnings)) => {
                     for w in warnings {
                         let _ = state.log_event(format!("resume: skip_proposal.toml: {w}"));
                     }
-                    let _ = state.log_event(
-                        "resume: skip_to_impl artifact missing or not proposed, falling through to SpecReviewRunning",
-                    );
-                    state.skip_to_impl_rationale = None;
-                    state.skip_to_impl_kind = None;
-                    state.pending_decisions.skip_to_impl = None;
-                    state.current_stage = Stage::SpecReviewRunning;
-                    if let Err(e) = state.save() {
-                        tracing::warn!("resume: failed to save after skip-to-impl fallback: {e}");
+                    return Err(ResumeError::InvalidState(
+                        "skip_proposal.toml must contain proposed = true while resuming SkipToImplPending"
+                            .to_string(),
+                    ));
+                }
+                Ok((None, warnings)) => {
+                    for w in warnings {
+                        let _ = state.log_event(format!("resume: skip_proposal.toml: {w}"));
                     }
+                    return Err(ResumeError::InvalidState(
+                        "skip_proposal.toml is required while resuming SkipToImplPending"
+                            .to_string(),
+                    ));
                 }
                 Err(err) => {
-                    let _ = state.log_event(format!(
-                        "resume: skip_to_impl artifact malformed, falling through to SpecReviewRunning: {err:#}"
-                    ));
-                    state.skip_to_impl_rationale = None;
-                    state.skip_to_impl_kind = None;
-                    state.pending_decisions.skip_to_impl = None;
-                    state.current_stage = Stage::SpecReviewRunning;
-                    if let Err(e) = state.save() {
-                        tracing::warn!(
-                            "resume: failed to save after malformed artifact fallback: {e}"
-                        );
-                    }
+                    return Err(ResumeError::InvalidState(format!(
+                        "invalid skip_proposal.toml while resuming SkipToImplPending: {err:#}"
+                    )));
                 }
             }
         }

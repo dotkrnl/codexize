@@ -84,6 +84,78 @@ fn resume_waiting_to_implement_leaves_idle() {
 }
 
 #[test]
+fn resume_skip_to_impl_pending_without_proposal_is_rejected() {
+    with_temp_root(|| {
+        let session_id = "resume-skip-missing";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_stage = Stage::SkipToImplPending;
+        state.save().unwrap();
+
+        let err = resume_session(&mut state).expect_err("missing proposal must block resume");
+
+        assert!(
+            err.to_string().contains("skip_proposal.toml is required"),
+            "error should explain the missing artifact: {err}"
+        );
+        assert_eq!(state.current_stage, Stage::SkipToImplPending);
+        assert!(state.skip_to_impl_rationale.is_none());
+        assert!(state.skip_to_impl_kind.is_none());
+    });
+}
+
+#[test]
+fn resume_skip_to_impl_pending_with_malformed_proposal_is_rejected() {
+    with_temp_root(|| {
+        let session_id = "resume-skip-malformed";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_stage = Stage::SkipToImplPending;
+        state.save().unwrap();
+
+        let artifacts = session_dir(session_id).join("artifacts");
+        fs::create_dir_all(&artifacts).expect("mk artifacts dir");
+        fs::write(artifacts.join("skip_proposal.toml"), "proposed = [").expect("write proposal");
+
+        let err = resume_session(&mut state).expect_err("malformed proposal must block resume");
+
+        assert!(
+            err.to_string().contains("invalid skip_proposal.toml"),
+            "error should explain the malformed artifact: {err}"
+        );
+        assert_eq!(state.current_stage, Stage::SkipToImplPending);
+        assert!(state.skip_to_impl_rationale.is_none());
+        assert!(state.skip_to_impl_kind.is_none());
+    });
+}
+
+#[test]
+fn resume_skip_to_impl_pending_with_unproposed_artifact_is_rejected() {
+    with_temp_root(|| {
+        let session_id = "resume-skip-unproposed";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_stage = Stage::SkipToImplPending;
+        state.save().unwrap();
+
+        let artifacts = session_dir(session_id).join("artifacts");
+        fs::create_dir_all(&artifacts).expect("mk artifacts dir");
+        fs::write(
+            artifacts.join("skip_proposal.toml"),
+            "proposed = false\nstatus = \"skip_to_impl\"\nrationale = \"not proposed\"\n",
+        )
+        .expect("write proposal");
+
+        let err = resume_session(&mut state).expect_err("unproposed artifact must block resume");
+
+        assert!(
+            err.to_string().contains("must contain proposed = true"),
+            "error should explain the invalid artifact: {err}"
+        );
+        assert_eq!(state.current_stage, Stage::SkipToImplPending);
+        assert!(state.skip_to_impl_rationale.is_none());
+        assert!(state.skip_to_impl_kind.is_none());
+    });
+}
+
+#[test]
 fn resume_repo_state_update_running_reverts_to_waiting() {
     with_temp_root(|| {
         let mut state = SessionState::new("resume-repo-update".to_string());

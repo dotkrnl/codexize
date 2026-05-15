@@ -145,21 +145,11 @@ mod tests {
     use crate::app_runtime::commands::*;
     use crate::app_runtime::root_view::*;
     use crate::app_runtime::views::*;
-    use std::collections::BTreeMap;
     use std::sync::Arc;
-
-    fn empty_root_view() -> RootView {
-        RootView {
-            seq: 0,
-            shell: ShellView::default(),
-            sessions: BTreeMap::new(),
-            focus: Arc::<str>::from(""),
-        }
-    }
 
     #[test]
     fn round_trip_root_event_snapshot() {
-        let view = empty_root_view();
+        let view = RootView::initial();
         let event = RootEvent {
             seq: 0,
             payload: RootEventPayload::Snapshot(view),

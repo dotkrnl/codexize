@@ -12,11 +12,10 @@
 //!    granular delta, so a frontend can initialize from events alone.
 //! 5. Hand off to `frontend.run(connector)`.
 //!
-//! The state-change update loop that publishes granular `RootEvent`s
-//! lands in later tasks — today's terminal frontend still mutates `App`
-//! internal state directly so no operator-visible behavior changes. The
-//! `seq`-before-publish ordering invariant is encoded in [`publish`] and
-//! enforced as soon as the runtime starts emitting granular deltas.
+//! The command loop consumes frontend commands and mutates `RootView`
+//! through targeted helpers. The `seq`-before-publish ordering invariant is
+//! encoded in [`publish`]: snapshot updates happen before the corresponding
+//! event is sent.
 use super::commands::{
     AppCommand, GlobalCommand, InputCommand, ModalAction, ModalCommand, PaletteCommand,
     SessionCommand, StageCommand, TreeCommand,
@@ -73,9 +72,6 @@ pub fn build_connector() -> (FrontendConnector, RuntimePublisher) {
 pub struct RuntimePublisher {
     snapshot: Arc<RwLock<RootView>>,
     events: mpsc::Sender<RootEvent>,
-    #[allow(dead_code)] // wired by later tasks; preserved here so the
-    // command receiver isn't dropped (which would close the channel and
-    // make every frontend `commands.send(..)` fail).
     commands: mpsc::Receiver<AppCommand>,
     shutdown: ShutdownSignal,
 }

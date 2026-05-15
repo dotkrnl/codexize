@@ -18,11 +18,9 @@
 //! cache handles. [`harness`] proves the seam by wiring a stubbed UI to
 //! the runtime side without touching the terminal.
 //!
-//! The newer [`frontend`] / [`root_view`] modules introduce the
-//! spec-pinned `Frontend` trait, `FrontendConnector`, `RootView`, and
-//! `RootEvent` shapes. They live side-by-side with `AppView` while
-//! later tasks migrate per-surface state onto `app_runtime/views/` and
-//! split `AppCommand` into per-surface groupings under
+//! [`frontend`] and [`root_view`] define the spec-pinned `Frontend` trait,
+//! `FrontendConnector`, `RootView`, and `RootEvent` shapes. Per-surface
+//! view state lives under `app_runtime/views/`; operator commands live under
 //! `app_runtime/commands/`.
 pub mod command;
 pub mod commands;
@@ -52,7 +50,6 @@ pub use views::session::{AgentRunSummary, ModeFlags};
 pub use views::shell::{ShellFocus, ShellView, SidebarRow};
 pub use views::status_line::{StatusMessage, StatusSeverity};
 
-// Keep AppView for now as it's used by the legacy TUI loop
 use crate::logic::pipeline::Stage;
 use std::sync::Arc;
 

@@ -15,7 +15,6 @@ pub mod shell;
 pub mod split;
 pub mod status_line;
 pub mod tree;
-pub mod tree_legacy;
 pub mod watchdog;
 
 pub use chat::*;

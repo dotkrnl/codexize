@@ -1143,12 +1143,11 @@ estimated_tokens = 100
             assert_eq!(app.state.session_id, "20260511-091000-000000001");
             assert_eq!(shell.focused_session_id(), "20260511-091000-000000001");
 
-            // Step 6: persisted Running runs are backfilled to Failed on
-            // resume, so no session is "running" after a TUI restart until
-            // a launch fires in-process. The load-bearing assertion of this
-            // test is the focus swap above; the running-marker assertions
-            // are kept here as a regression guard against the new model
-            // ever resurrecting orphaned runs as live.
+            // Persisted Running runs are backfilled to Failed on resume, so
+            // no session is "running" after a TUI restart until a launch
+            // fires in-process. The load-bearing assertion of this test is
+            // the focus swap above; the running-marker assertions guard
+            // against orphaned runs being resurrected as live.
             assert_eq!(shell.running_session_id(), None);
             let rows = shell.sidebar_view().rows;
             let prior_row = rows
@@ -1256,10 +1255,10 @@ estimated_tokens = 100
             let supervisor = shell
                 .workspace("20260511-090000-000000001")
                 .expect("background supervisor");
-            // Step 6: persisted Running runs are backfilled to Failed on
-            // resume, so the supervisor reports no live run for the prior
-            // run id. The App-reuse assertion above is the load-bearing
-            // invariant for this test.
+            // Persisted Running runs are backfilled to Failed on resume, so
+            // the supervisor reports no live run for the prior run id. The
+            // App-reuse assertion above is the load-bearing invariant for
+            // this test.
             assert_eq!(supervisor.current_run_id(), None);
         });
     }
@@ -1513,10 +1512,10 @@ estimated_tokens = 100
 
             let report = shell.run_scheduler_tick().expect("tick");
 
-            // Step 6: persisted Running runs are backfilled to Failed on
-            // resume, so the prior orphan no longer occupies the lane —
-            // the scheduler sees the session in `ShardingRunning` with no
-            // live run and reports it as the lane-occupant for re-launch.
+            // Persisted Running runs are backfilled to Failed on resume, so
+            // the prior orphan no longer occupies the lane. The scheduler
+            // sees the session in `ShardingRunning` with no live run and
+            // reports it as the lane-occupant for re-launch.
             assert!(matches!(
                 report.implementation,
                 ShellImplementationAction::LaneOccupied {
@@ -1658,11 +1657,11 @@ estimated_tokens = 100
             shell
                 .open_session("20260511-090000-000000001")
                 .expect("open");
-            // Step 6: any persisted Running run is treated as orphaned on
-            // resume and backfilled to Failed, so the derived `running`
-            // lookup finds no live session. The point of this test is that
-            // the lookup is *derived* (no mirrored field) — driving through
-            // a supervisor's `current_run_id()` is the load-bearing path.
+            // Any persisted Running run is treated as orphaned on resume
+            // and backfilled to Failed, so the derived `running` lookup
+            // finds no live session. The point of this test is that the
+            // lookup is *derived* (no mirrored field) — driving through a
+            // supervisor's `current_run_id()` is the load-bearing path.
             assert_eq!(shell.running_session_id(), None);
         });
     }

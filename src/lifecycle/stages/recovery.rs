@@ -68,9 +68,9 @@ impl StageDriver for RecoveryStage {
 
     fn artifact_paths(&self, _round: u32) -> Vec<PathBuf> {
         // Recovery produces `rounds/{r:03}/recovery.toml` but the persisted
-        // `go_back()` does not remove it — only the prompt file is cleaned.
-        // Preserve that behavior so Step 2 stays behavior-neutral; Step 8
-        // can decide whether to start tracking the artifact.
+        // rewind cleanup removes only prompts for same-stage recovery runs.
+        // Later rewinds that leave implementation delete the owning
+        // `rounds/{r:03}` directory through the coder stage.
         Vec::new()
     }
 

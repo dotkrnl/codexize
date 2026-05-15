@@ -48,7 +48,7 @@ impl TerminalRuntime {
         {
             app.read_live_summary_pipeline();
         }
-        app.poll_live_summary_fallback();
+        app.poll_live_summary_mtime();
         // Cache watcher: external `models.json` publishes by another
         // instance flow into the redraw loop the same way live-summary
         // changes do — a single debounced reload per atomic rename.

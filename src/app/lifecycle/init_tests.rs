@@ -1,10 +1,9 @@
 //! Tests for resume + crash recovery wiring in `App::new`.
 //!
-//! Step 6 of the lifecycle redesign: any `RunRecord` left as `Running` on
-//! disk is the residue of a prior TUI invocation that exited mid-run. On
-//! resume we backfill it as `Failed`, the FSM starts `Idle`, and the persisted
-//! `current_run_id`/`run_launched` mirrors are forced to "no live run"
-//! regardless of what's on disk.
+//! Any `RunRecord` left as `Running` on disk is the residue of a prior TUI
+//! invocation that exited mid-run. On resume we backfill it as `Failed`, the
+//! FSM starts `Idle`, and the persisted `current_run_id`/`run_launched`
+//! mirrors are forced to "no live run" regardless of what's on disk.
 use crate::app::App;
 use crate::app::test_support::with_temp_root;
 use crate::data::adapters::EffortLevel;

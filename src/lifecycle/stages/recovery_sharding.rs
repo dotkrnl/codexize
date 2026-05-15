@@ -67,8 +67,9 @@ impl StageDriver for RecoveryShardingStage {
 
     fn artifact_paths(&self, _round: u32) -> Vec<PathBuf> {
         // Recovery sharding mutates `artifacts/tasks.toml`, but the persisted
-        // `go_back()` does not clean it (it only removes the prompt). Keep
-        // that asymmetry — Step 8 may revisit.
+        // rewind cleanup removes only prompts for same-stage recovery runs.
+        // Rewinds that leave implementation delete `artifacts/tasks.toml`
+        // through the sharding stage.
         Vec::new()
     }
 

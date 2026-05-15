@@ -118,7 +118,7 @@ impl App {
         )
         .available_clis()
     }
-    pub(crate) fn poll_live_summary_fallback(&mut self) {
+    pub(crate) fn poll_live_summary_mtime(&mut self) {
         if !self.run_launched {
             self.live_summary_cached_text.clear();
             self.live_summary_cached_mtime = None;

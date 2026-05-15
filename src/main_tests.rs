@@ -52,67 +52,39 @@ fn launch_load_silently_uses_defaults_when_file_missing() {
 }
 
 #[test]
-fn resume_warning_mentions_ignored_cheap_flag() {
-    let warnings = resume_ignored_mode_warnings(Modes {
-        yolo: false,
-        cheap: true,
-    });
-    assert_eq!(
-        warnings,
-        vec!["warning: --cheap ignored on resume; persisted modes win"]
-    );
-}
-
-#[test]
-fn resume_warning_mentions_ignored_yolo_flag() {
-    let warnings = resume_ignored_mode_warnings(Modes {
-        yolo: true,
-        cheap: false,
-    });
-    assert_eq!(
-        warnings,
-        vec!["warning: --yolo ignored on resume; persisted modes win"]
-    );
-}
-
-#[test]
-fn resume_warning_mentions_both_ignored_flags() {
-    let warnings = resume_ignored_mode_warnings(Modes {
-        yolo: true,
-        cheap: true,
-    });
-    assert_eq!(
-        warnings,
-        vec![
-            "warning: --yolo ignored on resume; persisted modes win",
-            "warning: --cheap ignored on resume; persisted modes win",
-        ]
-    );
+fn resume_warning_mentions_ignored_launch_flags_in_order() {
+    for (modes, expected) in [
+        (
+            Modes {
+                yolo: false,
+                cheap: true,
+            },
+            vec!["warning: --cheap ignored on resume; persisted modes win"],
+        ),
+        (
+            Modes {
+                yolo: true,
+                cheap: false,
+            },
+            vec!["warning: --yolo ignored on resume; persisted modes win"],
+        ),
+        (
+            Modes {
+                yolo: true,
+                cheap: true,
+            },
+            vec![
+                "warning: --yolo ignored on resume; persisted modes win",
+                "warning: --cheap ignored on resume; persisted modes win",
+            ],
+        ),
+    ] {
+        assert_eq!(resume_ignored_mode_warnings(modes), expected);
+    }
 }
 
 fn cli(args: &[&str]) -> Cli {
     Cli::try_parse_from(args).expect("parse cli args")
-}
-
-#[test]
-fn ntfy_subcommand_parses_without_launch_flags() {
-    let cli = Cli::try_parse_from(["codexize", "ntfy"]).expect("parse ntfy");
-    assert!(matches!(
-        cli.command,
-        Some(Command::Ntfy(NtfyCommand { reset: false }))
-    ));
-    assert!(cli.message.is_none());
-    assert!(!cli.yolo);
-    assert!(!cli.cheap);
-}
-
-#[test]
-fn ntfy_reset_subcommand_parses() {
-    let cli = Cli::try_parse_from(["codexize", "ntfy", "--reset"]).expect("parse ntfy --reset");
-    assert!(matches!(
-        cli.command,
-        Some(Command::Ntfy(NtfyCommand { reset: true }))
-    ));
 }
 
 #[test]

@@ -81,8 +81,8 @@ pub trait LiveSummaryFetcher {
 /// Render-time fetcher that wraps App's pre-cached live-summary text.
 ///
 /// The runtime tick (`TerminalRuntime::drain_app_data_events` together with
-/// `App::poll_live_summary_fallback` / `App::read_live_summary_pipeline`)
-/// already performs mtime-based file reading with fallback to the last cached value
+/// `App::poll_live_summary_mtime` / `App::read_live_summary_pipeline`
+/// already performs mtime-based file reading and retains the last cached value
 /// on partial reads. This struct borrows that cached result at render time and
 /// extracts the short title, avoiding filesystem I/O on the render path.
 pub struct CachedSummaryFetcher<'a> {

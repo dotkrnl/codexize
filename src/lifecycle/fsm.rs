@@ -211,9 +211,8 @@ impl Fsm {
             }
             AgentState::Starting { spec } => {
                 // No live run yet — restore Starting and reject; the caller
-                // should cancel the pending launch via a different path.
-                // Step 4 will replace this with a proper preempt path; for
-                // now we model "not active" as "no Running/Stopping run".
+                // owns pending-launch cancellation before a run becomes
+                // stoppable.
                 self.state = AgentState::Starting { spec };
                 Err(FsmError::NotActive)
             }

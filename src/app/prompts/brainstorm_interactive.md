@@ -24,8 +24,6 @@ No-assumption rule (HARD):
       which surfaces are touched).
     • Behavioral edge cases (empty / zero / overflow / missing / failure
       / concurrency / retry / partial-state / cancellation).
-    • Versioning and migration (back-compat, on-disk format changes,
-      schema bumps, rollout / opt-in).
     • Anything user-facing (UI, CLI, config, output format, log lines,
       keybinding) whose shape the operator has not pinned verbatim.
 
@@ -80,7 +78,7 @@ Optional escape hatches (RARE — omit if uncertain):
 
   • Skip-to-impl: one coherent change landable in a single commit, small
     enough to review in one sitting; no new modules, cross-cutting refactors,
-    migrations, or multi-file rewrites. Mechanical edits across many files
+    or multi-file rewrites. Mechanical edits across many files
     don't qualify — sharding parallelises them. Keep the spec concise (goal,
     edit sites, acceptance check), then write {skip_proposal_path} as TOML:
         proposed  = true

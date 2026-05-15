@@ -37,7 +37,7 @@ Escalation rules:
     ordering, retries, cancellation, partial state) — MUST ask if not
     pinned.
   • Edge cases (empty / zero / overflow / missing / failure /
-    concurrency / migration / rollout) — MUST ask if not pinned.
+    concurrency / rollout) — MUST ask if not pinned.
   • Cosmetic / mechanical plan ordering (which equally-valid milestone
     to list first, the wording of a heading inside the plan) — decide
     alone; no escalation.

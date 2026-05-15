@@ -50,7 +50,7 @@ Under it, record every decision you made that was not pinned by the
 user. One bullet per assumption, each in the form
 `- <topic>: <the choice you made> — <one-line rationale>`. Cover at
 minimum: data shape, user-visible names/strings, scope boundaries,
-behavioral edge cases, versioning/migration, and anything user-facing
+behavioral edge cases and anything user-facing
 you decided on the user's behalf. If you made no assumptions in a
 category, omit it; do not invent assumptions for completeness. If you
 made literally none, write a single bullet `- (none)`.
@@ -72,7 +72,7 @@ Optional escape hatches (RARE — omit if uncertain):
 
   • Skip-to-impl: one coherent change landable in a single commit, small
     enough to review in one sitting; no new modules, cross-cutting refactors,
-    migrations, or multi-file rewrites. Mechanical edits across many files
+    or multi-file rewrites. Mechanical edits across many files
     don't qualify — sharding parallelises them. Keep the spec concise (goal,
     edit sites, acceptance check), then write {skip_proposal_path} as TOML:
         proposed  = true

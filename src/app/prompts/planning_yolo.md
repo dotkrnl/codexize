@@ -28,7 +28,7 @@ Assumption-logging rule (HARD):
   <one-line rationale> -->` placed in the plan next to the step it
   affects. Cover at minimum: data shape, user-visible names/strings,
   scope boundaries, behavioral edge cases, semantics (error/retry/
-  cancellation/ordering), versioning/migration. Do NOT bury
+  cancellation/ordering). Do NOT bury
   assumptions in prose; reviewers grep for `assumption:`. If a
   milestone or stage rests on a non-spec assumption, that milestone or
   stage carries its own assumption comment.

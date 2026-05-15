@@ -390,9 +390,13 @@ pub(super) async fn finalize_managed_acp_launch(
             // can't recover its in-flight git snapshot, so synthesise a worst-
             // case finalisation that records the failure.
             let _ = waiting_for_input.send_replace(false);
-            let _ = write_launch_cause(&launch.cause_path, &format!("{err:#}"));
+            if let Err(e) = write_launch_cause(&launch.cause_path, &format!("{err:#}")) {
+                tracing::warn!("failed to write panic launch cause: {e}");
+            }
             let head_before = git_rev_parse_head().unwrap_or_default();
-            let _ = write_finish_stamp_for_outcome(&launch.stamp_path, head_before, 1, "").await;
+            if let Err(e) = write_finish_stamp_for_outcome(&launch.stamp_path, head_before, 1, "").await {
+                tracing::warn!("failed to write panic finish stamp: {e}");
+            }
             return;
         }
     };

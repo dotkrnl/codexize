@@ -22,7 +22,9 @@ impl App {
         self.status_line.borrow_mut().push(message, severity, ttl);
     }
     pub(crate) fn surface_boundary_error(&mut self, message: String, persist_agent_error: bool) {
-        let _ = self.state.log_event(message.clone());
+        if let Err(e) = self.state.log_event(message.clone()) {
+            tracing::warn!("failed to log boundary error event: {e}");
+        }
         self.push_status(message.clone(), Severity::Error, Duration::from_secs(8));
         if persist_agent_error {
             self.record_agent_error(message);

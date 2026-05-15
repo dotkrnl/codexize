@@ -139,8 +139,12 @@ async fn actor_loop<R, W>(
         }
     }
     if writer_open {
-        let _ = writer.flush().await;
-        let _ = writer.shutdown().await;
+        if let Err(e) = writer.flush().await {
+            tracing::debug!("ACP writer flush failed: {e}");
+        }
+        if let Err(e) = writer.shutdown().await {
+            tracing::debug!("ACP writer shutdown failed: {e}");
+        }
     }
 }
 #[rustfmt::skip]

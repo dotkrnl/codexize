@@ -207,10 +207,14 @@ impl SessionState {
         }
         // Append collected messages and events
         for msg in messages_to_append {
-            let _ = self.append_message(&msg);
+            if let Err(e) = self.append_message(&msg) {
+                tracing::warn!("failed to append resume message: {e}");
+            }
         }
         for event in events_to_log {
-            let _ = self.log_event(event);
+            if let Err(e) = self.log_event(event) {
+                tracing::warn!("failed to log resume event: {e}");
+            }
         }
         let running_ids: Vec<u64> = self
             .agent_runs

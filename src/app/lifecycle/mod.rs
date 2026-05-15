@@ -671,15 +671,21 @@ impl App {
     /// exists, then remove the backup so a second rewind doesn't replay it.
     fn apply_cleanup_plan(plan: &crate::lifecycle::CleanupPlan) {
         for path in &plan.delete {
-            if path.is_dir() {
-                let _ = std::fs::remove_dir_all(path);
+            let res = if path.is_dir() {
+                std::fs::remove_dir_all(path)
             } else {
-                let _ = std::fs::remove_file(path);
+                std::fs::remove_file(path)
+            };
+            if let Err(e) = res {
+                tracing::debug!("cleanup remove failed for {}: {e}", path.display());
             }
         }
         for (backup, dest) in &plan.restore_backups {
-            if backup.exists() && std::fs::copy(backup, dest).is_ok() {
-                let _ = std::fs::remove_file(backup);
+            if backup.exists()
+                && std::fs::copy(backup, dest).is_ok()
+                && let Err(e) = std::fs::remove_file(backup)
+            {
+                tracing::debug!("cleanup backup remove failed for {}: {e}", backup.display());
             }
         }
     }

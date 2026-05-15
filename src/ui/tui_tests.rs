@@ -1,5 +1,8 @@
 use super::*;
-use crate::app_runtime::commands::{ModalAction, ModalCommand, PaletteCommand, SessionCommand};
+use crate::app_runtime::commands::{
+    ConfigPanelCommand, GlobalCommand, InputCommand, ModalAction, ModalCommand, PaletteCommand,
+    SessionCommand, TreeCommand,
+};
 use crate::app_runtime::views::modal::StageId;
 
 #[test]
@@ -73,6 +76,126 @@ fn tab_keys_survive_terminal_command_bridge() {
         ))
     );
     assert_eq!(command_from_event(back_tab, &view), None);
+}
+
+#[test]
+fn workspace_navigation_keys_route_to_pipeline_not_shell() {
+    let view = AppView::empty("ui-command-test");
+
+    assert_eq!(
+        command_from_event(
+            Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
+            &view,
+        ),
+        Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::Tree(TreeCommand::ScrollOrMoveFocus { delta: -1 })
+        ))
+    );
+    assert_eq!(
+        command_from_event(
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            &view,
+        ),
+        Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::Tree(TreeCommand::ScrollOrMoveFocus { delta: 1 })
+        ))
+    );
+    assert_eq!(
+        command_from_event(
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            &view,
+        ),
+        Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::Tree(TreeCommand::ActivateFocused)
+        ))
+    );
+}
+
+#[test]
+fn workspace_quit_keys_route_to_global_quit() {
+    let view = AppView::empty("ui-command-test");
+
+    for code in [KeyCode::Esc, KeyCode::Char('q')] {
+        assert_eq!(
+            command_from_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)), &view),
+            Some(AppCommand::Global(GlobalCommand::Quit))
+        );
+    }
+}
+
+#[test]
+fn open_palette_keys_route_to_palette_commands() {
+    let mut view = AppView::empty("ui-command-test");
+    view.palette_open = true;
+
+    assert_eq!(
+        command_from_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)),
+            &view,
+        ),
+        Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::Palette(PaletteCommand::Edit(InputCommand::InsertText(
+                "s".to_string()
+            )))
+        ))
+    );
+    assert_eq!(
+        command_from_event(
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            &view,
+        ),
+        Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::Palette(PaletteCommand::Submit)
+        ))
+    );
+    assert_eq!(
+        command_from_event(
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            &view,
+        ),
+        Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::Palette(PaletteCommand::Close {
+                restore_input_focus: true
+            })
+        ))
+    );
+}
+
+#[test]
+fn config_panel_keys_route_to_config_panel_commands() {
+    let mut view = AppView::empty("ui-command-test");
+    view.config_panel.is_open = true;
+
+    assert_eq!(
+        command_from_event(
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            &view,
+        ),
+        Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::ConfigPanel(ConfigPanelCommand::MoveDown)
+        ))
+    );
+
+    view.config_panel.is_searching = true;
+    assert_eq!(
+        command_from_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE)),
+            &view,
+        ),
+        Some(AppCommand::Session(
+            view.session_id.clone(),
+            SessionCommand::ConfigPanel(ConfigPanelCommand::Edit(InputCommand::InsertText(
+                "m".to_string()
+            )))
+        ))
+    );
 }
 
 #[test]

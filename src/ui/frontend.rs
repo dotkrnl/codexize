@@ -58,7 +58,10 @@ impl Frontend for TerminalFrontend<'_> {
             }
             runtime.drain_app_data_events(&mut app);
             app.runtime_tick_after_data_drain();
-            let view = runtime.view_for_render(app.current_app_view());
+            let mut view = runtime.view_for_render(app.current_app_view());
+            let shell_view = self.shell.sidebar_view();
+            view.shell_visible = shell_view.visible;
+            view.shell_focus = shell_view.focus;
 
             tui::render_app(self.terminal, |frame| {
                 let full_area = frame.area();

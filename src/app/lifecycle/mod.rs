@@ -187,6 +187,9 @@ impl App {
                 .as_ref()
                 .map(|p| p.current_view())
                 .unwrap_or_default(),
+            palette_open: self.palette.open,
+            shell_visible: false,
+            shell_focus: crate::app_runtime::ShellFocus::Workspace,
         }
     }
 

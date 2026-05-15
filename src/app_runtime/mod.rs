@@ -67,6 +67,9 @@ pub struct AppView {
     pub agent_running: bool,
     pub modes: ModeFlags,
     pub config_panel: views::config_panel::ConfigPanelView,
+    pub palette_open: bool,
+    pub shell_visible: bool,
+    pub shell_focus: ShellFocus,
 }
 
 impl AppView {
@@ -81,6 +84,9 @@ impl AppView {
             agent_running: false,
             modes: ModeFlags::default(),
             config_panel: views::config_panel::ConfigPanelView::default(),
+            palette_open: false,
+            shell_visible: false,
+            shell_focus: ShellFocus::Workspace,
         }
     }
 }

@@ -1,7 +1,8 @@
 use crate::app_runtime::commands::{
-    GlobalCommand, InputCommand, ModalAction, ModalCommand, SessionCommand, ShellCommand,
+    ConfigPanelCommand, GlobalCommand, InputCommand, ModalAction, ModalCommand, SessionCommand,
+    ShellCommand,
 };
-use crate::app_runtime::{AppCommand, AppView, ModalKind};
+use crate::app_runtime::{AppCommand, AppView, ModalKind, ShellFocus};
 use crate::input_key::{UiKey, UiKeyCode};
 use anyhow::Result;
 use crossterm::{
@@ -166,10 +167,20 @@ impl Drop for CrosstermInputAdapter {
 pub fn command_from_event(event: Event, view: &AppView) -> Option<AppCommand> {
     match event {
         Event::Key(key) => command_from_key_event(key, view),
-        Event::Paste(text) => Some(AppCommand::Session(
-            view.session_id.clone(),
-            SessionCommand::Input(InputCommand::InsertText(text)),
-        )),
+        Event::Paste(text) => {
+            let command = if view.palette_open {
+                SessionCommand::Palette(crate::app_runtime::commands::PaletteCommand::Edit(
+                    InputCommand::InsertText(text),
+                ))
+            } else if view.config_panel.is_open {
+                SessionCommand::ConfigPanel(ConfigPanelCommand::Edit(InputCommand::InsertText(
+                    text,
+                )))
+            } else {
+                SessionCommand::Input(InputCommand::InsertText(text))
+            };
+            Some(AppCommand::Session(view.session_id.clone(), command))
+        }
         _ => None,
     }
 }
@@ -205,6 +216,70 @@ fn translate_key_to_command(key: UiKey, view: &AppView) -> Option<AppCommand> {
     // Truly global keys
     if key.code == UiKeyCode::Char('c') && key.ctrl {
         return Some(AppCommand::Global(GlobalCommand::StopRunningAgent));
+    }
+
+    if view.config_panel.is_open {
+        let cmd = if view.config_panel.is_editing || view.config_panel.is_searching {
+            match key.code {
+                UiKeyCode::Esc => ConfigPanelCommand::Close,
+                UiKeyCode::Enter => ConfigPanelCommand::Activate,
+                UiKeyCode::Up => ConfigPanelCommand::MoveUp,
+                UiKeyCode::Down => ConfigPanelCommand::MoveDown,
+                UiKeyCode::Backspace => ConfigPanelCommand::Edit(InputCommand::Backspace),
+                UiKeyCode::Char(c) if !key.ctrl && !key.alt => {
+                    ConfigPanelCommand::Edit(InputCommand::InsertText(c.to_string()))
+                }
+                _ => crate::input_key::config_panel_key_to_command(key),
+            }
+        } else {
+            crate::input_key::config_panel_key_to_command(key)
+        };
+        return Some(AppCommand::Session(
+            session_id.clone(),
+            SessionCommand::ConfigPanel(cmd),
+        ));
+    }
+
+    if view.palette_open {
+        let palette_cmd = match key.code {
+            UiKeyCode::Esc if !key.ctrl && !key.alt => {
+                Some(crate::app_runtime::commands::PaletteCommand::Close {
+                    restore_input_focus: true,
+                })
+            }
+            UiKeyCode::Enter if !key.ctrl && !key.alt => {
+                Some(crate::app_runtime::commands::PaletteCommand::Submit)
+            }
+            UiKeyCode::Tab if !key.ctrl && !key.alt => {
+                Some(crate::app_runtime::commands::PaletteCommand::AcceptGhost)
+            }
+            UiKeyCode::Backspace => Some(crate::app_runtime::commands::PaletteCommand::Edit(
+                InputCommand::Backspace,
+            )),
+            UiKeyCode::Delete => Some(crate::app_runtime::commands::PaletteCommand::Edit(
+                InputCommand::DeleteForward,
+            )),
+            UiKeyCode::Left => Some(crate::app_runtime::commands::PaletteCommand::Edit(
+                InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::Left),
+            )),
+            UiKeyCode::Right => Some(crate::app_runtime::commands::PaletteCommand::Edit(
+                InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::Right),
+            )),
+            UiKeyCode::Home => Some(crate::app_runtime::commands::PaletteCommand::Edit(
+                InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::Home),
+            )),
+            UiKeyCode::End => Some(crate::app_runtime::commands::PaletteCommand::Edit(
+                InputCommand::MoveCursor(crate::app_runtime::commands::CursorMove::End),
+            )),
+            UiKeyCode::Char(c) if !key.ctrl && !key.alt => {
+                Some(crate::app_runtime::commands::PaletteCommand::Edit(
+                    InputCommand::InsertText(c.to_string()),
+                ))
+            }
+            _ => None,
+        };
+        return palette_cmd
+            .map(|cmd| AppCommand::Session(session_id.clone(), SessionCommand::Palette(cmd)));
     }
 
     // Modal-specific translation
@@ -342,6 +417,40 @@ fn translate_key_to_command(key: UiKey, view: &AppView) -> Option<AppCommand> {
         }
     }
 
+    let sidebar_focused = view.shell_visible && view.shell_focus == ShellFocus::Sidebar;
+
+    // Sidebar-owned navigation.
+    if sidebar_focused {
+        match key.code {
+            UiKeyCode::Left | UiKeyCode::Right if !key.ctrl && !key.alt => {
+                return Some(AppCommand::Shell(ShellCommand::ToggleSidebarFocus));
+            }
+            UiKeyCode::Up if !key.ctrl && !key.alt => {
+                return Some(AppCommand::Shell(ShellCommand::MoveSidebarSelection {
+                    delta: -1,
+                }));
+            }
+            UiKeyCode::Down if !key.ctrl && !key.alt => {
+                return Some(AppCommand::Shell(ShellCommand::MoveSidebarSelection {
+                    delta: 1,
+                }));
+            }
+            UiKeyCode::Enter if !key.ctrl && !key.alt => {
+                return Some(AppCommand::Shell(ShellCommand::OpenSelectedSidebarSession));
+            }
+            UiKeyCode::Esc if !key.ctrl && !key.alt => {
+                return Some(AppCommand::Shell(ShellCommand::CloseSidebar));
+            }
+            _ => {}
+        }
+    } else if view.shell_visible
+        && matches!(key.code, UiKeyCode::Left | UiKeyCode::Right)
+        && !key.ctrl
+        && !key.alt
+    {
+        return Some(AppCommand::Shell(ShellCommand::ToggleSidebarFocus));
+    }
+
     // Palette toggle
     if key.code == UiKeyCode::Char(':') && !key.ctrl && !key.alt {
         return Some(AppCommand::Session(
@@ -356,30 +465,6 @@ fn translate_key_to_command(key: UiKey, view: &AppView) -> Option<AppCommand> {
             session_id,
             SessionCommand::Palette(crate::app_runtime::commands::PaletteCommand::AcceptGhost),
         ));
-    }
-
-    // Shell-level navigation (sidebar)
-    match key.code {
-        UiKeyCode::Left | UiKeyCode::Right if !key.ctrl && !key.alt => {
-            return Some(AppCommand::Shell(ShellCommand::ToggleSidebarFocus));
-        }
-        UiKeyCode::Up if !key.ctrl && !key.alt => {
-            return Some(AppCommand::Shell(ShellCommand::MoveSidebarSelection {
-                delta: -1,
-            }));
-        }
-        UiKeyCode::Down if !key.ctrl && !key.alt => {
-            return Some(AppCommand::Shell(ShellCommand::MoveSidebarSelection {
-                delta: 1,
-            }));
-        }
-        UiKeyCode::Enter if !key.ctrl && !key.alt => {
-            return Some(AppCommand::Shell(ShellCommand::OpenSelectedSidebarSession));
-        }
-        UiKeyCode::Esc if !key.ctrl && !key.alt => {
-            return Some(AppCommand::Shell(ShellCommand::CloseSidebar));
-        }
-        _ => {}
     }
 
     // App-level navigation (tree)
@@ -427,6 +512,9 @@ fn translate_key_to_command(key: UiKey, view: &AppView) -> Option<AppCommand> {
                 session_id,
                 SessionCommand::Tree(crate::app_runtime::commands::TreeCommand::ActivateFocused),
             ));
+        }
+        UiKeyCode::Esc | UiKeyCode::Char('q' | 'Q') if !key.ctrl && !key.alt => {
+            return Some(AppCommand::Global(GlobalCommand::Quit));
         }
         _ => {}
     }

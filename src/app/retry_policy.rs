@@ -1,6 +1,6 @@
 use super::models::subscription_tag;
 use super::{App, FailedModelSet, RetryKey};
-use crate::selection::{SubscriptionKind, selection::select_excluding};
+use crate::selection::{SubscriptionKind, select_excluding};
 use crate::state::{MessageKind, RunStatus, SessionState};
 use std::collections::{HashMap, HashSet};
 impl App {

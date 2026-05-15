@@ -85,13 +85,12 @@ fn pool_pick<'a>(
 ///
 /// `vendor_filter`: hard inclusion filter applied before the pool scorer —
 /// vendor preferences are not multiplied into the post-softmax weights.
-#[cfg(test)]
 pub fn pick_for_stage(
     models: &[CachedModel],
     stage: SelectionStage,
     vendor_filter: Option<SubscriptionKind>,
 ) -> Option<&CachedModel> {
-    pick_for_stage_with_seed(models, stage, vendor_filter, test_sample_seed())
+    pick_for_stage_with_seed(models, stage, vendor_filter, sample_seed())
 }
 pub fn pick_for_stage_with_seed<'a>(
     models: &'a [CachedModel],
@@ -115,7 +114,6 @@ pub fn pick_for_stage_with_seed<'a>(
 ///
 /// For [`EffortLevel::Low`] and [`EffortLevel::Normal`], delegates straight
 /// to [`pick_for_stage`].
-#[cfg(test)]
 pub fn pick_for_stage_with_effort<'a>(
     models: &'a [CachedModel],
     stage: SelectionStage,
@@ -123,14 +121,7 @@ pub fn pick_for_stage_with_effort<'a>(
     effort: EffortLevel,
     cheap: bool,
 ) -> Option<SelectionOutcome<'a>> {
-    pick_for_stage_with_effort_and_seed(
-        models,
-        stage,
-        vendor_filter,
-        effort,
-        cheap,
-        test_sample_seed(),
-    )
+    pick_for_stage_with_effort_and_seed(models, stage, vendor_filter, effort, cheap, sample_seed())
 }
 pub fn pick_for_stage_with_effort_and_seed<'a>(
     models: &'a [CachedModel],
@@ -184,13 +175,12 @@ pub fn pick_for_stage_with_effort_and_seed<'a>(
 /// Tier 1 prefers different vendor *and* different model. Tier 2 falls back
 /// to any unused model. Each tier is a hard filter; the candidate-pool
 /// scorer is applied within the tier.
-#[cfg(test)]
 pub fn select_for_review<'a>(
     models: &'a [CachedModel],
     used_vendors: &[SubscriptionKind],
     used_models: &[(SubscriptionKind, String)],
 ) -> Option<&'a CachedModel> {
-    select_for_review_with_seed(models, used_vendors, used_models, test_sample_seed())
+    select_for_review_with_seed(models, used_vendors, used_models, sample_seed())
 }
 pub fn select_for_review_with_seed<'a>(
     models: &'a [CachedModel],
@@ -226,7 +216,6 @@ pub fn select_for_review_with_seed<'a>(
 ///
 /// For [`EffortLevel::Low`] and [`EffortLevel::Normal`], delegates to
 /// [`select_for_review`].
-#[cfg(test)]
 pub fn select_for_review_with_effort<'a>(
     models: &'a [CachedModel],
     used_vendors: &[SubscriptionKind],
@@ -240,7 +229,7 @@ pub fn select_for_review_with_effort<'a>(
         used_models,
         effort,
         cheap,
-        test_sample_seed(),
+        sample_seed(),
     )
 }
 pub fn select_for_review_with_effort_and_seed<'a>(
@@ -325,14 +314,13 @@ fn select_for_review_from_eligible<'a>(
 }
 /// Select a model excluding a list of models. `last_failed_vendor` does not
 /// affect weights: spec §5.3 / §6 forbid post-softmax policy multipliers.
-#[cfg(test)]
 pub fn select_excluding<'a>(
     models: &'a [CachedModel],
     stage: SelectionStage,
     excluded: &[(SubscriptionKind, String)],
-    _last_failed_vendor: Option<SubscriptionKind>,
+    last_failed_vendor: Option<SubscriptionKind>,
 ) -> Option<&'a CachedModel> {
-    select_excluding_with_seed(models, stage, excluded, None, test_sample_seed())
+    select_excluding_with_seed(models, stage, excluded, last_failed_vendor, sample_seed())
 }
 pub fn select_excluding_with_seed<'a>(
     models: &'a [CachedModel],
@@ -370,13 +358,18 @@ fn weighted_sample<'a>(
     }
     candidates.last().map(|(model, _)| *model)
 }
-#[cfg(test)]
-fn test_sample_seed() -> u64 {
-    let seeded = TEST_SAMPLE_SEED.load(AtomicOrdering::Relaxed);
-    if seeded != 0 {
-        return seeded;
+fn sample_seed() -> u64 {
+    #[cfg(test)]
+    {
+        let seeded = TEST_SAMPLE_SEED.load(AtomicOrdering::Relaxed);
+        if seeded == 0 { 1 } else { seeded }
     }
-    1
+    #[cfg(not(test))]
+    {
+        let mut buf = [0u8; 8];
+        getrandom::fill(&mut buf).expect("getrandom failed");
+        u64::from_ne_bytes(buf)
+    }
 }
 #[cfg(test)]
 mod tests_mod;

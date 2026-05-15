@@ -1,6 +1,6 @@
 use super::{App, DEFAULT_STAMP_TIMEOUT_MS, ENV_STAMP_TIMEOUT_MS, guard, status_line};
 use crate::{
-    selection::{SubscriptionKind, config::SelectionStage, selection::SelectionWarning},
+    selection::{SelectionWarning, SubscriptionKind, config::SelectionStage},
     state::{self as session_state, Message, MessageKind, MessageSender, RunStatus, Stage},
     tasks,
 };

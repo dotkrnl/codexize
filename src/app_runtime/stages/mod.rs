@@ -29,9 +29,8 @@ use crate::{
     data::adapters::EffortLevel,
     data::config::schema::EffortMapping,
     selection::{
-        CachedModel, CliKind, SubscriptionKind,
-        config::SelectionStage,
-        selection::{pick_for_stage_with_effort, select_for_review_with_effort},
+        CachedModel, CliKind, SubscriptionKind, config::SelectionStage, pick_for_stage_with_effort,
+        select_for_review_with_effort,
     },
     state::{
         self as session_state, LaunchModes, Message, MessageKind, MessageSender, SessionState,

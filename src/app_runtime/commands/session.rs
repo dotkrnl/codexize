@@ -32,9 +32,8 @@ pub enum SessionCommand {
     /// Submit a single pre-baked input line. The runtime treats it as
     /// "stuff this in the input buffer and press Enter". Equivalent to
     /// `Palette(Edit(ReplaceBuffer(text))) + Palette(Submit)` for the
-    /// palette buffer, but kept as a discrete variant because the legacy
-    /// `SubmitInput` command shape is widely used in tests and other
-    /// non-typed entry points.
+    /// palette buffer, but kept as a discrete command for tests and
+    /// scripted/headless entry points.
     SubmitInput {
         text: String,
     },

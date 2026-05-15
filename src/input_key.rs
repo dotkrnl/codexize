@@ -1,9 +1,9 @@
 //! TUI-shaped key types used internally by terminal input translation and
-//! legacy focus-local handlers.
+//! focus-local command handlers.
 //!
 //! These are not part of the runtime frontend seam. They live outside
 //! `app/` and `ui/` so neither side has to import the other just to share
-//! the temporary key adapter shape during the cutover.
+//! the compact key adapter shape.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct UiKey {
@@ -14,7 +14,7 @@ pub(crate) struct UiKey {
 
 impl UiKey {
     /// Synthetic key with no modifiers (the common case for command-to-key
-    /// bridging in the transitional typed-command handlers).
+    /// bridging in typed-command handlers).
     pub(crate) fn new(code: UiKeyCode) -> Self {
         Self {
             code,
@@ -46,8 +46,8 @@ pub(crate) enum UiKeyCode {
 
 /// Translate a TUI-shaped key into the corresponding config-panel command.
 ///
-/// This bridges legacy key handlers into the typed `ConfigPanelCommand`
-/// surface without making `ui/` import from `app/`.
+/// This keeps config-panel key mapping in one place without making `ui/`
+/// import from `app/`.
 pub(crate) fn config_panel_key_to_command(
     key: UiKey,
 ) -> crate::app_runtime::commands::ConfigPanelCommand {

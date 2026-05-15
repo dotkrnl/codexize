@@ -78,8 +78,6 @@ impl App {
     ) -> Option<anyhow::Result<()>> {
         #[cfg(not(test))]
         {
-            // Suppress unused-parameter warnings in production; the harness
-            // is test-only.
             let _ = (artifact_path, run_key, artifacts_dir);
             None
         }

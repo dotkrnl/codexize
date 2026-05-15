@@ -473,8 +473,7 @@ impl App {
                 false
             }
             PaletteCommand::Edit(input_cmd) => {
-                // Backspace on an empty palette buffer closes the palette
-                // (matches the legacy key handler behavior).
+                // Backspace on an empty palette buffer closes the palette.
                 if matches!(input_cmd, InputCommand::Backspace) && self.palette.buffer.is_empty() {
                     self.close_palette(true);
                     return false;
@@ -532,8 +531,8 @@ impl App {
 
     fn handle_modal_command_dispatch(&mut self, cmd: ModalCommand) -> bool {
         let Some(modal) = self.active_modal() else {
-            // Quit-confirmation lives outside `active_modal()` for legacy
-            // reasons; route a bare Cancel to clear its pending state.
+            // Quit-confirmation is tracked separately from modal content;
+            // route a bare Cancel to clear its pending state.
             if matches!(cmd, ModalCommand::Cancel) {
                 self.pending_quit_confirmation_run_id = None;
             }

@@ -64,8 +64,7 @@ impl SnapshotHandle {
     /// Return a cheap clone of the current [`RootView`].
     ///
     /// The clone is cheap because heavy sub-view fields are held behind
-    /// `Arc<…>` once those sub-views grow real content; for now `RootView`
-    /// is small enough that the clone is trivial.
+    /// `Arc<…>`.
     pub fn read(&self) -> RootView {
         self.inner.read().clone()
     }

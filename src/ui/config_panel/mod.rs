@@ -1,6 +1,6 @@
 #[cfg(test)]
 use crate::data::config::{Config, mutate, schema::Override};
-use crate::input_key::UiKeyCode;
+use crate::input_key::{UiKeyCode, config_panel_key_to_command};
 use crate::ui::chrome::{bottom_rule, top_rule_with_left_spans};
 use crossterm::event::KeyEvent;
 #[cfg(test)]
@@ -65,10 +65,10 @@ impl ConfigPanelState {
                         crate::app_runtime::commands::InputCommand::InsertText(c.to_string()),
                     )
                 }
-                _ => crate::app::config_panel::config_panel_key_to_command(ui_key),
+                _ => config_panel_key_to_command(ui_key),
             }
         } else {
-            crate::app::config_panel::config_panel_key_to_command(ui_key)
+            config_panel_key_to_command(ui_key)
         };
         self.handle_command(cmd)
     }

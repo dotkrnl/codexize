@@ -148,7 +148,7 @@ impl App {
     pub(crate) fn handle_key(&mut self, key: impl Into<UiKey>) -> bool {
         let key = key.into();
         if self.config_panel.is_some() {
-            let cmd = crate::app::config_panel::config_panel_key_to_command(key);
+            let cmd = crate::input_key::config_panel_key_to_command(key);
             return self.handle_config_panel_command(cmd);
         }
         // Keep Ctrl+C global so palette/input/modal states cannot swallow an

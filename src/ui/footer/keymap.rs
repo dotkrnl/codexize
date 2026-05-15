@@ -299,7 +299,7 @@ fn render_default_keymap(
 /// * `caps` - Capabilities of the currently focused row.
 /// * `input_mode` - Whether input mode is active.
 /// * `width` - Available terminal width in columns.
-pub fn keymap(
+pub(crate) fn keymap(
     _stage: Stage,
     modal: Option<ModalKind>,
     caps: FocusCaps,
@@ -347,7 +347,7 @@ pub fn keymap(
     render_keymap_line(&[&nav, &actions, &system], &caps_fn, width)
 }
 /// Renders a context-aware keymap line.
-pub fn render_keymap_line(
+pub(crate) fn render_keymap_line(
     categories: &[&[KeyBinding]],
     caps: &dyn Fn(Option<Capability>) -> bool,
     width: u16,

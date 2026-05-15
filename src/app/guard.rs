@@ -18,13 +18,13 @@ const SNAPSHOT_FILE: &str = "snapshot.toml";
 /// decision instead of resetting, and the operator chooses reset vs keep.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum GuardMode {
+pub(crate) enum GuardMode {
     #[default]
     AutoReset,
     AskOperator,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Snapshot {
+pub(crate) struct Snapshot {
     /// git HEAD at capture time (full SHA). Empty if git was unavailable.
     #[serde(default)]
     pub head: String,
@@ -49,7 +49,7 @@ pub struct Snapshot {
 /// Outcome of verifying a snapshot. Three arms so callers cannot
 /// accidentally treat a pending operator decision as a hard error.
 #[derive(Debug, Clone)]
-pub enum VerifyResult {
+pub(crate) enum VerifyResult {
     /// No protocol violation. Advisory `warnings` may still be present.
     Ok { warnings: Vec<String> },
     /// Hard violation that the guard already reacted to (reset, restored
@@ -81,7 +81,7 @@ fn git_head() -> Option<String> {
     let trimmed = git_stdout(&["rev-parse", "HEAD"])?.trim().to_string();
     (!trimmed.is_empty()).then_some(trimmed)
 }
-pub fn git_status_dirty() -> bool {
+pub(crate) fn git_status_dirty() -> bool {
     git_status().is_some_and(|s| !s.trim().is_empty())
 }
 fn git_status() -> Option<String> {
@@ -110,7 +110,7 @@ fn read_snapshot(snapshot_dir: &Path) -> Option<Snapshot> {
 /// Capture a snapshot for a non-coder agent. Records HEAD and working-tree
 /// status so `verify_non_coder` can detect changes and emit warnings.
 /// `mode` controls how a HEAD-advance violation is handled at verify time.
-pub fn capture_non_coder(
+pub(crate) fn capture_non_coder(
     snapshot_dir: &Path,
     _stage_tag: &str,
     mode: GuardMode,
@@ -161,7 +161,7 @@ fn coder_control_paths(session_dir: &Path, round: u32) -> Vec<PathBuf> {
     }
     out
 }
-pub fn capture_coder(snapshot_dir: &Path, session_dir: &Path, round: u32) -> std::io::Result<()> {
+pub(crate) fn capture_coder(snapshot_dir: &Path, session_dir: &Path, round: u32) -> std::io::Result<()> {
     let mut control_files = BTreeMap::new();
     for p in coder_control_paths(session_dir, round) {
         if let Ok(text) = std::fs::read_to_string(&p) {
@@ -180,7 +180,7 @@ pub fn capture_coder(snapshot_dir: &Path, session_dir: &Path, round: u32) -> std
 }
 /// Verify the snapshot. Returns a typed three-arm result so callers cannot
 /// accidentally treat a pending operator decision as a hard error.
-pub fn verify(snapshot_dir: &Path, stage: &str) -> VerifyResult {
+pub(crate) fn verify(snapshot_dir: &Path, stage: &str) -> VerifyResult {
     let Some(snap) = read_snapshot(snapshot_dir) else {
         return VerifyResult::Ok { warnings: vec![] };
     };
@@ -195,7 +195,7 @@ pub fn verify(snapshot_dir: &Path, stage: &str) -> VerifyResult {
 /// Run `git reset --hard <captured_head>` so an operator-driven reset can
 /// share the exact reset path used by `AutoReset` mode without having to
 /// re-read the snapshot.
-pub fn reset_hard_to(captured_head: &str) -> bool {
+pub(crate) fn reset_hard_to(captured_head: &str) -> bool {
     if captured_head.is_empty() {
         return false;
     }

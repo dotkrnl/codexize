@@ -10,11 +10,10 @@ use crate::logic::memory::{memory_root_from_session_path, normalize_absolute};
 /// `max_topics_per_read` is the literal substituted into the
 /// `{max_topics_per_read}` slot of the memory_context template.
 /// `memory_root` is `Some(_)` when the operator explicitly set
-/// `paths.memory_root`, in which case it overrides the
-/// session-derived memory location everywhere — including inside the
-/// memory-context block. When `None`, `memory_arg` falls back to
-/// deriving the root from the supplied session/artifact path so
-/// off-App callers (tests, snapshot fixtures) keep the prior behavior.
+/// `paths.memory_root`, in which case it overrides the session-derived
+/// memory location everywhere, including inside the memory-context block.
+/// When `None`, `memory_arg` derives the root from the supplied
+/// session/artifact path.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PromptMeta {
     pub max_topics_per_read: u32,

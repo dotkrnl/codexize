@@ -8,10 +8,10 @@ use self::stages::{
     build_review_stage, build_simple_stage, build_simplification_stage, total_iterations,
 };
 use std::collections::{BTreeMap, BTreeSet};
-pub type NodePath = Vec<usize>;
+pub(crate) type NodePath = Vec<usize>;
 type RecoveryRoundRuns<'a> = (Vec<&'a RunRecord>, Vec<&'a RunRecord>, Vec<&'a RunRecord>);
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum StageKey {
+pub(crate) enum StageKey {
     Idea,
     Brainstorm,
     SpecReview,
@@ -31,20 +31,20 @@ pub enum StageKey {
     Dreaming,
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum TaskKey {
+pub(crate) enum TaskKey {
     Task(u32),
     BuilderRecovery,
     Path(NodeKind, NodePath),
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ModeKey {
+pub(crate) enum ModeKey {
     Coder,
     Reviewer,
     Recovery,
     Named(String),
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum NodeKeyPart {
+pub(crate) enum NodeKeyPart {
     Stage(StageKey),
     Task(TaskKey),
     Round(u32),
@@ -53,21 +53,21 @@ pub enum NodeKeyPart {
     Path(NodeKind, NodePath),
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NodeKey {
+pub(crate) struct NodeKey {
     parts: Vec<NodeKeyPart>,
 }
 impl NodeKey {
-    pub fn new(parts: Vec<NodeKeyPart>) -> Self {
+    pub(crate) fn new(parts: Vec<NodeKeyPart>) -> Self {
         Self { parts }
     }
-    pub fn ancestors(&self) -> impl Iterator<Item = NodeKey> + '_ {
+    pub(crate) fn ancestors(&self) -> impl Iterator<Item = NodeKey> + '_ {
         (1..self.parts.len()).rev().map(|len| NodeKey {
             parts: self.parts[..len].to_vec(),
         })
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VisibleNodeRow {
+pub(crate) struct VisibleNodeRow {
     pub depth: usize,
     pub path: NodePath,
     pub key: NodeKey,
@@ -79,12 +79,12 @@ pub struct VisibleNodeRow {
     pub backing_leaf_run_id: Option<u64>,
 }
 impl VisibleNodeRow {
-    pub fn is_expandable(&self) -> bool {
+    pub(crate) fn is_expandable(&self) -> bool {
         self.status != NodeStatus::Pending
             && (self.has_children || self.has_transcript || self.has_body)
     }
 }
-pub fn build_tree(state: &SessionState) -> Vec<Node> {
+pub(crate) fn build_tree(state: &SessionState) -> Vec<Node> {
     let mut nodes = vec![
         build_idea_node(state),
         build_simple_stage(state, "brainstorm", "Brainstorm"),
@@ -110,7 +110,7 @@ pub fn build_tree(state: &SessionState) -> Vec<Node> {
     }
     nodes
 }
-pub fn node_at_path<'a>(nodes: &'a [Node], path: &[usize]) -> Option<&'a Node> {
+pub(crate) fn node_at_path<'a>(nodes: &'a [Node], path: &[usize]) -> Option<&'a Node> {
     let (&first, rest) = path.split_first()?;
     let mut node = nodes.get(first)?;
     for &index in rest {
@@ -118,7 +118,7 @@ pub fn node_at_path<'a>(nodes: &'a [Node], path: &[usize]) -> Option<&'a Node> {
     }
     Some(node)
 }
-pub fn node_key_at_path(nodes: &[Node], path: &[usize]) -> Option<NodeKey> {
+pub(crate) fn node_key_at_path(nodes: &[Node], path: &[usize]) -> Option<NodeKey> {
     let mut parts = Vec::new();
     let mut current = nodes;
     for (depth, &index) in path.iter().enumerate() {
@@ -129,10 +129,10 @@ pub fn node_key_at_path(nodes: &[Node], path: &[usize]) -> Option<NodeKey> {
     Some(NodeKey::new(parts))
 }
 #[cfg(test)]
-pub fn collect_all_rows(nodes: &[Node]) -> Vec<VisibleNodeRow> {
+pub(crate) fn collect_all_rows(nodes: &[Node]) -> Vec<VisibleNodeRow> {
     flatten_visible_rows(nodes, |_| true)
 }
-pub fn flatten_visible_rows(
+pub(crate) fn flatten_visible_rows(
     nodes: &[Node],
     mut is_expanded: impl FnMut(&VisibleNodeRow) -> bool,
 ) -> Vec<VisibleNodeRow> {
@@ -146,7 +146,7 @@ pub fn flatten_visible_rows(
     );
     rows
 }
-pub fn active_stage_paths(nodes: &[Node], runs: &[RunRecord]) -> BTreeMap<NodeKey, NodePath> {
+pub(crate) fn active_stage_paths(nodes: &[Node], runs: &[RunRecord]) -> BTreeMap<NodeKey, NodePath> {
     let run_lookup: BTreeMap<u64, &RunRecord> = runs.iter().map(|run| (run.id, run)).collect();
     nodes
         .iter()
@@ -162,7 +162,7 @@ pub fn active_stage_paths(nodes: &[Node], runs: &[RunRecord]) -> BTreeMap<NodeKe
         })
         .collect()
 }
-pub fn active_path_keys(nodes: &[Node], runs: &[RunRecord]) -> BTreeSet<NodeKey> {
+pub(crate) fn active_path_keys(nodes: &[Node], runs: &[RunRecord]) -> BTreeSet<NodeKey> {
     active_stage_paths(nodes, runs)
         .into_values()
         .flat_map(|path| (1..=path.len()).filter_map(move |d| node_key_at_path(nodes, &path[..d])))
@@ -171,7 +171,7 @@ pub fn active_path_keys(nodes: &[Node], runs: &[RunRecord]) -> BTreeSet<NodeKey>
 /// Find the deepest node path whose `run_id` or `leaf_run_id` matches `run_id`.
 /// Used by progress-follow focus to refocus on the most specific row backing a
 /// particular run when the operator has not opted out of automatic following.
-pub fn deepest_path_for_run(nodes: &[Node], run_id: u64) -> Option<NodePath> {
+pub(crate) fn deepest_path_for_run(nodes: &[Node], run_id: u64) -> Option<NodePath> {
     fn walk(nodes: &[Node], path: &mut NodePath, run_id: u64, best: &mut Option<NodePath>) {
         for (index, node) in nodes.iter().enumerate() {
             path.push(index);
@@ -661,7 +661,7 @@ fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String
 /// Collapse single-child layers selectively.
 /// Only Round and AgentRun nodes may be absorbed by their parent.
 /// Stage, Task, and Mode nodes are NEVER absorbed—they always remain visible.
-pub fn collapse_tree(node: &mut Node) {
+pub(crate) fn collapse_tree(node: &mut Node) {
     for child in &mut node.children {
         collapse_tree(child);
     }
@@ -680,7 +680,7 @@ pub fn collapse_tree(node: &mut Node) {
         }
     }
 }
-pub fn current_node_index(nodes: &[Node]) -> usize {
+pub(crate) fn current_node_index(nodes: &[Node]) -> usize {
     nodes
         .iter()
         .position(|n| {

@@ -1,4 +1,4 @@
-pub use super::live_agent_message_view_model::extract_short_title;
+pub(crate) use super::live_agent_message_view_model::extract_short_title;
 use super::live_agent_message_view_model::{capitalize_first, gradient_spans};
 use crate::ui::clock::Clock;
 use ratatui::style::{Color, Modifier, Style};
@@ -8,7 +8,7 @@ const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧
 const RUNNING_COLOR: Color = Color::Blue;
 /// Style hints for historical message rendering.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct HistoricalStyleHints {
+pub(crate) struct HistoricalStyleHints {
     pub is_summary: bool,
     pub is_warning: bool,
     pub is_error: bool,
@@ -22,7 +22,7 @@ pub struct HistoricalStyleHints {
 /// `HH:MM:SS ○ body text`
 ///
 /// Where the timestamp and symbol colors vary by message type.
-pub fn format_historical_message(
+pub(crate) fn format_historical_message(
     timestamp: &str,
     symbol: &str,
     body: &str,
@@ -54,10 +54,10 @@ pub fn format_historical_message(
 /// Container rows (stages, tasks, artifacts) keep their tree-node shape
 /// with spinner + state label and should use a different rendering path.
 #[derive(Clone, Copy, Debug)]
-pub struct TranscriptLeafMarker(());
+pub(crate) struct TranscriptLeafMarker(());
 impl TranscriptLeafMarker {
     /// Create a new marker. The caller asserts this is truly a transcript leaf.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(())
     }
 }
@@ -70,7 +70,7 @@ impl Default for TranscriptLeafMarker {
 ///
 /// This seam allows testing without filesystem access. The production
 /// implementation wraps the existing mtime-cached reader.
-pub trait LiveSummaryFetcher {
+pub(crate) trait LiveSummaryFetcher {
     /// Fetch the current short title from the live summary file.
     ///
     /// Returns the cached short title or the stage label when:
@@ -85,12 +85,12 @@ pub trait LiveSummaryFetcher {
 /// already performs mtime-based file reading and retains the last cached value
 /// on partial reads. This struct borrows that cached result at render time and
 /// extracts the short title, avoiding filesystem I/O on the render path.
-pub struct CachedSummaryFetcher<'a> {
+pub(crate) struct CachedSummaryFetcher<'a> {
     cached_text: &'a str,
     stage_label: &'a str,
 }
 impl<'a> CachedSummaryFetcher<'a> {
-    pub fn new(cached_text: &'a str, stage_label: &'a str) -> Self {
+    pub(crate) fn new(cached_text: &'a str, stage_label: &'a str) -> Self {
         Self {
             cached_text,
             stage_label,
@@ -108,7 +108,7 @@ impl LiveSummaryFetcher for CachedSummaryFetcher<'_> {
 }
 /// Test fetcher that returns a fixed value.
 #[cfg(test)]
-pub struct FixedFetcher(pub String);
+pub(super) struct FixedFetcher(pub String);
 #[cfg(test)]
 impl LiveSummaryFetcher for FixedFetcher {
     fn fetch(&self) -> String {
@@ -137,7 +137,7 @@ impl LiveSummaryFetcher for FixedFetcher {
 /// * `clock` - Clock providing 1 Hz truncated timestamps.
 /// * `spinner_tick` - Frame counter for spinner animation.
 /// * `fetcher` - Live summary text fetcher.
-pub fn format_running_transcript_leaf<C: Clock>(
+pub(crate) fn format_running_transcript_leaf<C: Clock>(
     _marker: TranscriptLeafMarker,
     clock: &C,
     spinner_tick: usize,
@@ -166,7 +166,7 @@ pub fn format_running_transcript_leaf<C: Clock>(
 /// The row keeps the same spinner-shaped marker as active rows, but freezes it
 /// and labels the state so lack of transcript activity is visible without
 /// implying the run completed.
-pub fn format_stalled_transcript_leaf<C: Clock>(
+pub(crate) fn format_stalled_transcript_leaf<C: Clock>(
     _marker: TranscriptLeafMarker,
     clock: &C,
     fetcher: &impl LiveSummaryFetcher,

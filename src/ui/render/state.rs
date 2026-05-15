@@ -44,7 +44,7 @@ pub(crate) fn status_highlight_bg(status: NodeStatus) -> Option<Color> {
 /// messages route through, so long fields don't overflow the viewport.
 /// Continuation lines indent to match the visual prefix on the first line so
 /// wrapped bullets stay column-aligned with their first row.
-pub fn final_validation_report_lines(
+pub(crate) fn final_validation_report_lines(
     verdict: &crate::data::validation::ValidationVerdict,
     indent: &str,
     width: usize,
@@ -215,7 +215,7 @@ fn push_wrapped_field(
         width,
     ));
 }
-pub fn sanitize_live_summary(text: &str) -> String {
+pub(crate) fn sanitize_live_summary(text: &str) -> String {
     let stripped = strip_ansi(text);
     let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
     collapsed.chars().take(500).collect()

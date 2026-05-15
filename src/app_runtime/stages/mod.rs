@@ -52,12 +52,10 @@ pub(crate) type StagePick = (
     bool,          // candidate's effort_eligible flag
 );
 
-/// Pull launch-time fields from the row's selected candidate when
-/// arbitration has chosen one; otherwise fall back to the direct-vendor
-/// CLI, the row's canonical name, and a default effort mapping with
-/// `effort_eligible = false`. The fallback only fires for rows with no
-/// candidates (e.g. override_model paths constructed before assembly
-/// seeded candidates), which preserves pre-task-2 behavior.
+/// Pull launch-time fields from the row's selected candidate. Rows without
+/// candidates use their direct CLI, canonical name, and a default non-effort
+/// mapping; this covers operator-provided override rows that bypass normal
+/// candidate assembly.
 pub(crate) fn pick_cli_and_launch_name(
     row: &CachedModel,
 ) -> (CliKind, String, EffortMapping, bool) {

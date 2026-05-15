@@ -1,4 +1,4 @@
-pub struct PaletteCommand {
+pub(crate) struct PaletteCommand {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
     pub help: &'static str,
@@ -8,7 +8,7 @@ pub struct PaletteCommand {
     /// exists for the current context (e.g. `Esc` for quit, `n` for new).
     pub key_hint: Option<&'static str>,
 }
-pub enum MatchResult<'a> {
+pub(crate) enum MatchResult<'a> {
     Exact {
         command: &'a PaletteCommand,
         args: String,
@@ -24,7 +24,7 @@ pub enum MatchResult<'a> {
         input: String,
     },
 }
-pub fn resolve<'a>(input: &str, commands: &'a [PaletteCommand]) -> MatchResult<'a> {
+pub(crate) fn resolve<'a>(input: &str, commands: &'a [PaletteCommand]) -> MatchResult<'a> {
     let input = input.trim();
     if input.is_empty() {
         return MatchResult::Unknown {
@@ -65,7 +65,7 @@ pub fn resolve<'a>(input: &str, commands: &'a [PaletteCommand]) -> MatchResult<'
     }
 }
 /// Compute the ghost completion text for the current buffer, if any.
-pub fn ghost_completion<'a>(input: &str, commands: &'a [PaletteCommand]) -> Option<&'a str> {
+pub(crate) fn ghost_completion<'a>(input: &str, commands: &'a [PaletteCommand]) -> Option<&'a str> {
     let input = input.trim();
     if input.is_empty() {
         return None;
@@ -96,7 +96,7 @@ pub fn ghost_completion<'a>(input: &str, commands: &'a [PaletteCommand]) -> Opti
 /// state is the discoverable browser. Otherwise, match on case-insensitive
 /// substring against name and aliases. Order is preserved so callers control
 /// the semantic ordering of their command set.
-pub fn filter<'a>(buffer: &str, commands: &'a [PaletteCommand]) -> Vec<&'a PaletteCommand> {
+pub(crate) fn filter<'a>(buffer: &str, commands: &'a [PaletteCommand]) -> Vec<&'a PaletteCommand> {
     let trimmed = buffer.trim();
     if trimmed.is_empty() {
         return commands.iter().collect();
@@ -118,7 +118,7 @@ pub fn filter<'a>(buffer: &str, commands: &'a [PaletteCommand]) -> Vec<&'a Palet
 /// Width budget order: name (always preserved), then description (truncated
 /// with an ellipsis before the shortcut is dropped), then shortcut. Returns
 /// the rendered string padded to exactly `width` cells.
-pub fn suggestion_text(command: &PaletteCommand, width: u16) -> String {
+pub(crate) fn suggestion_text(command: &PaletteCommand, width: u16) -> String {
     let name = command.name;
     let description = command.help;
     let shortcut = command.key_hint.unwrap_or("");
@@ -179,28 +179,28 @@ pub fn suggestion_text(command: &PaletteCommand, width: u16) -> String {
     out
 }
 #[derive(Debug, Default)]
-pub struct PaletteState {
+pub(crate) struct PaletteState {
     pub open: bool,
     pub buffer: String,
     pub cursor: usize,
 }
 impl PaletteState {
-    pub fn open(&mut self) {
+    pub(crate) fn open(&mut self) {
         self.open = true;
         self.buffer.clear();
         self.cursor = 0;
     }
-    pub fn open_with_buffer(&mut self, buffer: String) {
+    pub(crate) fn open_with_buffer(&mut self, buffer: String) {
         self.open = true;
         self.cursor = buffer.chars().count();
         self.buffer = buffer;
     }
-    pub fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         self.open = false;
         self.buffer.clear();
         self.cursor = 0;
     }
-    pub fn accept_ghost(&mut self, ghost: &str) {
+    pub(crate) fn accept_ghost(&mut self, ghost: &str) {
         self.buffer = ghost.to_string();
         self.cursor = self.buffer.len();
     }

@@ -4,13 +4,13 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
-pub fn visible_entries(entries: &[SessionEntry], show_archived: bool) -> Vec<&SessionEntry> {
+pub(crate) fn visible_entries(entries: &[SessionEntry], show_archived: bool) -> Vec<&SessionEntry> {
     entries
         .iter()
         .filter(|e| show_archived || !e.archived)
         .collect()
 }
-pub fn selected_entry(
+pub(crate) fn selected_entry(
     entries: &[SessionEntry],
     show_archived: bool,
     selected: usize,
@@ -19,27 +19,27 @@ pub fn selected_entry(
         .get(selected)
         .copied()
 }
-pub fn page_step(body_inner_height: usize) -> usize {
+pub(crate) fn page_step(body_inner_height: usize) -> usize {
     // Before the first draw there is no measured body height yet. The
     // interactive run loop always draws before reading input, so callers
     // without a render pass conservatively get a zero-step page move.
     body_inner_height.saturating_sub(1)
 }
-pub fn palette_inner_rows(buffer: &str, selected_archived: bool) -> u16 {
+pub(crate) fn palette_inner_rows(buffer: &str, selected_archived: bool) -> u16 {
     const MAX_OVERLAY_INNER: u16 = 12;
     let commands = palette_commands(selected_archived);
     let filtered = palette::filter(buffer, &commands);
     let suggestions = filtered.len().min(10) as u16;
     (1 + suggestions + 1).min(MAX_OVERLAY_INNER)
 }
-pub fn palette_overlay_height(buffer: &str, selected_archived: bool, total_height: u16) -> u16 {
+pub(crate) fn palette_overlay_height(buffer: &str, selected_archived: bool, total_height: u16) -> u16 {
     const LIST_RESERVE: u16 = 4;
     let inner = palette_inner_rows(buffer, selected_archived);
     let desired = inner + 2;
     let cap = total_height.saturating_sub(LIST_RESERVE).max(3);
     desired.min(cap).max(3)
 }
-pub fn palette_lines(
+pub(crate) fn palette_lines(
     buffer: &str,
     selected_archived: bool,
     width: u16,
@@ -89,7 +89,7 @@ pub fn palette_lines(
     }
     lines
 }
-pub fn palette_commands(selected_archived: bool) -> Vec<PaletteCommand> {
+pub(crate) fn palette_commands(selected_archived: bool) -> Vec<PaletteCommand> {
     let mut commands = vec![
         PaletteCommand {
             name: "quit",

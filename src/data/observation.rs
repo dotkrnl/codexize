@@ -53,9 +53,8 @@ pub enum LiveSummaryProbe {
 /// Resolve and create the directory `notify` will watch for
 /// `live_summary_path`.
 ///
-/// Returns the watch root on success, or a human-readable reason matching
-/// the prior boundary-error wording when the parent could not be created.
-/// Callers fall back to mtime polling on `Err`.
+/// Returns the watch root on success, or a human-readable reason when the
+/// parent could not be created. Callers switch to mtime polling on `Err`.
 pub fn ensure_live_summary_watch_dir(live_summary_path: &Path) -> Result<PathBuf, String> {
     let watch_path: PathBuf = live_summary_path
         .parent()
@@ -142,8 +141,7 @@ pub fn read_live_summary(path: &Path) -> Option<LiveSummarySnapshot> {
 /// probe lost a race with concurrent writers (or the file vanished between
 /// the two syscalls), the snapshot still carries the readable content with
 /// `mtime` filled in from `SystemTime::now()` so the final Brief is not
-/// silently dropped. Mirrors the pre-move app behavior, which appended the
-/// final summary purely on a successful read.
+/// silently dropped.
 pub fn drain_live_summary_file(path: &Path) -> Option<LiveSummarySnapshot> {
     let content = std::fs::read_to_string(path).ok();
     let mtime = std::fs::metadata(path)

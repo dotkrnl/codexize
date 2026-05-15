@@ -312,10 +312,9 @@ fn indexed_same(left: &IndexedSession, right: &IndexedSession) -> bool {
 mod truncate_idea_parity_tests {
     use super::super::picker_io::truncate_idea;
 
-    // Pins the sidebar projection to the picker's pre-refactor output so
-    // future edits to the shared helper trip a test instead of silently
-    // drifting one of the two surfaces. The constants below mirror the
-    // strings the picker produced before task 6 deduplicated the helper.
+    // Pins the sidebar projection to the shared picker helper so future
+    // edits trip a test instead of silently drifting one of the two
+    // surfaces.
     #[test]
     fn none_falls_back_to_no_idea_yet() {
         assert_eq!(truncate_idea(&None), "(no idea yet)");

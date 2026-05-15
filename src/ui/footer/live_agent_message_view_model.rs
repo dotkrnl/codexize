@@ -53,7 +53,7 @@ pub(super) fn gradient_spans(text: &str, stage: usize) -> Vec<Span<'static>> {
     }
     spans
 }
-pub fn extract_short_title(text: &str) -> String {
+pub(crate) fn extract_short_title(text: &str) -> String {
     if let Some((title, _)) = text.split_once('|') {
         title.trim().to_string()
     } else {

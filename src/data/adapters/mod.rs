@@ -1,5 +1,4 @@
 use crate::data::config::schema::EffortMapping;
-use crate::selection::SubscriptionKind;
 use crate::state::LaunchModes;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -27,21 +26,9 @@ pub struct AgentRun {
     pub effort_mapping: EffortMapping,
     /// Whether the selected `Candidate` is effort-capable. When `false`,
     /// [`launch_effort_suffix`] returns an empty string regardless of
-    /// `effort` — matching the pre-refactor "non-effort vendors get no
-    /// suffix" behavior, but driven by per-tuple data instead of vendor
-    /// pattern-matching.
+    /// `effort`; only the selected candidate's metadata enables suffixes.
     pub effort_eligible: bool,
     pub modes: LaunchModes,
-}
-pub fn all_vendors() -> [SubscriptionKind; 6] {
-    [
-        SubscriptionKind::Codex,
-        SubscriptionKind::Claude,
-        SubscriptionKind::Gemini,
-        SubscriptionKind::Kimi,
-        SubscriptionKind::OpencodeGo,
-        SubscriptionKind::Direct,
-    ]
 }
 pub fn short_model(model: &str) -> String {
     crate::model_names::run_label_name(model)

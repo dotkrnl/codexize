@@ -18,7 +18,7 @@ mod pipeline;
 mod split_view;
 use self::pipeline::PipelineWidget;
 use self::split_view::SplitWidget;
-pub use super::state::sanitize_live_summary;
+pub(crate) use super::state::sanitize_live_summary;
 use super::{
     App, ModalKind,
     chrome::{

@@ -10,17 +10,17 @@ pub(crate) struct MockProbe {
 }
 
 impl MockProbe {
-    pub fn dead() -> Self {
+    pub(crate) fn dead() -> Self {
         Self::default()
     }
-    pub fn live(pid: i32, start: DateTime<Utc>, exec: PathBuf) -> Self {
+    pub(crate) fn live(pid: i32, start: DateTime<Utc>, exec: PathBuf) -> Self {
         let p = Self::default();
         p.alive.lock().unwrap().insert(pid, true);
         p.start_times.lock().unwrap().insert(pid, start);
         p.executables.lock().unwrap().insert(pid, exec);
         p
     }
-    pub fn alive_only(pid: i32) -> Self {
+    pub(crate) fn alive_only(pid: i32) -> Self {
         let p = Self::default();
         p.alive.lock().unwrap().insert(pid, true);
         p

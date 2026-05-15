@@ -21,9 +21,9 @@ pub(super) fn build_managed_acp_launch(
         model: run.model.clone(),
         cli: run.cli,
         launch_name: run.launch_name.clone(),
-        // The current launch sites already pass the codexize-computed effective
-        // effort. Task 2 keeps artifact/finalization ownership in codexize and
-        // defers the requested-vs-effective UI split to the later ACP UX work.
+        // Launch sites pass the codexize-computed effort; ACP receives the
+        // same value for requested/effective until the UI exposes a separate
+        // requested-effort field.
         requested_effort: run.effort,
         effective_effort: run.effort,
         interactive,

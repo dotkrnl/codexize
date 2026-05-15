@@ -585,12 +585,11 @@ impl App {
         cleanup: crate::lifecycle::CleanupPlan,
         clear_pending: bool,
     ) {
-        // 8a removed the in-line lane gate that used to short-circuit the
-        // post-stop rewind apply. The shell scheduler's per-tick lane gate
+        // The shell scheduler's per-tick lane gate
         // (`AppShell::apply_implementation_decision`) is authoritative for
-        // cross-session implementation-lane occupancy; the rewind lands
-        // here and a subsequent scheduler tick returns
-        // `Blocked(ProjectLane)` if another session holds the lane.
+        // cross-session implementation-lane occupancy; this rewind lands
+        // locally, and the scheduler reports `Blocked(ProjectLane)` if
+        // another session holds the lane.
         Self::apply_cleanup_plan(&cleanup);
         self.apply_stage_change(Some(target));
         self.paused_at_stage = None;
@@ -689,12 +688,10 @@ impl App {
     /// rewind target and refresh the lifecycle-stage mirror.
     ///
     /// Rewinds frequently cross the stage-graph's forward-only edges (e.g.
-    /// Implementation(r) → Idea on the skip-to-impl path), so the validated
-    /// [`Self::transition_to_stage`] would silently reject them. The persisted
-    /// `go_back` lived with that — it just discarded the error. 5b uses the
-    /// unchecked [`session_state::set_stage_for_operator_retry`] so the
-    /// rewind actually lands, then triggers the same downstream effects
-    /// `transition_to_stage` would have fired.
+    /// Implementation(r) → Idea on the skip-to-impl path), so this uses
+    /// unchecked [`session_state::set_stage_for_operator_retry`] and then
+    /// triggers the same downstream effects `transition_to_stage` would have
+    /// fired for an allowed forward transition.
     fn apply_stage_change(&mut self, target: Option<crate::lifecycle::Stage>) {
         let Some(target) = target else {
             return;

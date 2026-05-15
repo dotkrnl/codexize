@@ -189,9 +189,8 @@ pub fn run_validate(path: Option<&Path>, out: &mut dyn Write) -> Result<()> {
 }
 
 /// `codexize config edit` — spawn `$EDITOR` (fallback `$VISUAL`, then
-/// `vi`) on the config path and validate on exit. Per the lower-bound
-/// spec contract this is "spawn editor then validate"; the re-edit loop
-/// is deferred. On a non-TTY we just validate without spawning an editor.
+/// `vi`) on the config path and validate on exit. On a non-TTY stdin,
+/// validate the resolved config path without spawning an editor.
 pub fn run_edit(is_tty_stdin: bool, out: &mut dyn Write) -> Result<()> {
     let path = effective_path();
     if !is_tty_stdin {

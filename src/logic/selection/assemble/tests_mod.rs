@@ -481,8 +481,7 @@ fn assemble_warns_only_for_provider_models_missing_from_ipbr() {
     assert!(warnings[0].contains("provider model 'grok-4-latest' is not present in ipbr"));
     assert!(
         !warnings[0].contains("ipbr-only-row"),
-        "unsupported IPBR rows should not warn: {:?}",
-        warnings
+        "unsupported IPBR rows should not warn: {warnings:?}"
     );
 }
 

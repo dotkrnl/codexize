@@ -92,8 +92,7 @@ fn wrap_text_breaks_on_word_boundary_when_possible() {
     // so the wrap point should split at the first space that overflows.
     assert!(
         lines.iter().all(|l| l.chars().count() <= 10),
-        "all wrapped lines must fit width=10: {:?}",
-        lines
+        "all wrapped lines must fit width=10: {lines:?}"
     );
     assert_eq!(lines.len(), 2);
 }
@@ -116,7 +115,6 @@ fn wrap_text_handles_unicode_by_char_count() {
     let lines = wrap_text("héllo wörld", 5);
     assert!(
         lines.iter().all(|l| l.chars().count() <= 5),
-        "lines must not exceed width by char count: {:?}",
-        lines
+        "lines must not exceed width by char count: {lines:?}"
     );
 }

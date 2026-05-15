@@ -28,7 +28,7 @@ fn group_runs_into_round_nodes(runs: &[&RunRecord]) -> Vec<Node> {
         .into_iter()
         .map(|(round_num, round_runs)| {
             node(
-                format!("Round {}", round_num),
+                format!("Round {round_num}"),
                 NodeKind::Round,
                 rollup_status(&round_runs),
                 "",
@@ -281,7 +281,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
                 ));
             }
             round_nodes.push(node(
-                format!("Round {}", round_num),
+                format!("Round {round_num}"),
                 NodeKind::Round,
                 rollup_status(&combined),
                 "",
@@ -314,7 +314,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
             Some(title) if !title.trim().is_empty() => {
                 format!("Task {}: {}", task_id, title.trim())
             }
-            _ => format!("Task {}", task_id),
+            _ => format!("Task {task_id}"),
         };
         let label = if is_tough {
             format!("{base_label} [tough]")
@@ -370,7 +370,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
                 ));
             }
             round_nodes.push(node(
-                format!("Round {}", round_num),
+                format!("Round {round_num}"),
                 NodeKind::Round,
                 rollup_status(&combined),
                 "",

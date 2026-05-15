@@ -197,17 +197,14 @@ impl WatchdogRegistry {
 pub(crate) fn warning_text(idle_minutes: u64, remaining_minutes: u64, prompt_body: &str) -> String {
     format!(
         "\u{26a0} Liveness warning from codexize watchdog \u{26a0}\n\n\
-You have not updated `live_summary.txt` in {idle} minutes. \
-You will be killed and the run will be retried automatically if you go another {remaining} minutes without writing a summary. \
+You have not updated `live_summary.txt` in {idle_minutes} minutes. \
+You will be killed and the run will be retried automatically if you go another {remaining_minutes} minutes without writing a summary. \
 This is your only warning.\n\n\
 The original prompt is repeated below verbatim so you can resume from it. Continue the task; \
 do not acknowledge this warning beyond updating the live summary file.\n\n\
 \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} ORIGINAL PROMPT \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n\
-{body}\n\
+{prompt_body}\n\
 \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} END ORIGINAL PROMPT \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n",
-        idle = idle_minutes,
-        remaining = remaining_minutes,
-        body = prompt_body,
     )
 }
 /// Placeholder used when `run.prompt_path` cannot be read. The warning still

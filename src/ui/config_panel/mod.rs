@@ -2313,7 +2313,7 @@ fn render_exit_prompt_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Bu
         spans.push(focus_span(focused));
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
-            format!("[{}]", key),
+            format!("[{key}]"),
             Style::default()
                 .fg(COLOR_FOCUS)
                 .add_modifier(Modifier::BOLD),
@@ -2329,7 +2329,7 @@ fn render_exit_prompt_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Bu
         spans.push(Span::styled(label.to_string(), label_style));
         if focused {
             spans.push(Span::styled(
-                format!("  · {}", hint),
+                format!("  · {hint}"),
                 Style::default().fg(COLOR_DIM),
             ));
         }
@@ -2678,7 +2678,7 @@ fn section_header_line(state: &ConfigPanelState, width: usize) -> Line<'static> 
     };
 
     spans.push(Span::styled(
-        format!(" {} ", icon),
+        format!(" {icon} "),
         Style::default().fg(COLOR_SECTION_TITLE),
     ));
     spans.push(Span::styled(
@@ -3477,7 +3477,7 @@ fn providers_body_lines(
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut budget = inner_h;
     if needs_top_indicator(scroll) {
-        out.push(Line::from(dim(format!("  ↑ {} more above", scroll))));
+        out.push(Line::from(dim(format!("  ↑ {scroll} more above"))));
         budget = budget.saturating_sub(1);
     }
     let bottom_reserved = if scroll + budget < total { 1 } else { 0 };

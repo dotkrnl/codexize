@@ -36,8 +36,7 @@ impl App {
         let recovery_cycle_count = session_state::increment_recovery_cycle_count(&mut self.state);
         let effective_trigger = if recovery_cycle_count >= 3 && trigger != "human_blocked" {
             let loop_msg = format!(
-                "recovery loop: {} consecutive recovery cycles without approval — escalating to human_blocked",
-                recovery_cycle_count
+                "recovery loop: {recovery_cycle_count} consecutive recovery cycles without approval — escalating to human_blocked"
             );
             let _ = self.state.log_event(loop_msg.clone());
             let msg = Message {

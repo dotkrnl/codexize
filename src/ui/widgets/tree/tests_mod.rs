@@ -1406,9 +1406,7 @@ fn simplification_precedes_final_validation_in_tree_order() {
         .expect("final validation stage missing");
     assert!(
         simpl_index < final_index,
-        "Simplification must appear before Final Validation in the tree, got simpl={} final={}",
-        simpl_index,
-        final_index
+        "Simplification must appear before Final Validation in the tree, got simpl={simpl_index} final={final_index}"
     );
 }
 

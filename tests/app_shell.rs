@@ -427,7 +427,7 @@ fn sidebar_shows_every_non_archived_non_cancelled_stage() {
         ];
 
         for (i, stage) in stages.iter().enumerate() {
-            let id = format!("20260511-{:02}0000-000000001", i);
+            let id = format!("20260511-{i:02}0000-000000001");
             save_session(&id, *stage);
         }
 

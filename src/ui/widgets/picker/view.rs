@@ -117,7 +117,7 @@ impl SessionPicker {
                 Span::raw(leading),
                 Span::styled(prefix, Style::default().fg(color)),
                 Span::raw(" "),
-                Span::styled(format!("{:<12}", badge), Style::default().fg(color)),
+                Span::styled(format!("{badge:<12}"), Style::default().fg(color)),
             ];
             for label in mode_badge_labels(entry.modes) {
                 let style = match label {
@@ -132,7 +132,7 @@ impl SessionPicker {
             }
             spans.extend([
                 Span::raw("  "),
-                Span::styled(format!("{:<8}", time), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{time:<8}"), Style::default().fg(Color::DarkGray)),
                 Span::raw("  "),
                 Span::raw(entry.idea_summary.clone()),
             ]);
@@ -425,7 +425,7 @@ impl SessionPicker {
         }
         content.push(Line::from(""));
         content.push(Line::from(Span::styled(
-            format!("\"{}\"", entry),
+            format!("\"{entry}\""),
             Style::default().fg(Color::Gray),
         )));
         content.push(Line::from(""));

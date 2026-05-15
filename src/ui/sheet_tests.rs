@@ -1,7 +1,7 @@
 use super::*;
 
 fn content_line(n: usize) -> Line<'static> {
-    Line::from(format!("Content line {}", n))
+    Line::from(format!("Content line {n}"))
 }
 
 fn controls() -> Line<'static> {

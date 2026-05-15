@@ -143,8 +143,7 @@ fn finish_stamp_atomic_write_no_partial_file_on_failure() {
     let entries: Vec<_> = fs::read_dir(&ro_dir).unwrap().flatten().collect();
     assert!(
         entries.is_empty(),
-        "expected no partial files, got {:?}",
-        entries
+        "expected no partial files, got {entries:?}"
     );
 
     // Restore permissions so the temp dir can be cleaned up.
@@ -864,7 +863,7 @@ fn run_child_with_timeout_propagates_spawn_failure() {
     let launch = ChildLaunch::new("/this/program/definitely/does/not/exist-xyz");
     let err = run_child_with_timeout(&launch, Duration::from_millis(100))
         .expect_err("spawning a missing binary must error before any timeout work");
-    let msg = format!("{:#}", err);
+    let msg = format!("{err:#}");
     assert!(
         msg.contains("failed to spawn"),
         "spawn error context: {msg}"
@@ -978,7 +977,7 @@ fn launch_interactive_bails_when_acp_cli_is_missing() {
         || {
             let result = launch_interactive("[Coder]", &run, "run-1", &artifacts_dir, None);
             let err = result.expect_err("missing CLI must bail before launch");
-            let msg = format!("{:#}", err);
+            let msg = format!("{err:#}");
             assert!(
                 msg.contains("agent CLI not found"),
                 "unexpected error: {msg}"
@@ -1003,7 +1002,7 @@ fn launch_noninteractive_bails_when_acp_cli_is_missing() {
         || {
             let result = launch_noninteractive("[Coder]", &run, "run-2", &artifacts_dir, None);
             let err = result.expect_err("missing CLI must bail before launch");
-            let msg = format!("{:#}", err);
+            let msg = format!("{err:#}");
             assert!(
                 msg.contains("agent CLI not found"),
                 "unexpected error: {msg}"

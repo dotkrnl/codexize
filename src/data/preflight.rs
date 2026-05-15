@@ -166,7 +166,7 @@ pub fn run_git_init() -> Result<()> {
         .status()
         .context("failed to run git init")?;
     if !status.success() {
-        anyhow::bail!("git init failed with status {}", status);
+        anyhow::bail!("git init failed with status {status}");
     }
     Ok(())
 }
@@ -186,7 +186,7 @@ pub fn install_claude_acp(install_root: &Path) -> Result<()> {
         .status()
         .context("failed to run npm install for Claude ACP")?;
     if !status.success() {
-        anyhow::bail!("Claude ACP install failed with status {}", status);
+        anyhow::bail!("Claude ACP install failed with status {status}");
     }
     Ok(())
 }
@@ -199,7 +199,7 @@ pub fn install_codex_acp() -> Result<()> {
         .status()
         .context("failed to run brew install codex-acp")?;
     if !status.success() {
-        anyhow::bail!("Codex ACP install failed with status {}", status);
+        anyhow::bail!("Codex ACP install failed with status {status}");
     }
     Ok(())
 }

@@ -42,8 +42,8 @@ pub(crate) fn format_historical_message(
     };
     let capitalized_body = capitalize_first(body);
     Line::from(vec![
-        Span::styled(format!("{} ", timestamp), Style::default().fg(symbol_color)),
-        Span::styled(format!("{} ", symbol), Style::default().fg(symbol_color)),
+        Span::styled(format!("{timestamp} "), Style::default().fg(symbol_color)),
+        Span::styled(format!("{symbol} "), Style::default().fg(symbol_color)),
         Span::styled(capitalized_body, body_style),
     ])
 }
@@ -148,11 +148,11 @@ pub(crate) fn format_running_transcript_leaf<C: Clock>(
     let body = capitalize_first(&fetcher.fetch());
     let mut spans = vec![
         Span::styled(
-            format!("{} ", timestamp),
+            format!("{timestamp} "),
             Style::default().fg(RUNNING_COLOR),
         ),
         Span::styled(
-            format!("{} ", spinner),
+            format!("{spinner} "),
             Style::default()
                 .fg(RUNNING_COLOR)
                 .add_modifier(Modifier::BOLD),
@@ -175,7 +175,7 @@ pub(crate) fn format_stalled_transcript_leaf<C: Clock>(
     let body = capitalize_first(&fetcher.fetch());
     Line::from(vec![
         Span::styled(
-            format!("{} ", timestamp),
+            format!("{timestamp} "),
             Style::default().fg(Color::Yellow),
         ),
         Span::styled(

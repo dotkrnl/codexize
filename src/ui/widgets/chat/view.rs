@@ -364,7 +364,7 @@ fn render_messages(
         let prefix_width = ts_w + 3; // " ○ "
         let ts_sym_prefix = || -> Vec<Span<'static>> {
             vec![
-                Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
+                Span::styled(format!("{ts_str} "), Style::default().fg(sym.color)),
                 Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
             ]
         };

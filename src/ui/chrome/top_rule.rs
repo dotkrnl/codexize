@@ -152,7 +152,7 @@ fn truncate_with_ellipsis(text: &str, max_len: usize) -> String {
     }
     // Take max_len - 1 chars and add ellipsis
     let truncated: String = text.chars().take(max_len - 1).collect();
-    format!("{}…", truncated)
+    format!("{truncated}…")
 }
 #[cfg(test)]
 #[path = "top_rule_tests.rs"]

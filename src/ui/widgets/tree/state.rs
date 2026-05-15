@@ -663,7 +663,7 @@ fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String
     if done == total {
         return "all tasks complete".to_string();
     }
-    format!("{} of {} tasks done", done, total)
+    format!("{done} of {total} tasks done")
 }
 /// Collapse single-child layers selectively.
 /// Only Round and AgentRun nodes may be absorbed by their parent.

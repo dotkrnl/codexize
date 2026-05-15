@@ -42,7 +42,7 @@ fn sanitize_live_summary_collapses_and_truncates() {
 #[test]
 fn skip_to_impl_content_uses_no_rationale_fallback() {
     let lines = skip_to_impl_content(None, None, 80);
-    assert!(format!("{:?}", lines).contains("(no rationale provided)"));
+    assert!(format!("{lines:?}").contains("(no rationale provided)"));
 }
 
 #[test]
@@ -58,14 +58,14 @@ fn guard_content_shortens_heads() {
         warnings: Vec::new(),
     };
     let lines = guard_content(Some(&decision));
-    assert!(format!("{:?}", lines).contains("abcdef1"));
-    assert!(format!("{:?}", lines).contains("9876543"));
+    assert!(format!("{lines:?}").contains("abcdef1"));
+    assert!(format!("{lines:?}").contains("9876543"));
 }
 
 #[test]
 fn stage_error_content_uses_default_error_details() {
     let lines = stage_error_content(StageId::Brainstorm, None, 80);
-    assert!(format!("{:?}", lines).contains("(no error details)"));
+    assert!(format!("{lines:?}").contains("(no error details)"));
 }
 
 fn lines_text(lines: &[Line<'_>]) -> String {

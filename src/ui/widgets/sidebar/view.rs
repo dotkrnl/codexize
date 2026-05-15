@@ -98,7 +98,7 @@ fn row_line(
         ' '
     };
     let running_indicator = if row.running { '▶' } else { ' ' };
-    let indicators = format!("{}{}", focused_indicator, running_indicator);
+    let indicators = format!("{focused_indicator}{running_indicator}");
     spans.push(Span::styled(indicators, Style::default().fg(Color::Cyan)));
 
     // Date + title (truncate to fit)
@@ -106,7 +106,7 @@ fn row_line(
     let label_budget = width.saturating_sub(5).max(4) as usize;
     let label_text = if label.chars().count() > label_budget {
         let truncated: String = label.chars().take(label_budget.saturating_sub(1)).collect();
-        format!("{}…", truncated)
+        format!("{truncated}…")
     } else {
         label
     };

@@ -419,11 +419,11 @@ impl App {
             } else {
                 extract_short_title(&self.live_summary_cached_text)
             };
-            return format!("{} · {}", agent, summary);
+            return format!("{agent} · {summary}");
         }
         let label = self.state.current_stage.label();
         let state_label = self.stage_state_label();
-        format!("{} · {}", label, state_label)
+        format!("{label} · {state_label}")
     }
     fn stage_state_label(&self) -> &'static str {
         if self.state.agent_error.is_some() {

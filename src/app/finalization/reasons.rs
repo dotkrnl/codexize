@@ -34,7 +34,7 @@ impl App {
             .replace("{round}", &round.to_string())
     }
     fn round_dir(session_dir: &std::path::Path, round: u32) -> std::path::PathBuf {
-        session_dir.join("rounds").join(format!("{:03}", round))
+        session_dir.join("rounds").join(format!("{round:03}"))
     }
     fn invalid_artifact(err: impl std::fmt::Display) -> String {
         Reason::ArtifactInvalid(err.to_string()).to_string()

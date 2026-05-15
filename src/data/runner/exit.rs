@@ -172,9 +172,7 @@ pub(super) fn enforce_readonly_workspace_policy(
     let git_status_after = git_status_porcelain()?;
     if git_status_after != git_status_before {
         bail!(
-            "ACP launch violated read-only workspace policy: git status changed from {:?} to {:?}",
-            git_status_before,
-            git_status_after
+            "ACP launch violated read-only workspace policy: git status changed from {git_status_before:?} to {git_status_after:?}"
         );
     }
     Ok(())

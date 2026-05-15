@@ -221,14 +221,14 @@ fn render_full_table(
                     QuotaColumn::Expanded => {
                         let displayed = display_quota_percent(v);
                         (
-                            format!("Quota {:>2}%", displayed),
+                            format!("Quota {displayed:>2}%"),
                             probability_color(displayed, 100),
                         )
                     }
                     QuotaColumn::Narrow => {
                         let displayed = display_quota_percent(v);
                         (
-                            format!("{:>3}%", displayed),
+                            format!("{displayed:>3}%"),
                             probability_color(displayed, 100),
                         )
                     }

@@ -355,7 +355,7 @@ mod tests {
                 .iter()
                 .filter(|p| *p == target)
                 .count();
-            assert_eq!(occurrences, 1, "{:?} must not be duplicated", target);
+            assert_eq!(occurrences, 1, "{target:?} must not be duplicated");
         }
     }
 }

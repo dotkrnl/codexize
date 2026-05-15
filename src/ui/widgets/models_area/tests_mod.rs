@@ -1388,7 +1388,7 @@ fn compact_quota_renders_expanded_quota_when_space_permits() {
         ModelsAreaMode::CompactQuota,
     );
     let row = full_buffer_line(&lines, 0, 120);
-    println!("ROW 2: {:?}", row);
+    println!("ROW 2: {row:?}");
 
     assert!(row.contains("Remaining Quota: claude 100%"));
 }
@@ -1410,7 +1410,7 @@ fn compact_quota_renders_narrow_quota_when_tight() {
         ModelsAreaMode::CompactQuota,
     );
     let row = full_buffer_line(&lines, 0, 50);
-    println!("ROW: {:?}", row);
+    println!("ROW: {row:?}");
 
     assert!(!row.contains("Quota"));
     assert!(row.contains("100"));

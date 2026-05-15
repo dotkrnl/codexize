@@ -165,8 +165,7 @@ pub fn validate_manifest(
         for superseded in &entry.supersedes {
             if !ids.contains(superseded.as_str()) {
                 bail!(
-                    "entries[{i}]: unknown supersession reference {}",
-                    superseded
+                    "entries[{i}]: unknown supersession reference {superseded}"
                 );
             }
         }

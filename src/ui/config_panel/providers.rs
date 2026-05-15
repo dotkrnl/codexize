@@ -383,7 +383,7 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
             Line::from(vec![
                 focus_glyph,
                 Span::styled(
-                    format!("{} ", chevron),
+                    format!("{chevron} "),
                     Style::default().fg(COLOR_DIM).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(vendor.clone(), vendor_style),

@@ -286,7 +286,7 @@ pub async fn run_child_with_timeout_async(
     }
     let mut child = command
         .spawn()
-        .with_context(|| format!("failed to spawn: {:?}", launch))?;
+        .with_context(|| format!("failed to spawn: {launch:?}"))?;
     match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(status)) => Ok(Some(status)),
         // A `wait()` failure here (e.g. the child was reaped elsewhere) is

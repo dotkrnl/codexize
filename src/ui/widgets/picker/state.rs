@@ -569,7 +569,7 @@ pub(super) fn format_relative_time(time: SystemTime, now: SystemTime) -> String 
     let duration = now.duration_since(time).unwrap_or_default();
     let secs = duration.as_secs();
     if secs < 60 {
-        format!("{}s ago", secs)
+        format!("{secs}s ago")
     } else if secs < 3600 {
         format!("{}m ago", secs / 60)
     } else if secs < 86400 {
@@ -590,8 +590,8 @@ pub(super) fn stage_badge(stage: Stage) -> (String, Color, &'static str) {
         Stage::WaitingToImplement => ("waiting".to_string(), Color::Yellow, "○"),
         Stage::RepoStateUpdateRunning => ("updating plan".to_string(), Color::Cyan, "●"),
         Stage::ShardingRunning => ("sharding".to_string(), Color::Cyan, "●"),
-        Stage::ImplementationRound(n) => (format!("coding r{}", n), Color::Cyan, "●"),
-        Stage::ReviewRound(n) => (format!("review r{}", n), Color::Cyan, "●"),
+        Stage::ImplementationRound(n) => (format!("coding r{n}"), Color::Cyan, "●"),
+        Stage::ReviewRound(n) => (format!("review r{n}"), Color::Cyan, "●"),
         Stage::BuilderRecovery(_) => ("builder recovery".to_string(), Color::Cyan, "●"),
         Stage::BuilderRecoveryPlanReview(_) => {
             ("recovery plan review".to_string(), Color::Cyan, "●")
@@ -602,10 +602,10 @@ pub(super) fn stage_badge(stage: Stage) -> (String, Color, &'static str) {
         Stage::Cancelled => ("cancelled".to_string(), Color::DarkGray, "✗"),
         Stage::SkipToImplPending => ("skip confirm".to_string(), Color::Yellow, "!"),
         Stage::GitGuardPending => ("guard decision".to_string(), Color::Yellow, "!"),
-        Stage::FinalValidation(n) => (format!("final validation r{}", n), Color::Cyan, "●"),
+        Stage::FinalValidation(n) => (format!("final validation r{n}"), Color::Cyan, "●"),
         Stage::DreamingPending => ("dreaming decision".to_string(), Color::Yellow, "!"),
-        Stage::Dreaming(n) => (format!("dreaming r{}", n), Color::Cyan, "●"),
-        Stage::Simplification(n) => (format!("simplification r{}", n), Color::Cyan, "●"),
+        Stage::Dreaming(n) => (format!("dreaming r{n}"), Color::Cyan, "●"),
+        Stage::Simplification(n) => (format!("simplification r{n}"), Color::Cyan, "●"),
     }
 }
 pub(super) fn mode_badge_labels(modes: Modes) -> Vec<&'static str> {

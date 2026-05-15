@@ -323,8 +323,7 @@ fn frozen_clock_difference_exactly_in_seconds_field() {
     for pos in &diff_positions {
         assert!(
             *pos < 8,
-            "difference at position {} should be in timestamp field (first 8 chars: HH:MM:SS)",
-            pos
+            "difference at position {pos} should be in timestamp field (first 8 chars: HH:MM:SS)"
         );
     }
 }

@@ -344,7 +344,7 @@ mod tests {
             Stage::PlanReviewRunning,
             Stage::PlanReviewPaused,
         ] {
-            assert_eq!(stage_lane(stage), StageLane::Planning, "stage: {:?}", stage);
+            assert_eq!(stage_lane(stage), StageLane::Planning, "stage: {stage:?}");
         }
         // Implementation lane: explicit list from spec § Queue scheduler.
         for stage in [
@@ -363,8 +363,7 @@ mod tests {
             assert_eq!(
                 stage_lane(stage),
                 StageLane::Implementation,
-                "stage: {:?}",
-                stage
+                "stage: {stage:?}"
             );
         }
         // Not-eligible: terminal, operator-blocking, idle-head stages.
@@ -377,7 +376,7 @@ mod tests {
             Stage::Cancelled,
             Stage::BlockedNeedsUser,
         ] {
-            assert_eq!(stage_lane(stage), StageLane::Other, "stage: {:?}", stage);
+            assert_eq!(stage_lane(stage), StageLane::Other, "stage: {stage:?}");
         }
     }
 

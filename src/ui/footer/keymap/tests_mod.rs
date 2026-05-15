@@ -248,7 +248,7 @@ fn disabled_binding_uses_single_dim_color() {
         .spans
         .iter()
         .filter_map(|s| match s.style.fg {
-            Some(c) if c == DISABLED_DIM => Some(format!("{:?}", c)),
+            Some(c) if c == DISABLED_DIM => Some(format!("{c:?}")),
             _ => None,
         })
         .collect();

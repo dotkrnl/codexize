@@ -59,15 +59,13 @@ impl SpecPlanDefect {
 pub(crate) fn validate_spec_plan_ref(label: &str, target: &str, r: &Ref) -> Result<()> {
     if !matches!(target, "spec" | "plan" | "tasks") {
         bail!(
-            "{label}: target must be one of \"spec\", \"plan\", \"tasks\" (got {:?})",
-            target
+            "{label}: target must be one of \"spec\", \"plan\", \"tasks\" (got {target:?})"
         );
     }
     match r.path.as_str() {
         "artifacts/spec.md" | "artifacts/plan.md" | "artifacts/tasks.toml" => {}
         other => bail!(
-            "{label}: ref.path must be one of \"artifacts/spec.md\", \"artifacts/plan.md\", \"artifacts/tasks.toml\" (got {:?})",
-            other
+            "{label}: ref.path must be one of \"artifacts/spec.md\", \"artifacts/plan.md\", \"artifacts/tasks.toml\" (got {other:?})"
         ),
     }
     let lines = r.lines.trim();

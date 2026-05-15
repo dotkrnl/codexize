@@ -6,5 +6,3 @@
 //! Cargo treats `tests/integration/` as a single test binary because of
 //! `main.rs`; per-feature integration tests can be added as siblings and
 //! `mod`'d in below.
-
-mod config;

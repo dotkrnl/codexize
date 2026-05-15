@@ -465,3 +465,20 @@ fn chat_lines_allows_scrolling_to_bottom_with_indicators() {
         "bottom view should include the last message"
     );
 }
+
+#[test]
+fn chat_lines_windowing_renders_only_visible_messages() {
+    let mut rendered = Vec::new();
+    let line_counts = vec![1; 12];
+
+    let lines = chat_lines_windowed(&line_counts, None, 5, 4, |message_index| {
+        rendered.push(message_index);
+        vec![Line::from(format!("message {message_index}"))]
+    });
+
+    assert_eq!(rendered, vec![5, 6]);
+    assert_eq!(line_text(&lines[0]), "  ↑ 5 more above");
+    assert_eq!(line_text(&lines[1]), "message 5");
+    assert_eq!(line_text(&lines[2]), "message 6");
+    assert_eq!(line_text(&lines[3]), "  ↓ 5 more below");
+}

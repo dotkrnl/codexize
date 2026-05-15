@@ -11,6 +11,60 @@ use ratatui::{
     text::{Line, Span},
     widgets::Widget,
 };
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
+const MESSAGE_RENDER_CACHE_LIMIT: usize = 20_000;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct RenderedMessageKey {
+    kind: u8,
+    run_status: u8,
+    ts_seconds: i64,
+    ts_nanos: u32,
+    text_ptr: usize,
+    text_len: usize,
+    available_width: usize,
+    local_offset_seconds: i32,
+    today_days_from_ce: i32,
+    leading_blank: bool,
+    animate_started: bool,
+    spinner_tick: usize,
+}
+
+thread_local! {
+    static MESSAGE_RENDER_CACHE: RefCell<HashMap<RenderedMessageKey, Rc<Vec<Line<'static>>>>> =
+        RefCell::new(HashMap::new());
+}
+
+fn message_kind_key(kind: MessageKind) -> u8 {
+    match kind {
+        MessageKind::Started => 0,
+        MessageKind::Brief => 1,
+        MessageKind::UserInput => 2,
+        MessageKind::AgentText => 3,
+        MessageKind::AgentThought => 4,
+        MessageKind::Summary => 5,
+        MessageKind::SummaryWarn => 6,
+        MessageKind::End => 7,
+    }
+}
+
+fn run_status_key(status: RunStatus) -> u8 {
+    match status {
+        RunStatus::Running => 0,
+        RunStatus::Done => 1,
+        RunStatus::Failed => 2,
+        RunStatus::FailedUnverified => 3,
+    }
+}
+
+fn line_is_blank(line: &Line<'static>) -> bool {
+    line.spans.iter().all(|span| span.content.is_empty())
+}
+
+fn message_ends_blank(lines: &[Line<'static>]) -> bool {
+    lines.last().is_some_and(line_is_blank)
+}
 pub struct ChatWidget<'a> {
     messages: &'a [Message],
     run: &'a RunRecord,
@@ -358,103 +412,221 @@ fn render_messages(
     let today_local = now_local.date_naive();
     let mut lines: Vec<Line<'static>> = Vec::new();
     for msg in messages {
-        let ts_str = format_timestamp(&msg.ts, local_offset, today_local);
-        let ts_w = ts_str.chars().count();
-        let sym = message_symbol(msg.kind, run.status, animate_started, spinner_tick);
-        let prefix_width = ts_w + 3; // " ○ "
-        let ts_sym_prefix = || -> Vec<Span<'static>> {
-            vec![
-                Span::styled(format!("{ts_str} "), Style::default().fg(sym.color)),
-                Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
-            ]
-        };
-        let indent_prefix = || -> Vec<Span<'static>> { vec![Span::raw(" ".repeat(prefix_width))] };
-        if msg.kind == MessageKind::Brief {
-            let (title, details) = match msg.text.split_once('|') {
-                Some((t, d)) => (t.trim().to_string(), d.trim().to_string()),
-                None => (msg.text.trim().to_string(), String::new()),
-            };
-            lines.extend(wrap_lines_with_prefix(
-                ts_sym_prefix(),
-                prefix_width,
-                &title,
-                Style::default().add_modifier(Modifier::BOLD),
-                available_width,
-            ));
-            if !details.is_empty() {
-                lines.extend(wrap_lines_with_prefix(
-                    indent_prefix(),
-                    prefix_width,
-                    &details,
-                    Style::default().fg(Color::White),
-                    available_width,
-                ));
-            }
-            continue;
-        }
-        if msg.kind == MessageKind::UserInput {
-            lines.extend(wrap_lines_with_prefix(
-                ts_sym_prefix(),
-                prefix_width,
-                &msg.text,
-                Style::default().fg(Color::Magenta),
-                available_width,
-            ));
-            push_blank_line_if_needed(&mut lines);
-            continue;
-        }
-        let hints = kind_to_hints(msg.kind, run.status);
-        let body_style = body_style_from_hints(hints);
-        let renders_markdown =
-            matches!(msg.kind, MessageKind::AgentText | MessageKind::AgentThought);
-        if !renders_markdown {
-            // Plain (non-markdown) historical messages route through the
-            // shared wrap helper so prefix/wrap behavior matches every
-            // other transcript surface. Capitalize the first character to
-            // preserve `format_historical_message`'s look.
-            let capitalized = capitalize_first(&msg.text);
-            lines.extend(wrap_lines_with_prefix(
-                ts_sym_prefix(),
-                prefix_width,
-                &capitalized,
-                body_style,
-                available_width,
-            ));
-            continue;
-        }
-        // Markdown-aware path keeps its own renderer because each rendered
-        // line carries multiple styled spans (code blocks, emphasis,
-        // inline code) that the single-style wrap helper cannot reproduce.
-        let content_width = available_width.saturating_sub(prefix_width).max(1);
-        let indent = " ".repeat(prefix_width);
-        let markdown_style = if hints.is_dim {
-            Style::default().fg(Color::DarkGray)
-        } else {
-            Style::default().fg(Color::White)
-        };
-        push_blank_line_if_needed(&mut lines);
-        let markdown_lines = render_agent_markdown(&msg.text, content_width, markdown_style);
-        if let Some((first, rest)) = markdown_lines.split_first() {
-            let mut first_spans = ts_sym_prefix();
-            if msg.kind == MessageKind::AgentThought {
-                first_spans.extend(capitalize_first_span(first));
-            } else {
-                first_spans.extend(first.iter().cloned());
-            }
-            lines.push(Line::from(first_spans));
-            for chunk in rest {
-                let mut spans = vec![Span::raw(indent.clone())];
-                spans.extend(chunk.iter().cloned());
-                lines.push(Line::from(spans));
-            }
-        } else {
-            lines.push(format_historical_message(
-                &ts_str, sym.symbol, "", sym.color, hints,
-            ));
-        }
-        push_blank_line_if_needed(&mut lines);
+        let leading_blank = matches!(msg.kind, MessageKind::AgentText | MessageKind::AgentThought)
+            && lines.last().is_some_and(|line| !line_is_blank(line));
+        lines.extend(render_single_message(
+            msg,
+            run,
+            local_offset,
+            today_local,
+            available_width,
+            spinner_tick,
+            animate_started,
+            leading_blank,
+        ));
     }
     lines
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_single_message(
+    msg: &Message,
+    run: &RunRecord,
+    local_offset: &FixedOffset,
+    today_local: chrono::NaiveDate,
+    available_width: usize,
+    spinner_tick: usize,
+    animate_started: bool,
+    leading_blank: bool,
+) -> Vec<Line<'static>> {
+    let ts_str = format_timestamp(&msg.ts, local_offset, today_local);
+    let ts_w = ts_str.chars().count();
+    let sym = message_symbol(msg.kind, run.status, animate_started, spinner_tick);
+    let prefix_width = ts_w + 3; // " ○ "
+    let ts_sym_prefix = || -> Vec<Span<'static>> {
+        vec![
+            Span::styled(format!("{ts_str} "), Style::default().fg(sym.color)),
+            Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
+        ]
+    };
+    let indent_prefix = || -> Vec<Span<'static>> { vec![Span::raw(" ".repeat(prefix_width))] };
+    let mut lines = Vec::new();
+    if msg.kind == MessageKind::Brief {
+        let (title, details) = match msg.text.split_once('|') {
+            Some((t, d)) => (t.trim().to_string(), d.trim().to_string()),
+            None => (msg.text.trim().to_string(), String::new()),
+        };
+        lines.extend(wrap_lines_with_prefix(
+            ts_sym_prefix(),
+            prefix_width,
+            &title,
+            Style::default().add_modifier(Modifier::BOLD),
+            available_width,
+        ));
+        if !details.is_empty() {
+            lines.extend(wrap_lines_with_prefix(
+                indent_prefix(),
+                prefix_width,
+                &details,
+                Style::default().fg(Color::White),
+                available_width,
+            ));
+        }
+        return lines;
+    }
+    if msg.kind == MessageKind::UserInput {
+        lines.extend(wrap_lines_with_prefix(
+            ts_sym_prefix(),
+            prefix_width,
+            &msg.text,
+            Style::default().fg(Color::Magenta),
+            available_width,
+        ));
+        push_blank_line_if_needed(&mut lines);
+        return lines;
+    }
+    let hints = kind_to_hints(msg.kind, run.status);
+    let body_style = body_style_from_hints(hints);
+    let renders_markdown = matches!(msg.kind, MessageKind::AgentText | MessageKind::AgentThought);
+    if !renders_markdown {
+        // Plain (non-markdown) historical messages route through the
+        // shared wrap helper so prefix/wrap behavior matches every
+        // other transcript surface. Capitalize the first character to
+        // preserve `format_historical_message`'s look.
+        let capitalized = capitalize_first(&msg.text);
+        lines.extend(wrap_lines_with_prefix(
+            ts_sym_prefix(),
+            prefix_width,
+            &capitalized,
+            body_style,
+            available_width,
+        ));
+        return lines;
+    }
+    // Markdown-aware path keeps its own renderer because each rendered
+    // line carries multiple styled spans (code blocks, emphasis,
+    // inline code) that the single-style wrap helper cannot reproduce.
+    let content_width = available_width.saturating_sub(prefix_width).max(1);
+    let indent = " ".repeat(prefix_width);
+    let markdown_style = if hints.is_dim {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::White)
+    };
+    if leading_blank {
+        lines.push(Line::from(Vec::<Span<'static>>::new()));
+    }
+    let markdown_lines = render_agent_markdown(&msg.text, content_width, markdown_style);
+    if let Some((first, rest)) = markdown_lines.split_first() {
+        let mut first_spans = ts_sym_prefix();
+        if msg.kind == MessageKind::AgentThought {
+            first_spans.extend(capitalize_first_span(first));
+        } else {
+            first_spans.extend(first.iter().cloned());
+        }
+        lines.push(Line::from(first_spans));
+        for chunk in rest {
+            let mut spans = vec![Span::raw(indent.clone())];
+            spans.extend(chunk.iter().cloned());
+            lines.push(Line::from(spans));
+        }
+    } else {
+        lines.push(format_historical_message(
+            &ts_str, sym.symbol, "", sym.color, hints,
+        ));
+    }
+    push_blank_line_if_needed(&mut lines);
+    lines
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cached_message_lines(
+    msg: &Message,
+    run: &RunRecord,
+    local_offset: &FixedOffset,
+    today_local: chrono::NaiveDate,
+    available_width: usize,
+    spinner_tick: usize,
+    animate_started: bool,
+    leading_blank: bool,
+) -> Rc<Vec<Line<'static>>> {
+    let effective_spinner_tick = if animate_started
+        && run.status == RunStatus::Running
+        && msg.kind == MessageKind::Started
+    {
+        spinner_tick
+    } else {
+        0
+    };
+    let key = RenderedMessageKey {
+        kind: message_kind_key(msg.kind),
+        run_status: run_status_key(run.status),
+        ts_seconds: msg.ts.timestamp(),
+        ts_nanos: msg.ts.timestamp_subsec_nanos(),
+        text_ptr: msg.text.as_ptr() as usize,
+        text_len: msg.text.len(),
+        available_width,
+        local_offset_seconds: local_offset.local_minus_utc(),
+        today_days_from_ce: today_local.num_days_from_ce(),
+        leading_blank,
+        animate_started,
+        spinner_tick: effective_spinner_tick,
+    };
+    if let Some(lines) = MESSAGE_RENDER_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
+        return lines;
+    }
+    let lines = Rc::new(render_single_message(
+        msg,
+        run,
+        local_offset,
+        today_local,
+        available_width,
+        spinner_tick,
+        animate_started,
+        leading_blank,
+    ));
+    MESSAGE_RENDER_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= MESSAGE_RENDER_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, Rc::clone(&lines));
+    });
+    lines
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cached_message_layouts(
+    messages: &[Message],
+    run: &RunRecord,
+    local_offset: &FixedOffset,
+    today_local: chrono::NaiveDate,
+    available_width: usize,
+    spinner_tick: usize,
+    animate_started: bool,
+) -> Vec<(usize, bool)> {
+    let mut previous_ends_blank = true;
+    messages
+        .iter()
+        .map(|message| {
+            let leading_blank = matches!(
+                message.kind,
+                MessageKind::AgentText | MessageKind::AgentThought
+            ) && !previous_ends_blank;
+            let lines = cached_message_lines(
+                message,
+                run,
+                local_offset,
+                today_local,
+                available_width,
+                spinner_tick,
+                animate_started,
+                leading_blank,
+            );
+            previous_ends_blank = message_ends_blank(&lines);
+            (lines.len(), leading_blank)
+        })
+        .collect()
 }
 fn body_style_from_hints(hints: HistoricalStyleHints) -> Style {
     let color = if hints.is_error {
@@ -505,16 +677,49 @@ pub fn chat_lines(
     spinner_tick: usize,
     animate_started: bool,
 ) -> Vec<Line<'static>> {
-    let all_lines = message_lines(
+    let now_local = local_offset.from_utc_datetime(&Utc::now().naive_utc());
+    let today_local = now_local.date_naive();
+    let layouts = cached_message_layouts(
         messages,
         run,
         local_offset,
-        running_tail,
+        today_local,
         available_width,
         spinner_tick,
         animate_started,
     );
-    let total = all_lines.len();
+    let line_counts: Vec<_> = layouts.iter().map(|(line_count, _)| *line_count).collect();
+    chat_lines_windowed(
+        &line_counts,
+        running_tail,
+        scroll_offset,
+        available_height,
+        |message_index| {
+            let (_, leading_blank) = layouts[message_index];
+            cached_message_lines(
+                &messages[message_index],
+                run,
+                local_offset,
+                today_local,
+                available_width,
+                spinner_tick,
+                animate_started,
+                leading_blank,
+            )
+            .as_ref()
+            .clone()
+        },
+    )
+}
+
+fn chat_lines_windowed(
+    message_line_counts: &[usize],
+    running_tail: Option<Line<'static>>,
+    scroll_offset: usize,
+    available_height: usize,
+    mut render_message: impl FnMut(usize) -> Vec<Line<'static>>,
+) -> Vec<Line<'static>> {
+    let total = message_line_counts.iter().sum::<usize>() + usize::from(running_tail.is_some());
     if total == 0 {
         return Vec::new();
     }
@@ -528,8 +733,24 @@ pub fn chat_lines(
             Style::default().fg(Color::DarkGray),
         )));
     }
-    for line in &all_lines[window.offset..window.visible_end] {
-        lines.push(line.clone());
+    let mut line_cursor = 0usize;
+    for (message_index, line_count) in message_line_counts.iter().copied().enumerate() {
+        let start = line_cursor;
+        let end = start + line_count;
+        line_cursor = end;
+        if end <= window.offset || start >= window.visible_end {
+            continue;
+        }
+        let rendered = render_message(message_index);
+        let visible_start = window.offset.saturating_sub(start);
+        let visible_end = window.visible_end.saturating_sub(start).min(rendered.len());
+        lines.extend(rendered[visible_start..visible_end].iter().cloned());
+    }
+    if let Some(tail) = running_tail
+        && line_cursor >= window.offset
+        && line_cursor < window.visible_end
+    {
+        lines.push(tail);
     }
     if window.show_below_indicator {
         lines.push(Line::from(Span::styled(

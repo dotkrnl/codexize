@@ -275,6 +275,9 @@ pub async fn run_child_with_timeout_async(
     for (key, value) in &launch.envs {
         command.env(key, value);
     }
+    command.env("SSH_ASKPASS", "");
+    command.env("SSH_ASKPASS_REQUIRE", "no");
+    command.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
     if launch.stdin_null {
         command.stdin(Stdio::null());
     }

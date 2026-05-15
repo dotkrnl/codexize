@@ -145,6 +145,7 @@ pub(crate) fn write_review_scope_artifact(
 pub(crate) fn git_rev_parse_head() -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
         .output()
         .ok()?;
     if !output.status.success() {

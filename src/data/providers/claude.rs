@@ -63,6 +63,8 @@ fn warmup_provider_cli() -> Result<()> {
 fn resolve_access_token() -> Result<String> {
     let output = Command::new("security")
         .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"])
+        .env("SSH_ASKPASS", "")
+        .env("SSH_ASKPASS_REQUIRE", "no")
         .output()
         .context("failed to read Claude keychain credentials")?;
     if !output.status.success() {
@@ -82,6 +84,8 @@ fn resolve_org_id() -> Result<String> {
     let output = Command::new("claude")
         .args(["auth", "status"])
         .env("CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP", "1")
+        .env("SSH_ASKPASS", "")
+        .env("SSH_ASKPASS_REQUIRE", "no")
         .output()
         .context("failed to run `claude auth status`")?;
     if !output.status.success() {

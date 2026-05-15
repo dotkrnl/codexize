@@ -59,6 +59,7 @@ const ENV_STAMP_STABILIZE_INTERVAL_MS: &str = "CODEXIZE_STAMP_STABILIZE_INTERVAL
 pub(super) fn git_rev_parse_head() -> Option<String> {
     Command::new("git")
         .args(["rev-parse", "HEAD"])
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
         .output()
         .ok()
         .filter(|output| output.status.success())
@@ -68,6 +69,7 @@ pub(super) fn git_rev_parse_head() -> Option<String> {
 pub(super) fn working_tree_clean() -> bool {
     Command::new("git")
         .args(["status", "--porcelain"])
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
         .output()
         .ok()
         .filter(|output| output.status.success())
@@ -76,6 +78,7 @@ pub(super) fn working_tree_clean() -> bool {
 pub(super) fn git_status_porcelain() -> Result<String> {
     let output = Command::new("git")
         .args(["status", "--porcelain"])
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
         .output()
         .context("failed to run git status --porcelain")?;
     if !output.status.success() {

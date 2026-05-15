@@ -92,6 +92,7 @@ fn parse_porcelain_line(line: &str) -> Option<(&str, &str)> {
 fn run_git_command_with_stderr(args: &[&str]) -> Result<(), String> {
     let output = Command::new("git")
         .args(args)
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
         .output()
         .map_err(|e| format!("failed to run `git {}`: {e}", args.join(" ")))?;
     if output.status.success() {

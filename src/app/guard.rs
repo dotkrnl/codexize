@@ -69,7 +69,11 @@ pub(crate) enum VerifyResult {
 fn git_stdout(args: &[&str]) -> Option<String> {
     #[cfg(test)]
     let _guard = crate::state::test_fs_lock().lock();
-    let output = std::process::Command::new("git").args(args).output().ok()?;
+    let output = std::process::Command::new("git")
+        .args(args)
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+        .output()
+        .ok()?;
     output
         .status
         .success()
@@ -207,6 +211,7 @@ pub(crate) fn reset_hard_to(captured_head: &str) -> bool {
     let _guard = crate::state::test_fs_lock().lock();
     std::process::Command::new("git")
         .args(["reset", "--hard", captured_head])
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()

@@ -1,5 +1,5 @@
 //! Split pane surface view.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// View projection for the split pane (horizontal dividing view).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -9,7 +9,7 @@ pub struct SplitView {
 }
 
 /// Identifies what content the bottom split pane is displaying.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SplitTargetView {
     /// An agent run transcript identified by its run ID.
     Run(u64),

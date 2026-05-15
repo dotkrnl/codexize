@@ -53,35 +53,37 @@ pub(crate) fn run(spec: WarmupSpec<'_>) -> Result<()> {
     let mut reader = master
         .try_clone_reader()
         .context("failed to open warm-up PTY reader")?;
-    // portable-pty exposes blocking readers; keep that work on tokio's
-    // blocking pool while the supervisor/runtime stays async-owned.
-    let _drain = tokio::task::spawn_blocking(move || {
+    let drain = std::thread::spawn(move || {
         let mut buf = [0u8; 1024];
         while reader.read(&mut buf).unwrap_or(0) > 0 {}
     });
-    let started = Instant::now();
-    loop {
-        if let Some(status) = child.try_wait().context("failed to poll warm-up process")? {
-            if status.success() {
+    let result = (|| {
+        let started = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait().context("failed to poll warm-up process")? {
+                if status.success() {
+                    return Ok(());
+                }
+                if started.elapsed() < Duration::from_millis(300) {
+                    bail!(
+                        "{} warm-up exited immediately with {}",
+                        spec.program,
+                        status
+                    );
+                }
                 return Ok(());
             }
-            if started.elapsed() < Duration::from_millis(300) {
-                bail!(
-                    "{} warm-up exited immediately with {}",
-                    spec.program,
-                    status
-                );
+            if started.elapsed() >= spec.settle_timeout {
+                #[cfg(unix)]
+                if let Some(pgid) = master.process_group_leader() {
+                    let _ = killpg(Pid::from_raw(pgid), Signal::SIGKILL);
+                }
+                let _ = child.kill();
+                return Ok(());
             }
-            return Ok(());
+            crate::data::async_bridge::sleep_blocking(Duration::from_millis(50));
         }
-        if started.elapsed() >= spec.settle_timeout {
-            #[cfg(unix)]
-            if let Some(pgid) = master.process_group_leader() {
-                let _ = killpg(Pid::from_raw(pgid), Signal::SIGKILL);
-            }
-            let _ = child.kill();
-            return Ok(());
-        }
-        crate::data::async_bridge::sleep_blocking(Duration::from_millis(50));
-    }
+    })();
+    let _ = drain.join();
+    result
 }

@@ -1,10 +1,9 @@
 //! Minimal test helpers for the App-internal test suites.
 //!
 //! Replaces the bespoke `test_harness.rs` fixture machinery. Only carries
-//! the small primitives the surviving snapshot tests and split-sync test
-//! still need: a tempdir wrapper that pins `CODEXIZE_ROOT` (with optional
-//! cwd swap for prompts that probe the working directory), an `App`
-//! constructor that wires up the visible-row cache, and a key-event helper.
+//! the small primitives the suites still need: a tempdir wrapper that pins
+//! `CODEXIZE_ROOT`, an `App` constructor that wires up the visible-row cache,
+//! and a key-event helper.
 
 use super::tree::{build_tree, current_node_index, node_key_at_path};
 use super::*;
@@ -30,36 +29,6 @@ pub(crate) fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
             None => std::env::remove_var("CODEXIZE_ROOT"),
         }
     }
-    result.expect("test panicked")
-}
-
-/// Pin `CODEXIZE_ROOT` to a tempdir and chdir into it for the duration of
-/// `f`. Required by prompts that read `CLAUDE.md`/`AGENTS.md` from the
-/// current working directory — the cwd must be empty so the rendered prompt
-/// snapshot is independent of what's checked into the host repo. Serialized
-/// via `test_fs_lock` since chdir is process-global.
-pub(crate) fn with_temp_root_and_cwd<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
-    let _guard = crate::state::test_fs_lock().lock();
-    let temp = tempfile::TempDir::new().expect("tempdir");
-    let prev_root = std::env::var_os("CODEXIZE_ROOT");
-    let prev_cwd = std::env::current_dir().ok();
-
-    // SAFETY: env + cwd mutation is serialized by `test_fs_lock`.
-    unsafe {
-        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
-    }
-    let chdir_result = std::env::set_current_dir(temp.path());
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(temp.path())));
-    if let (Ok(()), Some(p)) = (&chdir_result, prev_cwd) {
-        let _ = std::env::set_current_dir(p);
-    }
-    unsafe {
-        match prev_root {
-            Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
-            None => std::env::remove_var("CODEXIZE_ROOT"),
-        }
-    }
-    chdir_result.expect("chdir into tempdir for snapshot test");
     result.expect("test panicked")
 }
 

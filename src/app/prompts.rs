@@ -9,10 +9,6 @@ pub(crate) use super::prompt_builders::{
     reviewer_prompt, sharding_prompt, simplifier_prompt, spec_review_prompt,
 };
 pub(crate) use super::prompt_ctx::PromptMeta;
-#[cfg(test)]
-pub(crate) use super::prompt_ctx::{
-    live_summary_instruction, live_summary_instruction_interactive,
-};
 pub(super) use super::review_banner::{prepend_review_banner, strip_review_banner};
 #[cfg(not(test))]
 pub(crate) use super::stage_support::git_rev_parse_head;

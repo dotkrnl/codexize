@@ -138,19 +138,3 @@ fn project_doc_instr() -> String {
     };
     format!("Read {docs} in the repo first and follow those directions carefully.\n\n")
 }
-#[cfg(test)]
-pub(crate) fn live_summary_instruction(path: &Path) -> String {
-    let ctx = PromptCtx::new(PromptMeta::with_topics(6));
-    PromptCtx::render_values(
-        include_str!("prompts/live_summary.md"),
-        [("path", ctx.path(path))],
-    )
-}
-#[cfg(test)]
-pub(crate) fn live_summary_instruction_interactive(path: &Path) -> String {
-    let ctx = PromptCtx::new(PromptMeta::with_topics(6));
-    PromptCtx::render_values(
-        include_str!("prompts/live_summary_interactive.md"),
-        [("path", ctx.path(path))],
-    )
-}

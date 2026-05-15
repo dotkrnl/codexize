@@ -1,7 +1,7 @@
 use crate::app_runtime::commands::AppCommand;
 use crate::app_runtime::frontend::{Frontend, FrontendConnector, SnapshotHandle};
 use crate::app_runtime::root_view::{RootEvent, RootEventPayload};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
 use std::io::{self, BufRead, Write};
 use std::sync::mpsc;
@@ -65,6 +65,11 @@ impl Frontend for HeadlessFrontend {
 
             match connector.events.recv_timeout(poll_interval) {
                 Ok(event) => {
+                    // Filter out the runtime-provided initial snapshot or any pushed snapshots
+                    // as we emit our own at startup.
+                    if matches!(event.payload, RootEventPayload::Snapshot(_)) {
+                        continue;
+                    }
                     emit_json_line(&event)?;
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -76,16 +81,12 @@ impl Frontend for HeadlessFrontend {
             loop {
                 match stdin_rx.try_recv() {
                     Ok(line) => {
-                        if let Err(e) =
-                            handle_stdin_line(&line, &connector.commands, &connector.snapshot)
-                        {
-                            eprintln!("headless: command error: {e:#}");
-                        }
+                        handle_stdin_line(&line, &connector.commands, &connector.snapshot)?;
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
                         eprintln!("headless: stdin closed");
-                        return Ok(());
+                        return Err(anyhow!("stdin closed"));
                     }
                 }
             }
@@ -119,7 +120,12 @@ fn handle_stdin_line(
     snapshot: &SnapshotHandle,
 ) -> Result<()> {
     match serde_json::from_str::<AppCommand>(line) {
-        Ok(cmd) => commands.send(cmd)?,
+        Ok(cmd) => {
+            // If the command channel is closed, we could return an error.
+            commands
+                .send(cmd)
+                .context("headless: command channel closed")?;
+        }
         Err(e) => {
             let seq = snapshot.read().seq;
             emit_json_line(&RootEvent {

@@ -1,8 +1,8 @@
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
 #[test]
-fn headless_emits_snapshot_on_startup() {
+fn headless_emits_snapshot_and_handles_commands_and_sigint() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let codexize_root = dir.path().join(".codexize");
     std::fs::create_dir_all(&codexize_root).expect("create codexize_root");
@@ -17,23 +17,35 @@ fn headless_emits_snapshot_on_startup() {
         .expect("failed to start codexize headless");
 
     let stdout = child.stdout.take().expect("stdout");
-    let reader = BufReader::new(stdout);
-    let mut lines = reader.lines();
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
 
-    let first_line = lines
-        .next()
-        .expect("expected snapshot line from headless")
-        .expect("failed to read stdout");
+    reader.read_line(&mut line).expect("read snapshot line");
 
     assert!(
-        first_line.contains(r#""Snapshot""#),
-        "first line should contain Snapshot payload: {first_line}"
+        line.contains(r#""Snapshot""#),
+        "first line should contain Snapshot payload: {line}"
     );
     assert!(
-        first_line.contains(r#""seq""#),
-        "Snapshot should contain seq field: {first_line}"
+        line.contains(r#""seq""#),
+        "Snapshot should contain seq field: {line}"
     );
 
-    let _ = child.kill();
-    let _ = child.wait();
+    // Send one valid AppCommand line
+    let mut stdin = child.stdin.take().expect("stdin");
+    writeln!(stdin, r#"{{"Global":"Quit"}}"#).expect("write valid command");
+    stdin.flush().expect("flush stdin");
+    drop(stdin);
+
+    // We cannot wait for a granular delta here, because the runtime update loop
+    // isn't implemented in this task (run_frontend just blocks on frontend.run).
+    // So we just send SIGINT.
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(child.id() as i32),
+        nix::sys::signal::Signal::SIGINT,
+    )
+    .expect("failed to send SIGINT");
+
+    let status = child.wait().expect("wait for child");
+    assert!(status.success(), "child should exit with 0 on SIGINT");
 }

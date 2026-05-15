@@ -30,13 +30,23 @@ pub(crate) fn spawn_refresh(
         });
     } else {
         let cache_dir_owned = cache_dir;
-        let _ = tx.send(crate::data::async_bridge::block_on_io(async move {
+        let result = crate::data::async_bridge::block_on_io(async move {
             crate::data::selection_assembly::assemble_models_async(
                 &cache_dir_owned,
                 &available_clis,
                 &providers,
             )
             .await
+        });
+        let _ = tx.send(result.unwrap_or_else(|err| {
+            tracing::warn!("model assembly bridge failed: {err}");
+            (
+                Vec::new(),
+                vec![QuotaError {
+                    subscription: SubscriptionKind::Direct,
+                    message: format!("{err:#}"),
+                }],
+            )
         }));
     }
     rx

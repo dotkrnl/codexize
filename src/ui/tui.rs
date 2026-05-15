@@ -128,8 +128,12 @@ impl CrosstermInputAdapter {
     ) -> Result<Option<AppCommand>> {
         match crate::data::async_bridge::block_on_io(tokio::time::timeout(timeout, self.rx.recv()))
         {
-            Ok(Some(event)) => Ok(command_from_event(event, view)),
-            Ok(None) | Err(_) => Ok(None),
+            Ok(Ok(Some(event))) => Ok(command_from_event(event, view)),
+            Ok(Ok(None)) | Ok(Err(_)) => Ok(None),
+            Err(err) => {
+                tracing::warn!("event poll bridge failed: {err}");
+                Ok(None)
+            }
         }
     }
     /// Cancel the blocking-poll worker and wait for it to exit. Used
@@ -144,7 +148,9 @@ impl CrosstermInputAdapter {
         if let Some(handle) = self.worker.take() {
             // The worker checks the cancellation flag once per `event::poll`
             // window (≤ 50 ms), so this join completes promptly.
-            let _ = crate::data::async_bridge::block_on_io(handle);
+            if let Err(err) = crate::data::async_bridge::block_on_io(handle) {
+                tracing::warn!("input worker join failed: {err}");
+            }
         }
     }
 }

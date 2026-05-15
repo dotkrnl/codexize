@@ -433,7 +433,8 @@ fn assemble_models_uses_supplied_cache_dir_when_fresh() {
             cache_dir,
             &crate::data::acp::AcpConfig::default().available_clis(),
             &[],
-        ));
+        ))
+        .expect("assemble models async");
         assert!(
             errors.is_empty(),
             "fresh cache should not trigger refresh errors"

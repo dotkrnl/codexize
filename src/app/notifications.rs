@@ -59,7 +59,11 @@ impl App {
         let completed = crate::data::async_bridge::block_on_io(
             self.notification_runtime
                 .drain_pending_sends(NOTIFICATION_SHUTDOWN_DRAIN),
-        );
+        )
+        .unwrap_or_else(|err| {
+            tracing::warn!("notification drain bridge failed: {err}");
+            false
+        });
         self.poll_notification_reports();
         if !completed {
             let message = "notification_publish_drain_timeout".to_string();

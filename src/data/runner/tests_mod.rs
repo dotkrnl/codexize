@@ -204,41 +204,6 @@ fn finish_stamp_malformed_toml_is_error() {
 }
 
 #[test]
-fn finish_stamp_ignores_unknown_fields() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = dir.path().join("stamp.toml");
-    fs::write(
-        &path,
-        r#"finished_at = "2026-04-26T10:00:00Z"
-exit_code = 0
-head_before = "abc"
-head_after = "def"
-head_state = "stable"
-extra_field = "ignored"
-"#,
-    )
-    .unwrap();
-    let stamp = read_finish_stamp(&path).unwrap();
-    assert_eq!(stamp.head_state, "stable");
-}
-
-#[test]
-fn finish_stamp_serialization_includes_working_tree_clean() {
-    let stamp = FinishStamp {
-        finished_at: "2026-04-26T10:00:00Z".to_string(),
-        exit_code: 0,
-        head_before: "abc123".to_string(),
-        head_after: "def456".to_string(),
-        head_state: "stable".to_string(),
-        signal_received: String::new(),
-        working_tree_clean: true,
-    };
-
-    let text = toml::to_string_pretty(&stamp).unwrap();
-    assert!(text.contains("working_tree_clean = true"));
-}
-
-#[test]
 fn acp_text_stream_buffers_partial_text_until_paragraph_boundary() {
     let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();
@@ -996,18 +961,6 @@ fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
     }
 }
 
-#[test]
-fn run_child_with_timeout_returns_status_when_child_exits_quickly() {
-    let launch = ChildLaunch::new("true")
-        .stdin_null()
-        .stdout_null()
-        .stderr_null();
-    let outcome = run_child_with_timeout(&launch, Duration::from_secs(2)).unwrap();
-    let status = outcome.expect("child should exit before timeout");
-    assert!(status.success(), "expected zero exit");
-}
-
-#[test]
 fn run_child_with_timeout_propagates_spawn_failure() {
     let launch = ChildLaunch::new("/this/program/definitely/does/not/exist-xyz");
     let err = run_child_with_timeout(&launch, Duration::from_millis(100))

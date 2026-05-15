@@ -350,8 +350,7 @@ pub fn select_excluding_with_seed<'a>(
         .collect();
     pool_pick(&candidates, stage, sample_seed)
 }
-/// Weighted random sampling from candidates.
-/// Returns None if candidates is empty or all weights are zero.
+/// Weighted random sampling from candidates whose weights are already positive.
 fn weighted_sample<'a>(
     candidates: &[(&'a CachedModel, f64)],
     sample_seed: u64,
@@ -360,9 +359,6 @@ fn weighted_sample<'a>(
         return None;
     }
     let total: f64 = candidates.iter().map(|(_, weight)| *weight).sum();
-    if total <= 0.0 {
-        return candidates.first().map(|(model, _)| *model);
-    }
     let seed = sample_seed as f64;
     let r = (seed % 1_000_000.0) / 1_000_000.0 * total;
     let mut cumulative = 0.0;

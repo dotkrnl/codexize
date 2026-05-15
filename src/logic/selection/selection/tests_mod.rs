@@ -254,16 +254,6 @@ fn weighted_sample_returns_none_for_empty() {
 }
 
 #[test]
-fn weighted_sample_returns_first_when_all_zero_weight() {
-    let m1 = sample_model(SubscriptionKind::Claude, "first", 80);
-    let m2 = sample_model(SubscriptionKind::Codex, "second", 80);
-    let candidates = vec![(&m1, 0.0), (&m2, 0.0)];
-
-    let chosen = weighted_sample(&candidates, 1).expect("should pick first");
-    assert_eq!(chosen.name, "first");
-}
-
-#[test]
 fn weighted_sample_uses_weights_for_random() {
     let m1 = sample_model(SubscriptionKind::Claude, "high-weight", 80);
     let m2 = sample_model(SubscriptionKind::Codex, "low-weight", 80);

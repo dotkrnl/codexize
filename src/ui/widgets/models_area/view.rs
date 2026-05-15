@@ -12,7 +12,6 @@ use super::state::{
     ProbColumn, QuotaColumn, RESET_TIME_MAX_WIDTH, choose_mode, format_name_with_freshness,
     name_budget_for, name_width_min, probability_color, probability_percent,
 };
-use crate::app::models::{subscription_color, subscription_tag};
 use crate::model_names;
 use crate::selection::{
     CachedModel, QuotaError, SubscriptionKind,
@@ -34,6 +33,29 @@ pub const CHROME_RESERVED_LINES: u16 = 11;
 /// a separate full-height threshold, so centralizing that value must not
 /// silently change existing models-area behavior.
 const RESPONSIVE_MODELS_AREA_THRESHOLD: u16 = 50;
+
+fn subscription_tag(subscription: SubscriptionKind) -> &'static str {
+    match subscription {
+        SubscriptionKind::Claude => "claude",
+        SubscriptionKind::Codex => "codex",
+        SubscriptionKind::Gemini => "gemini",
+        SubscriptionKind::Kimi => "kimi",
+        SubscriptionKind::OpencodeGo => "opencode",
+        SubscriptionKind::Direct => "direct",
+    }
+}
+
+fn subscription_color(subscription: SubscriptionKind) -> Color {
+    match subscription {
+        SubscriptionKind::Claude => Color::Magenta,
+        SubscriptionKind::Codex => Color::Green,
+        SubscriptionKind::Gemini => Color::Blue,
+        SubscriptionKind::Kimi => Color::Yellow,
+        SubscriptionKind::OpencodeGo => Color::Cyan,
+        SubscriptionKind::Direct => Color::White,
+    }
+}
+
 /// Pure renderer.
 ///
 /// `term_h` is the full terminal height; the renderer derives

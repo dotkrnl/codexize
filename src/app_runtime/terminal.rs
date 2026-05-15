@@ -1,13 +1,12 @@
-//! Production terminal runtime coordinator.
+//! Production terminal runtime routing helpers.
 //!
-//! The TUI owns crossterm event collection and terminal drawing, while this
-//! module owns the application loop ordering: pre-drain tick, post-drain
-//! tick, render, then command dispatch.
+//! The TUI owns crossterm event collection and terminal drawing. This
+//! module owns the UI-neutral routing that still belongs on the runtime
+//! side: live-summary data-event draining and command dispatch decisions.
+use crate::app::App;
 use crate::app_runtime::{AppCommand, AppView, ModalKind};
 use crate::data::events::{DataEvent, DataOutcome, DataRequest, LiveSummaryEvents};
 use crate::state::RunStatus;
-use crate::{app::App, ui::tui::AppTerminal};
-use anyhow::Result;
 /// Result of routing an [`AppCommand`] through the terminal runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TerminalCommandOutcome {
@@ -96,55 +95,6 @@ impl TerminalRuntime {
                 TerminalCommandOutcome::HandledContinue
             }
             other => TerminalCommandOutcome::AppOwned(other),
-        }
-    }
-}
-/// Run the production terminal app through the app-runtime seam.
-pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()> {
-    let mut runtime = TerminalRuntime::default();
-    let mut input = crate::ui::tui::CrosstermInputAdapter::spawn();
-    loop {
-        // Hand the TTY to `$EDITOR` outside the tick: the input worker has
-        // to be torn down first, otherwise its `event::poll` / `event::read`
-        // loop steals keystrokes from vim. Re-spawn the worker after the
-        // editor exits so the next render keeps picking up keys.
-        if let Some(path) = app.take_pending_view_path() {
-            input.shutdown_blocking();
-            app.run_external_view_editor(terminal, &path);
-            input = crate::ui::tui::CrosstermInputAdapter::spawn();
-        }
-        if app.runtime_tick_before_data_drain() {
-            app.drain_notifications_for_shutdown();
-            return Ok(());
-        }
-        runtime.drain_app_data_events(app);
-        app.runtime_tick_after_data_drain();
-        let view = runtime.view_for_render(app.current_app_view());
-        // The production draw path consumes `AppView` end-to-end: the top
-        // rule's mode badges are now derived from the seam, so the runtime
-        // wiring carries real rendering data instead of being derived and
-        // discarded.
-        crate::ui::tui::render_app(terminal, |frame| app.draw(frame, &view))?;
-        app.on_frame_drawn();
-        if let Some(command) = input.next_command(app.event_poll_duration(), &view)? {
-            let outcome = runtime.route_command_with_dispatch(command, &view, |request| {
-                crate::data::events::dispatch(request, &app.runner_supervisor)
-            });
-            match outcome {
-                TerminalCommandOutcome::HandledContinue => {}
-                TerminalCommandOutcome::HandledExit => {
-                    app.runner_supervisor.shutdown_all_runs();
-                    app.drain_notifications_for_shutdown();
-                    return Ok(());
-                }
-                TerminalCommandOutcome::AppOwned(command) => {
-                    if app.handle_app_command(command) {
-                        app.runner_supervisor.shutdown_all_runs();
-                        app.drain_notifications_for_shutdown();
-                        return Ok(());
-                    }
-                }
-            }
         }
     }
 }

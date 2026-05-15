@@ -204,7 +204,9 @@ impl App {
                                 crate::state::NodeStatus::Done => tree::TreeNodeStatus::Success,
                                 crate::state::NodeStatus::Failed => tree::TreeNodeStatus::Failure,
                                 crate::state::NodeStatus::Skipped => tree::TreeNodeStatus::Skipped,
-                                crate::state::NodeStatus::WaitingUser => tree::TreeNodeStatus::Pending,
+                                crate::state::NodeStatus::WaitingUser => {
+                                    tree::TreeNodeStatus::Pending
+                                }
                                 _ => tree::TreeNodeStatus::Pending,
                             },
                             has_children: r.has_children,
@@ -235,7 +237,9 @@ impl App {
                                 crate::state::MessageKind::AgentThought => {
                                     chat::ChatMessageKind::AgentThought
                                 }
-                                crate::state::MessageKind::Summary => chat::ChatMessageKind::Summary,
+                                crate::state::MessageKind::Summary => {
+                                    chat::ChatMessageKind::Summary
+                                }
                                 crate::state::MessageKind::SummaryWarn => {
                                     chat::ChatMessageKind::SummaryWarn
                                 }
@@ -255,7 +259,9 @@ impl App {
                 crate::app::ModalKind::GitGuard => modal::ModalKind::GitGuard,
                 crate::app::ModalKind::QuitRunningAgent => modal::ModalKind::QuitRunningAgent,
                 crate::app::ModalKind::CancelSession => modal::ModalKind::CancelSession,
-                crate::app::ModalKind::InteractiveExitPrompt => modal::ModalKind::InteractiveExitPrompt,
+                crate::app::ModalKind::InteractiveExitPrompt => {
+                    modal::ModalKind::InteractiveExitPrompt
+                }
                 crate::app::ModalKind::SpecReviewPaused => modal::ModalKind::SpecReviewPaused,
                 crate::app::ModalKind::PlanReviewPaused => modal::ModalKind::PlanReviewPaused,
                 crate::app::ModalKind::StageError(id) => modal::ModalKind::StageError(match id {
@@ -274,7 +280,9 @@ impl App {
                     crate::app::StageId::FinalValidation => modal::StageId::FinalValidation,
                     crate::app::StageId::Dreaming => modal::StageId::Dreaming,
                 }),
-                crate::app::ModalKind::FinalValidationBlocked => modal::ModalKind::FinalValidationBlocked,
+                crate::app::ModalKind::FinalValidationBlocked => {
+                    modal::ModalKind::FinalValidationBlocked
+                }
                 crate::app::ModalKind::DreamingDecision => modal::ModalKind::DreamingDecision,
             }),
             agent_runs: Arc::from(
@@ -289,11 +297,8 @@ impl App {
                 cheap: self.state.modes.cheap,
             },
             stage: self.state.current_stage,
-            status: self
-                .status_line
-                .borrow()
-                .current_message()
-                .map(|m| status_line::StatusMessage {
+            status: self.status_line.borrow().current_message().map(|m| {
+                status_line::StatusMessage {
                     text: Arc::from(m.text.as_str()),
                     severity: match m.severity {
                         crate::app::status_line::Severity::Info => {
@@ -306,7 +311,8 @@ impl App {
                             status_line::StatusSeverity::Error
                         }
                     },
-                }),
+                }
+            }),
             ..Default::default()
         }
     }
@@ -369,9 +375,6 @@ impl App {
             return None;
         }
         Some(key)
-    }
-    pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<()> {
-        crate::app_runtime::run_terminal_app(self, terminal)
     }
     /// If the operator has queued an artifact path for external review,
     /// take it. The terminal runtime drives the actual editor launch so it

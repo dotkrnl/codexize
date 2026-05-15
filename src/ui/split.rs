@@ -1,11 +1,4 @@
-/// Identifies what content the bottom split pane is displaying.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SplitTarget {
-    /// An agent run transcript identified by its run id.
-    Run(u64),
-    /// The Idea node's captured text or active input surface.
-    Idea,
-}
+pub use crate::app_runtime::views::split::SplitTargetView as SplitTarget;
 pub(crate) fn run_main_panel_message_visible(
     _run: &crate::state::RunRecord,
     kind: crate::state::MessageKind,

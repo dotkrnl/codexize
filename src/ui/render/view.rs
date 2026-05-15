@@ -1,5 +1,5 @@
 #[cfg(test)]
-use crate::app::ModelRefreshState;
+use super::ModelRefreshState;
 use crate::state::{NodeStatus, RunRecord, RunStatus, Stage};
 use chrono::Offset;
 use ratatui::{
@@ -20,7 +20,7 @@ use self::pipeline::PipelineWidget;
 use self::split_view::SplitWidget;
 pub(crate) use super::state::sanitize_live_summary;
 use super::{
-    App, ModalKind,
+    App,
     chrome::{
         UnreadBadge, bottom_rule,
         modal::{render_modal_backdrop, render_modal_overlay},
@@ -39,45 +39,9 @@ use super::{
         skip_to_impl_content, spinner_frame, stage_error_content, status_highlight_bg,
     },
 };
-use crate::app_runtime::AppView;
+use crate::app_runtime::{AppView, ModalKind};
 const DEGENERATE_FLOOR: u16 = 16;
 const BODY_FLOOR_NORMAL: u16 = 8;
-fn modal_from_runtime(modal: crate::app_runtime::ModalKind) -> ModalKind {
-    fn stage_from_runtime(stage: crate::app_runtime::StageId) -> crate::app::StageId {
-        match stage {
-            crate::app_runtime::StageId::Brainstorm => crate::app::StageId::Brainstorm,
-            crate::app_runtime::StageId::SpecReview => crate::app::StageId::SpecReview,
-            crate::app_runtime::StageId::Planning => crate::app::StageId::Planning,
-            crate::app_runtime::StageId::PlanReview => crate::app::StageId::PlanReview,
-            crate::app_runtime::StageId::RepoStateUpdate => crate::app::StageId::RepoStateUpdate,
-            crate::app_runtime::StageId::Sharding => crate::app::StageId::Sharding,
-            crate::app_runtime::StageId::Implementation => crate::app::StageId::Implementation,
-            crate::app_runtime::StageId::Recovery => crate::app::StageId::Recovery,
-            crate::app_runtime::StageId::RecoveryPlanReview => {
-                crate::app::StageId::RecoveryPlanReview
-            }
-            crate::app_runtime::StageId::RecoverySharding => crate::app::StageId::RecoverySharding,
-            crate::app_runtime::StageId::Review => crate::app::StageId::Review,
-            crate::app_runtime::StageId::Simplification => crate::app::StageId::Simplification,
-            crate::app_runtime::StageId::FinalValidation => crate::app::StageId::FinalValidation,
-            crate::app_runtime::StageId::Dreaming => crate::app::StageId::Dreaming,
-        }
-    }
-    match modal {
-        crate::app_runtime::ModalKind::SkipToImpl => ModalKind::SkipToImpl,
-        crate::app_runtime::ModalKind::GitGuard => ModalKind::GitGuard,
-        crate::app_runtime::ModalKind::QuitRunningAgent => ModalKind::QuitRunningAgent,
-        crate::app_runtime::ModalKind::CancelSession => ModalKind::CancelSession,
-        crate::app_runtime::ModalKind::InteractiveExitPrompt => ModalKind::InteractiveExitPrompt,
-        crate::app_runtime::ModalKind::SpecReviewPaused => ModalKind::SpecReviewPaused,
-        crate::app_runtime::ModalKind::PlanReviewPaused => ModalKind::PlanReviewPaused,
-        crate::app_runtime::ModalKind::StageError(stage) => {
-            ModalKind::StageError(stage_from_runtime(stage))
-        }
-        crate::app_runtime::ModalKind::FinalValidationBlocked => ModalKind::FinalValidationBlocked,
-        crate::app_runtime::ModalKind::DreamingDecision => ModalKind::DreamingDecision,
-    }
-}
 impl App {
     pub(crate) fn draw(&mut self, frame: &mut Frame<'_>, view: &AppView) {
         self.draw_in_area(frame, view, frame.area());
@@ -122,7 +86,7 @@ impl App {
         };
         let status_h: u16 = if status_line_content.is_some() { 1 } else { 0 };
         // --- Determine footer zone ---
-        let modal = view.modal.map(modal_from_runtime);
+        let modal = view.modal;
         let caps = self.focus_caps();
         let split_open = self.is_split_open();
         let split_owns_input = self.split_owns_input();

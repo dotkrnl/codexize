@@ -1,36 +1,22 @@
-pub use crate::ui::chrome;
-pub use crate::ui::clock;
-pub(crate) use crate::ui::widgets::chat::state as chat_widget_view_model;
-pub use crate::ui::widgets::chat::view as chat_widget;
 mod builder_recovery;
 mod events;
 mod expansion;
 mod finalization;
-pub use crate::ui::focus_caps;
-pub use crate::ui::footer;
 pub(crate) use finalization::Reason;
 pub(crate) mod guard;
 mod lifecycle;
 pub(crate) mod models;
-pub use crate::ui::widgets::models_area::view as models_area;
 mod notifications;
 mod observation;
-pub(crate) use crate::ui::config_panel;
-pub(crate) use crate::ui::palette;
 pub(crate) mod prior_attempts;
 mod prompt_builders;
 mod prompt_ctx;
 pub(crate) mod prompts;
 mod retry_policy;
 mod review_banner;
-pub(crate) use crate::ui::render::state as render_view_model;
-pub(crate) use crate::ui::render::view as render;
 mod run_helpers;
 mod stage_support;
-pub use crate::ui::sheet;
-pub use crate::ui::split;
 mod state;
-pub use crate::ui::status_line;
 #[cfg(test)]
 #[path = "tests_support.rs"]
 pub(crate) mod test_support;
@@ -40,21 +26,27 @@ pub(crate) mod test_support;
 #[path = "notifications_tests.rs"]
 mod tests_notifications;
 #[cfg(test)]
-#[path = "../ui/tests/split_sync.rs"]
+#[path = "split_sync_tests.rs"]
 mod tests_split_sync;
-pub(crate) use crate::ui::widgets::tree::view as tree;
 pub(crate) mod watchdog;
 mod yolo_exit;
 pub(crate) use self::state::ModelRefreshState;
 use self::tree::{NodeKey, VisibleNodeRow};
+use crate::ui::config_panel;
+use crate::ui::palette;
+use crate::ui::render::view as render;
+use crate::ui::split;
+use crate::ui::status_line;
+use crate::ui::widgets::chat::state as chat_widget_view_model;
+use crate::ui::widgets::chat::view as chat_widget;
+use crate::ui::widgets::models_area::view as models_area;
+use crate::ui::widgets::tree::view as tree;
 use crate::{
     data::cache,
     selection::{CachedModel, QuotaError, SubscriptionKind},
     state::{Message, Node, SessionState},
 };
-pub(crate) use footer::keymap::{Capability, KeyBinding, render_keymap_line};
-pub(crate) use sheet::bottom_sheet;
-pub(crate) use status_line::{Severity, StatusLine};
+use status_line::{Severity, StatusLine};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},

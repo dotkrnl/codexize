@@ -16,8 +16,8 @@ use crate::app_runtime::views::palette::PaletteView;
 use crate::app_runtime::views::picker::PickerView;
 use crate::app_runtime::views::render::RenderView;
 use crate::app_runtime::views::session::{AgentRunSummary, ModeFlags, SessionView};
-use crate::app_runtime::views::shell::{ShellFocus, ShellView, SidebarRow};
 use crate::app_runtime::views::sheet::SheetView;
+use crate::app_runtime::views::shell::{ShellFocus, ShellView, SidebarRow};
 use crate::app_runtime::views::split::SplitView;
 use crate::app_runtime::views::status_line::{StatusLineView, StatusMessage};
 use crate::app_runtime::views::tree::TreeView;
@@ -112,6 +112,9 @@ pub enum ShellViewDelta {
 
 /// Granular session-level delta. The spec guarantees one variant per
 /// mutable field of `SessionView`.
+// Spec/plan pin this as an inline full-session delta; boxing would change
+// the public event shape that later headless JSON tests assert.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum SessionViewDelta {
     /// Whole-session replacement, used on `SessionAdded` or recovery.

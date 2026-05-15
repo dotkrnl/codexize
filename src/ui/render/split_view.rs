@@ -1,8 +1,8 @@
 use super::*;
-use crate::app::chat_widget::ChatWidget;
-use crate::app::split::SplitTarget;
 use crate::state::Stage;
+use crate::ui::split::SplitTarget;
 use crate::ui::tui::wrap_text;
+use crate::ui::widgets::chat::view::ChatWidget;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 pub(crate) struct SplitWidget<'a> {
@@ -33,7 +33,7 @@ impl SplitWidget<'_> {
             .iter()
             .filter(|m| m.run_id == run_id)
             .filter(|m| {
-                crate::app::split::run_split_panel_message_visible(
+                crate::ui::split::run_split_panel_message_visible(
                     run,
                     m.kind,
                     self.app.state.show_thinking_texts,

@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::footer::keymap_view_model;
+use crate::ui::footer::keymap_view_model;
 
 fn line_text(line: &Line) -> String {
     line.spans

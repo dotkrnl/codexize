@@ -1,7 +1,7 @@
-use crate::app::chat_widget_view_model::chat_scroll_window;
-use crate::app::footer::{HistoricalStyleHints, capitalize_first, format_historical_message};
-use crate::app::render_view_model::spinner_frame;
 use crate::state::{Message, MessageKind, RunRecord, RunStatus};
+use crate::ui::footer::{HistoricalStyleHints, capitalize_first, format_historical_message};
+use crate::ui::render::state::spinner_frame;
+use crate::ui::widgets::chat::state::chat_scroll_window;
 use chrono::{Datelike, FixedOffset, TimeZone, Timelike, Utc};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use ratatui::{

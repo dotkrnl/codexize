@@ -4,6 +4,7 @@ pub mod clock;
 pub(crate) mod config_panel;
 pub mod focus_caps;
 pub mod footer;
+pub mod frontend;
 pub mod input_editor;
 pub(crate) mod palette;
 pub mod preflight;

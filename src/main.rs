@@ -306,12 +306,10 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
         Some(app_lock_guard),
     )?;
     let mut terminal = terminal_guard.into_terminal();
-    // Route the existing TUI launch through the new frontend seam helper.
-    // `run_frontend` builds the `FrontendConnector`, emits the spec-pinned
-    // initial Snapshot, then hands off to `TerminalFrontend`, which today
-    // is a thin shim around `AppShell::run_focused_terminal_app`. No
-    // operator-visible behavior changes.
-    let result = app_runtime::run_frontend(app_runtime::TerminalFrontend {
+    // Route the existing TUI launch through the frontend seam. The TUI
+    // still owns terminal input/rendering, while app_runtime owns the
+    // connector shape and command routing.
+    let result = app_runtime::run_frontend(codexize::ui::frontend::TerminalFrontend {
         shell: &mut shell,
         terminal: &mut terminal,
     });

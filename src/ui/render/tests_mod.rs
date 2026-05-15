@@ -1,11 +1,11 @@
 use super::*;
 use crate::{
     app::AppStartupOrigin,
-    app::tree::{flatten_visible_rows, node_key_at_path},
     state::{
         Message, MessageKind, MessageSender, Node, NodeKind, NodeStatus, RunRecord, RunStatus,
         SessionState,
     },
+    ui::widgets::tree::view::{flatten_visible_rows, node_key_at_path},
 };
 use ratatui::layout::Rect;
 use std::{
@@ -1624,7 +1624,7 @@ fn interactive_run_split_height_uses_same_filter_as_rendering() {
         .find(|run| run.id == 1)
         .expect("run");
     let local_offset = chrono::FixedOffset::east_opt(0).expect("zero offset");
-    let expected = crate::app::chat_widget::message_lines(
+    let expected = crate::ui::widgets::chat::view::message_lines(
         &[
             kind_message(1, MessageKind::Started, "started"),
             user_input(1, "operator input"),
@@ -1717,7 +1717,7 @@ fn split_transcript_tail_line_includes_tail_for_interactive_runs() {
     // tail-less render of the same messages. Avoid timestamp races by comparing
     // counts (transcript-leaf rows are 1 line at width 80 with a short title).
     let local_offset = chrono::FixedOffset::east_opt(0).expect("zero offset");
-    let no_tail = crate::app::chat_widget::message_lines(
+    let no_tail = crate::ui::widgets::chat::view::message_lines(
         &[agent_text(1, "visible model answer")],
         run_ref,
         &local_offset,

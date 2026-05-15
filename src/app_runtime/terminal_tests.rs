@@ -2,7 +2,6 @@ use super::*;
 use crate::app_runtime::{AgentRunSummary, AppCommand, AppView, ModalKind};
 use crate::data::events::{DataEvent, DataOutcome, DataRequest, LiveSummaryEvents};
 use crate::state::RunStatus;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -47,19 +46,12 @@ fn confirm_app_owned_quit_modal_routes_termination_through_runtime() {
     // Regression: production `:quit` opens the App-owned modal (sets only
     // `view.modal`), so a subsequent Enter must still route termination
     // through the runtime even when `modal_override` is None. Drives the
-    // production command path via `command_from_event`
-    // + `route_command_with_dispatch` rather than `App::handle_key`.
     let mut runtime = TerminalRuntime::default();
     let mut view = running_view();
     view.modal = Some(ModalKind::QuitRunningAgent);
-    let command = crate::ui::tui::command_from_event(
-        Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        &view,
-    )
-    .expect("enter confirms quit modal");
 
     let mut requests = Vec::new();
-    let confirm = runtime.route_command_with_dispatch(command, &view, |request| {
+    let confirm = runtime.route_command_with_dispatch(AppCommand::ConfirmModal, &view, |request| {
         requests.push(request);
         DataOutcome::Terminated(true)
     });

@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    app::tree::NodeKey,
     state::{NodeKind, NodeStatus},
+    ui::widgets::tree::view::NodeKey,
 };
 
 fn row(depth: usize) -> VisibleNodeRow {

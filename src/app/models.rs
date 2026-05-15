@@ -4,7 +4,6 @@ use crate::{
     data::config::schema::ProviderEntry,
     selection::{CachedModel, CliKind, QuotaError, SubscriptionKind},
 };
-use ratatui::style::Color;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -59,16 +58,6 @@ pub(crate) fn subscription_tag(subscription: SubscriptionKind) -> &'static str {
         SubscriptionKind::Kimi => "kimi",
         SubscriptionKind::OpencodeGo => "opencode",
         SubscriptionKind::Direct => "direct",
-    }
-}
-pub(crate) fn subscription_color(subscription: SubscriptionKind) -> Color {
-    match subscription {
-        SubscriptionKind::Claude => Color::Magenta,
-        SubscriptionKind::Codex => Color::Green,
-        SubscriptionKind::Gemini => Color::Blue,
-        SubscriptionKind::Kimi => Color::Yellow,
-        SubscriptionKind::OpencodeGo => Color::Cyan,
-        SubscriptionKind::Direct => Color::White,
     }
 }
 fn quota_error_summary(errors: &[QuotaError]) -> String {

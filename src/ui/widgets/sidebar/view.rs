@@ -1,4 +1,4 @@
-use crate::app_shell::{ShellFocus, SidebarRow, SidebarView};
+use crate::app_runtime::views::shell::{ShellFocus, ShellView, SidebarRow};
 use crate::state::Stage;
 use ratatui::{
     buffer::Buffer,
@@ -15,7 +15,7 @@ pub fn sidebar_width() -> u16 {
 }
 
 /// Render the sidebar into `area` of `buf`.
-pub fn render_sidebar(area: Rect, buf: &mut Buffer, view: &SidebarView) {
+pub fn render_sidebar(area: Rect, buf: &mut Buffer, view: &ShellView) {
     if area.width == 0 || area.height == 0 {
         return;
     }

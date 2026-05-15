@@ -1,7 +1,7 @@
-use crate::app::tree::VisibleNodeRow;
-use crate::app::{ModalKind, StageId};
+use crate::app_runtime::{ModalKind, StageId};
 use crate::state::{NodeStatus, PendingGuardDecision};
 use crate::ui::tui::{strip_ansi, wrap_lines_with_prefix, wrap_text};
+use crate::ui::widgets::tree::view::VisibleNodeRow;
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},

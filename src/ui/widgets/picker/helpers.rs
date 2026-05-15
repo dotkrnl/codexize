@@ -1,4 +1,4 @@
-use crate::app::palette::{self, PaletteCommand};
+use crate::ui::palette::{self, PaletteCommand};
 use crate::ui::widgets::picker::state::SessionEntry;
 use ratatui::{
     style::{Color, Modifier, Style},

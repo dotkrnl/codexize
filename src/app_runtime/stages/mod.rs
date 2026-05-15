@@ -250,7 +250,9 @@ impl App {
             "agent run tracking started"
         );
         if run.modes.interactive {
-            self.open_split_target(crate::app::split::SplitTarget::Run(run_id));
+            self.open_split_target(crate::app_runtime::views::split::SplitTargetView::Run(
+                run_id,
+            ));
         } else {
             // Watchdog only arms for non-interactive runs (spec §3.8 / AC5).
             self.watchdog

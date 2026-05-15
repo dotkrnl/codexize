@@ -7,6 +7,8 @@
 //! workspaces through an in-process event path.
 
 use crate::app::{App, AppStartupOrigin};
+pub use crate::app_runtime::views::shell::ShellFocus;
+use crate::app_runtime::views::shell::ShellView;
 use crate::app_runtime::{AppCommand, UiKeyCode};
 use crate::data::app_lock::AppLockGuard;
 use crate::data::config::Config;
@@ -23,12 +25,6 @@ use tokio::sync::broadcast;
 use tracing::warn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ShellFocus {
-    Workspace,
-    Sidebar,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellCommandOutcome {
     Consumed,
     Unhandled,
@@ -43,14 +39,6 @@ pub struct SidebarRow {
     pub focused: bool,
     pub open: bool,
     pub running: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SidebarView {
-    pub visible: bool,
-    pub focus: ShellFocus,
-    pub selected_index: usize,
-    pub rows: Vec<SidebarRow>,
 }
 
 #[derive(Debug, Clone)]
@@ -248,14 +236,14 @@ impl SessionSupervisor {
         app.input_buffer = input_buffer.into();
         app.input_cursor = app.input_buffer.chars().count();
         app.viewport_top = viewport_top;
-        app.split_target = split_run_id.map(crate::app::split::SplitTarget::Run);
+        app.split_target = split_run_id.map(crate::app_runtime::views::split::SplitTargetView::Run);
     }
 
     pub fn ui_probe_state(&self) -> (String, usize, Option<u64>) {
         let app = self.app();
         let split_run_id = match app.split_target {
-            Some(crate::app::split::SplitTarget::Run(run_id)) => Some(run_id),
-            Some(crate::app::split::SplitTarget::Idea) | None => None,
+            Some(crate::app_runtime::views::split::SplitTargetView::Run(run_id)) => Some(run_id),
+            Some(crate::app_runtime::views::split::SplitTargetView::Idea) | None => None,
         };
         (app.input_buffer.clone(), app.viewport_top, split_run_id)
     }
@@ -277,7 +265,7 @@ impl SessionSupervisor {
 
     fn replace_live_summary(&mut self, text: String) {
         if let Some(app) = self.app.as_mut() {
-            app.live_summary_cached_text = crate::app::render::sanitize_live_summary(&text);
+            app.live_summary_cached_text = crate::ui::render::state::sanitize_live_summary(&text);
         }
     }
 
@@ -408,11 +396,11 @@ impl AppShell {
             .expect("AppShell always has a focused workspace")
     }
 
-    fn take_focused_app(&mut self) -> App {
+    pub(crate) fn take_focused_app(&mut self) -> App {
         self.focused_supervisor_unchecked().take_app()
     }
 
-    fn return_app_to_supervisor(&mut self, app: App) {
+    pub(crate) fn return_app_to_supervisor(&mut self, app: App) {
         let session_id = app.state.session_id.clone();
         self.supervisors
             .get_mut(&session_id)
@@ -422,7 +410,7 @@ impl AppShell {
 
     /// If the focused session has changed since `app` was lent to the terminal
     /// loop, return it to its supervisor and lend out the newly focused App.
-    fn swap_focused_app_if_needed(&mut self, app: App) -> App {
+    pub(crate) fn swap_focused_app_if_needed(&mut self, app: App) -> App {
         if app.state.session_id == self.focused_session_id {
             return app;
         }
@@ -430,108 +418,6 @@ impl AppShell {
         self.sidebar.mark_dirty();
         self.refresh_sidebar_rows();
         self.take_focused_app()
-    }
-
-    pub fn run_focused_terminal_app(
-        &mut self,
-        terminal: &mut crate::ui::tui::AppTerminal,
-    ) -> Result<()> {
-        use crate::app_runtime::terminal::{TerminalCommandOutcome, TerminalRuntime};
-        use crate::ui::widgets::sidebar::view::render_sidebar;
-        use ratatui::layout::Rect;
-
-        let mut app = self.take_focused_app();
-        let mut runtime = TerminalRuntime::default();
-        let mut input = crate::ui::tui::CrosstermInputAdapter::spawn();
-
-        loop {
-            // Park the focused App back inside its supervisor for the
-            // scheduler tick. With the App lent back, the scheduler can
-            // drive every session (focused or not) through the supervisor
-            // map under a single code path, so the tick no longer needs
-            // to borrow the focused `App` (spec §4.7, §4.8 line 280).
-            self.return_app_to_supervisor(app);
-            if let Err(err) = self.run_scheduler_tick() {
-                tracing::warn!("scheduler tick failed: {err}");
-            }
-            app = self.take_focused_app();
-            if let Some(path) = app.take_pending_view_path() {
-                input.shutdown_blocking();
-                app.run_external_view_editor(terminal, &path);
-                input = crate::ui::tui::CrosstermInputAdapter::spawn();
-            }
-            if app.runtime_tick_before_data_drain() {
-                app.drain_notifications_for_shutdown();
-                self.return_app_to_supervisor(app);
-                return Ok(());
-            }
-            runtime.drain_app_data_events(&mut app);
-            app.runtime_tick_after_data_drain();
-            let view = runtime.view_for_render(app.current_app_view());
-
-            crate::ui::tui::render_app(terminal, |frame| {
-                let full_area = frame.area();
-                if self.sidebar.visible {
-                    let sidebar_w = crate::ui::widgets::sidebar::view::sidebar_width()
-                        .min(full_area.width.saturating_sub(20).max(10));
-                    let sidebar_area =
-                        Rect::new(full_area.x, full_area.y, sidebar_w, full_area.height);
-                    let app_area = Rect::new(
-                        full_area.x + sidebar_w,
-                        full_area.y,
-                        full_area.width.saturating_sub(sidebar_w),
-                        full_area.height,
-                    );
-                    let sidebar_view = self.sidebar_view();
-                    render_sidebar(sidebar_area, frame.buffer_mut(), &sidebar_view);
-                    app.draw_in_area(frame, &view, app_area);
-                } else {
-                    app.draw(frame, &view);
-                }
-            })?;
-
-            app.on_frame_drawn();
-
-            if let Some(command) = input.next_command(app.event_poll_duration(), &view)? {
-                // Shell intercepts sidebar-navigation keys first.
-                if self.sidebar.visible {
-                    let modal_open = app.current_app_view().modal.is_some();
-                    match self.handle_shell_command(command.clone(), modal_open)? {
-                        ShellCommandOutcome::Consumed => {
-                            app = self.swap_focused_app_if_needed(app);
-                            continue;
-                        }
-                        ShellCommandOutcome::Unhandled => {}
-                    }
-                }
-
-                let outcome = runtime.route_command_with_dispatch(command, &view, |request| {
-                    crate::data::events::dispatch(request, &app.runner_supervisor)
-                });
-                match outcome {
-                    TerminalCommandOutcome::HandledContinue => {}
-                    TerminalCommandOutcome::HandledExit => {
-                        app.runner_supervisor.shutdown_all_runs();
-                        app.drain_notifications_for_shutdown();
-                        self.return_app_to_supervisor(app);
-                        return Ok(());
-                    }
-                    TerminalCommandOutcome::AppOwned(command) => {
-                        if app.handle_app_command(command) {
-                            app.runner_supervisor.shutdown_all_runs();
-                            app.drain_notifications_for_shutdown();
-                            self.return_app_to_supervisor(app);
-                            return Ok(());
-                        }
-                    }
-                }
-
-                // If the App executed a shell-level palette command, forward it.
-                if let Some("sessions") = app.pending_shell_command.take().as_deref() {
-                    let _ = self.execute_shell_palette_command("sessions");
-                }
-            }
-        }
     }
 
     pub fn toggle_sessions_sidebar(&mut self) -> Result<()> {
@@ -543,6 +429,10 @@ impl AppShell {
             self.sidebar.focus = ShellFocus::Workspace;
         }
         Ok(())
+    }
+
+    pub fn sidebar_visible(&self) -> bool {
+        self.sidebar.visible
     }
 
     pub fn execute_shell_palette_command(&mut self, name: &str) -> Result<ShellCommandOutcome> {
@@ -688,12 +578,25 @@ impl AppShell {
         Ok(())
     }
 
-    pub fn sidebar_view(&self) -> SidebarView {
-        SidebarView {
+    pub fn sidebar_view(&self) -> ShellView {
+        ShellView {
             visible: self.sidebar.visible,
             focus: self.sidebar.focus,
             selected_index: self.sidebar.selected_index,
-            rows: self.sidebar.rows.clone(),
+            rows: self
+                .sidebar
+                .rows
+                .iter()
+                .map(|row| crate::app_runtime::views::shell::SidebarRow {
+                    session_id: row.session_id.clone(),
+                    date_label: row.date_label.clone(),
+                    title: row.title.clone(),
+                    stage: row.stage,
+                    focused: row.focused,
+                    open: row.open,
+                    running: row.running,
+                })
+                .collect(),
         }
     }
 
@@ -712,32 +615,28 @@ impl AppShell {
         crate::app_runtime::RootView {
             seq: 0, // Managed by RuntimePublisher
             shell: ShellView {
-                sidebar_visible: self.sidebar.visible,
+                visible: self.sidebar.visible,
                 focus: match self.sidebar.focus {
-                    crate::app_shell::ShellFocus::Workspace => {
+                    ShellFocus::Workspace => {
                         crate::app_runtime::views::shell::ShellFocus::Workspace
                     }
-                    crate::app_shell::ShellFocus::Sidebar => {
-                        crate::app_runtime::views::shell::ShellFocus::Sidebar
-                    }
+                    ShellFocus::Sidebar => crate::app_runtime::views::shell::ShellFocus::Sidebar,
                 },
                 selected_index: self.sidebar.selected_index,
-                rows: Arc::from(
-                    self.sidebar
-                        .rows
-                        .iter()
-                        .map(|r| SidebarRow {
-                            session_id: Arc::from(r.session_id.as_str()),
-                            date_label: Arc::from(r.date_label.as_str()),
-                            title: Arc::from(r.title.as_str()),
-                            stage: r.stage,
-                            focused: r.focused,
-                            open: r.open,
-                            running: r.running,
-                        })
-                        .collect::<Vec<_>>()
-                        .as_slice(),
-                ),
+                rows: self
+                    .sidebar
+                    .rows
+                    .iter()
+                    .map(|r| SidebarRow {
+                        session_id: r.session_id.clone(),
+                        date_label: r.date_label.clone(),
+                        title: r.title.clone(),
+                        stage: r.stage,
+                        focused: r.focused,
+                        open: r.open,
+                        running: r.running,
+                    })
+                    .collect(),
             },
             sessions,
             focus: Arc::from(self.focused_session_id.as_str()),
@@ -831,7 +730,7 @@ impl AppShell {
                             // Supervisors are the single source of truth
                             // for run state; the focused App is parked
                             // back into its supervisor before this call
-                            // (see `run_focused_terminal_app`), so the
+                            // (see `TerminalFrontend`), so the
                             // focused session is observed alongside the
                             // background ones without a special case.
                             session.current_stage = supervisor.stage();
@@ -1128,7 +1027,7 @@ estimated_tokens = 100
         .expect("write tasks");
     }
 
-    // Mirrors the swap point inside `run_focused_terminal_app`: when sidebar
+    // Mirrors the swap point inside `TerminalFrontend`: when sidebar
     // Enter changes the focused session, the loop must return the running
     // local `App` to its supervisor and lend out the newly focused App.
     #[test]

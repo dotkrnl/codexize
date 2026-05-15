@@ -1,11 +1,10 @@
 use super::*;
-use crate::app::chat_widget;
-use crate::app::clock::WallClock;
-use crate::app::split::{SplitTarget, run_main_panel_message_visible};
 use crate::ui::render::frame_cache::{
     PipelineLine, PipelineLineKind, cached_pipeline_lines, cached_pipeline_lines_filtered,
     cached_row_body,
 };
+use crate::ui::split::{SplitTarget, run_main_panel_message_visible};
+use crate::ui::{clock::WallClock, widgets::chat::view as chat_widget};
 use itertools::Itertools;
 use std::rc::Rc;
 pub(crate) struct PipelineWidget<'a> {

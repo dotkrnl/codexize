@@ -2,7 +2,7 @@ use super::keymap_view_model::{
     WidthTier, binding_enabled, render_binding, select_modal_tier, select_simple_tier,
     select_width_tier,
 };
-use crate::app::{ModalKind, StageId};
+use crate::app_runtime::{ModalKind, StageId};
 use crate::state::Stage;
 use crate::ui::focus_caps::FocusCaps;
 use ratatui::style::{Color, Style};

@@ -13,17 +13,18 @@
 //! 5. Hand off to `frontend.run(connector)`.
 //!
 //! The state-change update loop that publishes granular `RootEvent`s
-//! lands in later tasks — today's runtime still mutates `App` internal
-//! state directly, and [`TerminalFrontend`] preserves that path so no
-//! operator-visible behavior changes. The `seq`-before-publish ordering
-//! invariant is encoded in [`publish`] and enforced as soon as the
-//! runtime starts emitting granular deltas.
+//! lands in later tasks — today's terminal frontend still mutates `App`
+//! internal state directly so no operator-visible behavior changes. The
+//! `seq`-before-publish ordering invariant is encoded in [`publish`] and
+//! enforced as soon as the runtime starts emitting granular deltas.
 use super::frontend::{Frontend, FrontendConnector, ShutdownSignal, SnapshotHandle};
 use super::root_view::{RootEvent, RootEventPayload, RootView};
 use anyhow::Result;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use std::sync::mpsc;
+
+type PublishResult = std::result::Result<(), Box<mpsc::SendError<RootEvent>>>;
 
 /// Build a fresh `FrontendConnector` (and a writer-side handle on the
 /// snapshot) for use by [`run_frontend`] and tests.
@@ -75,7 +76,7 @@ impl RuntimePublisher {
     ///
     /// Returns `Err` only if the event channel is closed (no frontend is
     /// listening); callers may treat that as a benign shutdown signal.
-    pub fn publish<F, E>(&self, mutate: F, event_for: E) -> Result<(), mpsc::SendError<RootEvent>>
+    pub fn publish<F, E>(&self, mutate: F, event_for: E) -> PublishResult
     where
         F: FnOnce(&mut RootView),
         E: FnOnce(u64) -> RootEventPayload,
@@ -86,23 +87,27 @@ impl RuntimePublisher {
             guard.seq = guard.seq.saturating_add(1);
             guard.seq
         };
-        self.events.send(RootEvent {
-            seq,
-            payload: event_for(seq),
-        })
+        self.events
+            .send(RootEvent {
+                seq,
+                payload: event_for(seq),
+            })
+            .map_err(Box::new)
     }
 
     /// Emit the initial `Snapshot` payload. Used by [`run_frontend`] before
     /// handing the connector to the frontend so a frontend can rely on
     /// receiving exactly one `Snapshot` before any granular delta.
-    pub fn emit_initial_snapshot(&self) -> Result<(), mpsc::SendError<RootEvent>> {
+    pub fn emit_initial_snapshot(&self) -> PublishResult {
         // The seeded `RootView` already has seq = 0; the event carries the
         // same seq so the spec's "match" invariant holds at startup too.
         let view = self.snapshot.read().clone();
-        self.events.send(RootEvent {
-            seq: view.seq,
-            payload: RootEventPayload::Snapshot(view),
-        })
+        self.events
+            .send(RootEvent {
+                seq: view.seq,
+                payload: RootEventPayload::Snapshot(view),
+            })
+            .map_err(Box::new)
     }
 
     pub fn shutdown(&self) -> ShutdownSignal {
@@ -128,26 +133,6 @@ pub fn run_frontend<F: Frontend>(frontend: F) -> Result<()> {
     let result = frontend.run(connector);
     drop(publisher);
     result
-}
-
-/// Thin shim that adapts today's `AppShell`-driven TUI loop onto the
-/// [`Frontend`] trait. Milestone 4 replaces this with a real
-/// `TerminalFrontend` that consumes `RootView` / `RootEvent` end-to-end.
-///
-/// `connector` is accepted but the inner TUI loop still drives state
-/// directly via `AppShell::run_focused_terminal_app`; the connector is
-/// kept alive (the initial Snapshot has been emitted, the command sender
-/// stays open) so future incremental wiring can flip surfaces over one at
-/// a time without touching the call site in `main.rs`.
-pub struct TerminalFrontend<'a> {
-    pub shell: &'a mut crate::app_shell::AppShell,
-    pub terminal: &'a mut crate::ui::tui::AppTerminal,
-}
-
-impl<'a> Frontend for TerminalFrontend<'a> {
-    fn run(self, _connector: FrontendConnector) -> Result<()> {
-        self.shell.run_focused_terminal_app(self.terminal)
-    }
 }
 
 #[cfg(test)]

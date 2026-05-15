@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::clock::TestClock;
+use crate::ui::clock::TestClock;
 use std::time::{Duration, SystemTime};
 
 fn line_text(line: &Line) -> String {

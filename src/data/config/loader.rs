@@ -836,7 +836,7 @@ pub fn save_atomic(config: &Config) -> Result<(), LoadError> {
 /// Variant of [`save_atomic`] that targets `path` directly. The CLI
 /// `validate <path>` and the integration tests exercise non-default
 /// paths through `CODEXIZE_CONFIG`, but anything that already holds a
-/// resolved path (e.g. the ntfy-alias rewrite) calls this directly so
+/// resolved path (for example, ntfy topic minting) calls this directly so
 /// it doesn't have to go back through the env.
 pub fn save_atomic_to(path: &Path, config: &Config) -> Result<(), LoadError> {
     let bytes = render_sparse(config).into_bytes();
@@ -845,7 +845,7 @@ pub fn save_atomic_to(path: &Path, config: &Config) -> Result<(), LoadError> {
 }
 
 /// Render the sparse on-disk form of `config`. Public for tests and the
-/// pending CLI `set`/`unset`/`reset <section>` paths.
+/// config CLI mutate paths (`set`/`unset`/`reset <section>`).
 pub fn render_sparse(config: &Config) -> String {
     let baked = Config::baked_defaults();
     let mut out = String::new();

@@ -215,11 +215,10 @@ pub fn run_edit(is_tty_stdin: bool, out: &mut dyn Write) -> Result<()> {
     run_validate(Some(&path), out)
 }
 
-/// `codexize ntfy --reset` rewire: mint a fresh topic via the existing
-/// `generate_topic` helper, persist it under `[ntfy].topic` in the
-/// unified config (creating the file if absent), and return the
-/// resulting `Config` so the caller can print whatever surface the user
-/// expects. Atomic.
+/// Mint a fresh topic via `generate_topic`, persist it under
+/// `[ntfy].topic` in the unified config (creating the file if absent),
+/// and return the resulting `Config` so the caller can print whatever
+/// surface the user expects. Atomic.
 pub fn ntfy_reset_topic() -> Result<Config> {
     let path = effective_path();
     let mut cfg = load_from_path(&path).map_err(load_to_anyhow)?;

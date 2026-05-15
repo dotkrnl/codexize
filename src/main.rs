@@ -30,15 +30,10 @@ struct Cli {
 }
 #[derive(Debug, Subcommand)]
 enum Command {
-    Ntfy(NtfyCommand),
+    /// Mint and print the active ntfy topic.
+    Ntfy,
     /// Inspect or mutate the unified config file.
     Config(ConfigCommand),
-}
-#[derive(Debug, Parser)]
-struct NtfyCommand {
-    /// Generate and persist a new ntfy topic.
-    #[arg(long)]
-    reset: bool,
 }
 #[derive(Debug, Parser)]
 struct ConfigCommand {
@@ -142,15 +137,12 @@ fn run_cli_command(cli: &Cli) -> Result<()> {
         bail!("error: subcommands do not accept launch flags");
     }
     match &cli.command {
-        Some(Command::Ntfy(command)) => run_ntfy_command(command),
+        Some(Command::Ntfy) => run_ntfy_command(),
         Some(Command::Config(command)) => run_config_command(command),
         None => bail!("error: no subcommand provided"),
     }
 }
-fn run_ntfy_command(command: &NtfyCommand) -> Result<()> {
-    if !command.reset {
-        bail!("error: `codexize ntfy` requires --reset");
-    }
+fn run_ntfy_command() -> Result<()> {
     let config = config_cli::ntfy_reset_topic()?;
     let topic = config.ntfy.topic.value();
     let server = config.ntfy.server.value().trim_end_matches('/');

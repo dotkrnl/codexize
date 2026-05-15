@@ -34,7 +34,7 @@ pub fn emit_annotated(config: &Config) -> String {
     out.push_str("[ntfy]\n");
     writeln!(out, "enabled = {}", n.enabled.value()).ok();
     writeln!(out, "server = {}", quote(n.server.value())).ok();
-    out.push_str("# topic empty disables notifications; mint via `codexize ntfy --reset`.\n");
+    out.push_str("# topic empty disables notifications; mint via `codexize ntfy`.\n");
     writeln!(out, "topic = {}", quote(n.topic.value())).ok();
     writeln!(
         out,

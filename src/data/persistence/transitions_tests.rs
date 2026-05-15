@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::test_support::with_temp_root;
 use crate::data::adapters::EffortLevel;
 use crate::state::{LaunchModes, PipelineItem, PipelineItemStatus, SectionPart};
 
@@ -125,28 +126,6 @@ fn brainstorm_run_captures_brainstorm_stage_path() {
             ][..]
         )
     );
-}
-
-/// Run `f` with a private `CODEXIZE_ROOT` so `execute_transition`'s
-/// implicit `SessionState::save` writes into a temp directory that gets
-/// cleaned up.
-fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = crate::state::test_fs_lock().lock();
-    let temp = tempfile::TempDir::new().unwrap();
-    let prev = std::env::var_os("CODEXIZE_ROOT");
-    // SAFETY: `set_var`/`remove_var` are not thread-safe on *nix; the
-    // `test_fs_lock` mutex serializes every test that touches the env.
-    unsafe {
-        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
-    }
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    unsafe {
-        match prev {
-            Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
-            None => std::env::remove_var("CODEXIZE_ROOT"),
-        }
-    }
-    result.unwrap()
 }
 
 #[test]

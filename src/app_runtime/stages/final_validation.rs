@@ -221,30 +221,12 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::test_support::{key, mk_app};
+    use crate::app::test_support::{key, mk_app, with_temp_root};
     use crate::data::adapters::EffortLevel;
     use crate::state::{
         DreamingDecision, DreamingDecisionKind, LaunchModes, RunRecord, RunStatus, SessionState,
     };
     use crossterm::event::KeyCode;
-
-    fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = crate::state::test_fs_lock().lock();
-        let temp = tempfile::TempDir::new().unwrap();
-        let prev = std::env::var_os("CODEXIZE_ROOT");
-        // SAFETY: serialized by test_fs_lock and restored before returning.
-        unsafe {
-            std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
-        }
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-        unsafe {
-            match prev {
-                Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
-                None => std::env::remove_var("CODEXIZE_ROOT"),
-            }
-        }
-        result.unwrap()
-    }
 
     fn run_record(id: u64, round: u32) -> RunRecord {
         RunRecord {

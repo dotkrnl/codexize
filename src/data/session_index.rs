@@ -355,24 +355,9 @@ pub fn snapshot_for_scheduler(sessions_root: &Path) -> Result<Vec<ScannedSession
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{self, SessionState, Stage, test_fs_lock};
+    use crate::app::test_support::with_temp_root;
+    use crate::state::{self, SessionState, Stage};
     use serial_test::serial;
-
-    fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = test_fs_lock().lock();
-        let tmp = tempfile::tempdir().expect("tempdir");
-        // Safety: tests are serialised by `test_fs_lock`, so the env var is
-        // not touched by another thread concurrently.
-        unsafe {
-            std::env::set_var("CODEXIZE_ROOT", tmp.path());
-        }
-        let out = f();
-        unsafe {
-            std::env::remove_var("CODEXIZE_ROOT");
-        }
-        drop(tmp);
-        out
-    }
 
     fn save_session(id: &str, stage: Stage) {
         let mut state = SessionState::new(id.to_string());

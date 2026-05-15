@@ -1,25 +1,7 @@
 use super::*;
+use crate::app::test_support::with_temp_root;
 use crate::data::artifacts::SkipProposalStatus;
 use std::fs;
-
-fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = crate::state::test_fs_lock().lock();
-    let temp = tempfile::TempDir::new().unwrap();
-    let prev = std::env::var_os("CODEXIZE_ROOT");
-
-    // SAFETY: env mutation is serialized by `test_fs_lock`.
-    unsafe {
-        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
-    }
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    unsafe {
-        match prev {
-            Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
-            None => std::env::remove_var("CODEXIZE_ROOT"),
-        }
-    }
-    result.unwrap()
-}
 
 #[test]
 fn resume_skip_to_impl_pending_with_overlength_proposal_keeps_modal() {

@@ -959,29 +959,13 @@ impl SchedulerDrive {
 mod tests {
     use super::*;
     use crate::app::{TestLaunchHarness, TestLaunchOutcome};
+    use crate::app::test_support::with_temp_root;
     use crate::app_runtime::{AppCommand, UiKey, UiKeyCode};
     use crate::logic::selection::{
         CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind,
     };
     use serial_test::serial;
     use std::collections::VecDeque;
-
-    fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = crate::state::test_fs_lock().lock();
-        let temp = tempfile::TempDir::new().expect("tempdir");
-        let prev = std::env::var_os("CODEXIZE_ROOT");
-        unsafe {
-            std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
-        }
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-        unsafe {
-            match prev {
-                Some(value) => std::env::set_var("CODEXIZE_ROOT", value),
-                None => std::env::remove_var("CODEXIZE_ROOT"),
-            }
-        }
-        result.expect("test panicked")
-    }
 
     fn save_session(id: &str, stage: Stage) -> SessionState {
         let mut state = SessionState::new(id.to_string());

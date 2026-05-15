@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::test_support::with_temp_root;
 use crate::data::adapters::EffortLevel;
 use serde::{Deserialize, Serialize};
 
@@ -126,25 +127,7 @@ fn pending_guard_decision_round_trips() {
     assert_eq!(back.pending_guard_decision, state.pending_guard_decision);
 }
 
-fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = test_fs_lock().lock();
-    let temp = tempfile::TempDir::new().unwrap();
-    let prev = std::env::var_os("CODEXIZE_ROOT");
 
-    // SAFETY: `set_var`/`remove_var` are not thread-safe on *nix; the
-    // `test_fs_lock` mutex serializes every test that touches the env.
-    unsafe {
-        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
-    }
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    unsafe {
-        match prev {
-            Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
-            None => std::env::remove_var("CODEXIZE_ROOT"),
-        }
-    }
-    result.unwrap()
-}
 
 #[test]
 fn test_new_session_defaults_to_v4_with_zero_validation_attempts() {

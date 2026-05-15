@@ -172,14 +172,19 @@ impl App {
         }
     }
 
-    /// Guard that the model list has been loaded. If empty, records an agent
-    /// error, saves state, rebuilds the tree, and returns `false`.
+    /// Guard that the model list has been loaded. If empty, starts or keeps
+    /// a model refresh in flight and returns `false` without recording a
+    /// stage error; the next tick can launch once the refresh completes.
     pub(crate) fn guard_models_loaded(&mut self) -> bool {
         if self.models.is_empty() {
-            self.record_agent_error(
-                "model list not yet loaded — wait a moment and try again".to_string(),
+            if matches!(self.model_refresh, ModelRefreshState::Idle(_)) {
+                self.force_refresh_models();
+            }
+            self.push_status(
+                "model list not yet loaded — loading models".to_string(),
+                Severity::Info,
+                Duration::from_secs(3),
             );
-            self.save_state();
             self.rebuild_tree_view(None);
             return false;
         }

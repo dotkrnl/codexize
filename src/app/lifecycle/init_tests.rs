@@ -167,3 +167,21 @@ fn resume_reopens_failed_final_validation_block_as_retryable_stage_error() {
         assert_eq!(app.state.agent_error.as_deref(), Some("exit(1)"));
     });
 }
+
+#[test]
+fn resume_clears_transient_model_list_error() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("20260513-150000-000000006".to_string());
+        state.current_stage = PersistedStage::FinalValidation(1);
+        state.agent_error =
+            Some("model list not yet loaded — wait a moment and try again".to_string());
+        state.save().unwrap();
+        let session_id = state.session_id.clone();
+
+        drop(state);
+        let loaded = SessionState::load(&session_id).expect("reload session");
+        let app = build_app(loaded);
+
+        assert_eq!(app.state.agent_error, None);
+    });
+}

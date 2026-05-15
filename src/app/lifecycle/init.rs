@@ -185,6 +185,7 @@ impl App {
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
+        app.clear_transient_model_list_error();
         // Once-per-launch journal retention sweep: drop monthly entries older
         // than `[memory] journal_retention_months`. Failures are logged-only
         // — pruning is best-effort and must not block session startup.
@@ -374,6 +375,19 @@ impl App {
         if let Err(err) = self.transition_to_stage(Stage::FinalValidation(round)) {
             tracing::warn!("resume: failed to reopen final-validation block: {err}");
         }
+    }
+
+    fn clear_transient_model_list_error(&mut self) {
+        if self.state.agent_error.as_deref()
+            != Some("model list not yet loaded — wait a moment and try again")
+        {
+            return;
+        }
+        self.clear_agent_error();
+        let _ = self
+            .state
+            .log_event("resume: clearing transient model-list loading error");
+        self.save_state();
     }
 }
 

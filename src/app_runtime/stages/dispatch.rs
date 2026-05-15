@@ -226,6 +226,26 @@ mod tests {
     }
 
     #[test]
+    fn model_guard_without_models_starts_refresh_without_agent_error() {
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let _guard = runtime.enter();
+        let mut state = SessionState::new("20260511-093000-000000003".to_string());
+        state.current_stage = Stage::FinalValidation(1);
+        let mut app = mk_app(state);
+        app.models.clear();
+
+        assert!(!app.guard_models_loaded());
+        assert_eq!(app.state.agent_error, None);
+        assert!(
+            matches!(
+                app.model_refresh,
+                crate::app::ModelRefreshState::Fetching { .. }
+            ),
+            "missing models should kick a refresh instead of persisting a stage error"
+        );
+    }
+
+    #[test]
     fn automatic_sharding_model_retry_pauses_in_waiting_to_implement() {
         // The model retry path re-enters WaitingToImplement so the shell
         // scheduler re-verifies the repo-state baseline before launching

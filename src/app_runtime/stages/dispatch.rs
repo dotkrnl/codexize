@@ -6,7 +6,7 @@
 // for stage-specific launch wiring.
 use crate::{
     app::{App, AppStartupOrigin, ModelRefreshState},
-    lifecycle::{TickInput, TickOutcome},
+    lifecycle::StageId,
     state::Stage,
 };
 impl App {
@@ -34,33 +34,49 @@ impl App {
             }
             return;
         }
-        // The shell scheduler owns the WaitingToImplement → Sharding /
-        // RepoStateUpdate decision via `decide_waiting_dispatch`; per-session
-        // auto-launch deliberately skips this stage so the baseline check
-        // runs first. The lifecycle stage for WaitingToImplement is `Stage::Plan`
-        // and `Scheduler::plan` would otherwise pick Sharding here.
-        if matches!(self.state.current_stage, Stage::WaitingToImplement) {
-            return;
-        }
-        // DreamingPending is a persisted operator-decision stage, not a
-        // PendingDecisions entry, so gate on the persisted stage.
-        if matches!(self.state.current_stage, Stage::DreamingPending) {
-            return;
-        }
+        let stage_id = match self.state.current_stage {
+            Stage::BrainstormRunning => StageId::Brainstorm,
+            Stage::SpecReviewRunning => StageId::SpecReview,
+            Stage::PlanningRunning => StageId::Planning,
+            Stage::PlanReviewRunning => StageId::PlanReview,
+            Stage::RepoStateUpdateRunning => StageId::RepoStateUpdate,
+            Stage::ShardingRunning => StageId::Sharding,
+            Stage::ImplementationRound(_) => StageId::Coder,
+            Stage::ReviewRound(_) => StageId::Reviewer,
+            Stage::BuilderRecovery(_) => StageId::Recovery,
+            Stage::BuilderRecoveryPlanReview(_) => StageId::RecoveryPlanReview,
+            Stage::BuilderRecoverySharding(_) => StageId::RecoverySharding,
+            Stage::FinalValidation(_) => StageId::FinalValidation,
+            Stage::Simplification(_) => StageId::Simplification,
+            Stage::Dreaming(_) => StageId::Dreaming,
+            // Operator/modal/queue states are intentionally idle here. In
+            // particular, WaitingToImplement is driven by the shell-level
+            // baseline gate, and PlanReviewPaused waits for the approval
+            // modal instead of launching another review round.
+            Stage::IdeaInput
+            | Stage::SpecReviewPaused
+            | Stage::PlanReviewPaused
+            | Stage::WaitingToImplement
+            | Stage::SkipToImplPending
+            | Stage::GitGuardPending
+            | Stage::DreamingPending
+            | Stage::BlockedNeedsUser
+            | Stage::Done
+            | Stage::Cancelled => return,
+        };
 
         let spec = self.with_lifecycle_stage_ctx(self.lifecycle_stage, |stage_ctx| {
-            let input = TickInput {
-                agent: self.fsm.view(),
-                stage: self.lifecycle_stage,
-                paused_at_stage: self.paused_at_stage,
-                pending_decisions: &self.pending_decisions,
-                project_lane_allows: true,
-                ctx: stage_ctx,
-            };
-            match self.scheduler.plan(input) {
-                TickOutcome::Dispatch(spec) => Some(spec),
-                TickOutcome::Idle | TickOutcome::Blocked(_) => None,
+            if !matches!(self.fsm.view(), crate::lifecycle::AgentState::Idle) {
+                return None;
             }
+            if self.paused_at_stage == Some(self.lifecycle_stage) || self.pending_decisions.blocks()
+            {
+                return None;
+            }
+            let stage = self.scheduler.registry().get(stage_id)?;
+            stage
+                .next_pending_work(&stage_ctx)
+                .map(|_| stage.build_spec(&stage_ctx))
         });
         if let Some(spec) = spec {
             self.dispatch_start(&spec);
@@ -71,10 +87,13 @@ impl App {
 #[cfg(test)]
 mod tests {
     use crate::app::test_support::{mk_app, with_temp_root};
+    use crate::app::{TestLaunchHarness, TestLaunchOutcome};
     use crate::logic::selection::{
         CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind,
     };
     use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState, Stage};
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
 
     fn cached_build_model(vendor: SubscriptionKind, name: &str) -> CachedModel {
         let candidate = Candidate {
@@ -136,6 +155,54 @@ mod tests {
         }
     }
 
+    fn done_stage_run(id: u64, stage: &str, window_name: &str) -> RunRecord {
+        RunRecord {
+            id,
+            stage: stage.to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "done-model".to_string(),
+            subscription_label: "codex".to_string(),
+            window_name: window_name.to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+            effort: crate::data::adapters::EffortLevel::Normal,
+            effort_mapping: crate::data::config::schema::EffortMapping::default(),
+            effort_eligible: false,
+            modes: LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+            section_path: None,
+        }
+    }
+
+    fn failed_plan_review_run(id: u64) -> RunRecord {
+        let mut run = done_stage_run(id, "plan-review", "[Plan Review 1] failed-model");
+        run.status = RunStatus::Failed;
+        run.error = Some("aborted: TUI exited while running".to_string());
+        run
+    }
+
+    fn write_spec_and_plan(session_id: &str) {
+        let artifacts = crate::state::session_dir(session_id).join("artifacts");
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::write(artifacts.join("spec.md"), "# spec\n").unwrap();
+        std::fs::write(artifacts.join("plan.md"), "# plan\n").unwrap();
+    }
+
+    fn install_launch_harness(app: &mut crate::app::App, artifact_contents: Option<&str>) {
+        app.test_launch_harness = Some(Arc::new(Mutex::new(TestLaunchHarness {
+            outcomes: VecDeque::from([TestLaunchOutcome {
+                exit_code: 0,
+                artifact_contents: artifact_contents.map(str::to_string),
+                launch_error: None,
+            }]),
+        })));
+    }
+
     #[test]
     fn auto_launch_without_models_starts_model_refresh() {
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -184,6 +251,69 @@ mod tests {
                     .count(),
                 1,
                 "retry should not append a new sharding run before the waiting dispatch",
+            );
+        });
+    }
+
+    #[test]
+    fn sharding_running_launches_sharding_not_plan_review_after_backfilled_review() {
+        with_temp_root(|| {
+            let session_id = "20260515-111500-000000001";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_stage = Stage::ShardingRunning;
+            state
+                .agent_runs
+                .push(done_stage_run(1, "planning", "[Planning] done-model"));
+            state.agent_runs.push(failed_plan_review_run(2));
+            state.save().unwrap();
+            write_spec_and_plan(session_id);
+
+            let mut app = mk_app(state);
+            app.models
+                .push(cached_build_model(SubscriptionKind::Codex, "next-model"));
+            app.run_launched = false;
+            app.current_run_id = None;
+            install_launch_harness(&mut app, Some("[[tasks]]\nid = 1\ntitle = \"Implement\"\n"));
+
+            app.maybe_auto_launch();
+
+            let latest = app.state.agent_runs.last().expect("new run");
+            assert_eq!(
+                latest.stage, "sharding",
+                "ShardingRunning must not be routed through lifecycle Plan candidates"
+            );
+        });
+    }
+
+    #[test]
+    fn plan_review_paused_does_not_auto_launch_next_plan_review_round() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("20260515-111500-000000002".to_string());
+            state.current_stage = Stage::PlanReviewPaused;
+            state
+                .agent_runs
+                .push(done_stage_run(1, "planning", "[Planning] done-model"));
+            state.agent_runs.push(done_stage_run(
+                2,
+                "plan-review",
+                "[Plan Review 1] done-model",
+            ));
+            state.save().unwrap();
+            let original_run_count = state.agent_runs.len();
+
+            let mut app = mk_app(state);
+            app.models
+                .push(cached_build_model(SubscriptionKind::Codex, "next-model"));
+            app.run_launched = false;
+            app.current_run_id = None;
+            install_launch_harness(&mut app, Some("# review\n"));
+
+            app.maybe_auto_launch();
+
+            assert_eq!(
+                app.state.agent_runs.len(),
+                original_run_count,
+                "paused plan review should wait for the operator modal"
             );
         });
     }

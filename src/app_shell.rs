@@ -697,6 +697,53 @@ impl AppShell {
         }
     }
 
+    pub(crate) fn current_root_view(&self) -> crate::app_runtime::RootView {
+        use crate::app_runtime::views::shell::*;
+        use std::collections::BTreeMap;
+        use std::sync::Arc;
+
+        let mut sessions = BTreeMap::new();
+        for (session_id, supervisor) in &self.supervisors {
+            if let Some(app) = &supervisor.app {
+                sessions.insert(Arc::from(session_id.as_str()), app.current_session_view());
+            }
+        }
+
+        crate::app_runtime::RootView {
+            seq: 0, // Managed by RuntimePublisher
+            shell: ShellView {
+                sidebar_visible: self.sidebar.visible,
+                focus: match self.sidebar.focus {
+                    crate::app_shell::ShellFocus::Workspace => {
+                        crate::app_runtime::views::shell::ShellFocus::Workspace
+                    }
+                    crate::app_shell::ShellFocus::Sidebar => {
+                        crate::app_runtime::views::shell::ShellFocus::Sidebar
+                    }
+                },
+                selected_index: self.sidebar.selected_index,
+                rows: Arc::from(
+                    self.sidebar
+                        .rows
+                        .iter()
+                        .map(|r| SidebarRow {
+                            session_id: Arc::from(r.session_id.as_str()),
+                            date_label: Arc::from(r.date_label.as_str()),
+                            title: Arc::from(r.title.as_str()),
+                            stage: r.stage,
+                            focused: r.focused,
+                            open: r.open,
+                            running: r.running,
+                        })
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                ),
+            },
+            sessions,
+            focus: Arc::from(self.focused_session_id.as_str()),
+        }
+    }
+
     pub fn apply_event(&mut self, event: ShellEvent) {
         self.event_bus.publish(event.clone());
         match event {

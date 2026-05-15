@@ -185,6 +185,131 @@ impl App {
             },
         }
     }
+
+    pub(crate) fn current_session_view(&self) -> crate::app_runtime::SessionView {
+        use crate::app_runtime::views::*;
+        use std::sync::Arc;
+
+        SessionView {
+            tree: TreeView {
+                rows: Arc::from(
+                    self.visible_rows
+                        .iter()
+                        .map(|r| tree::VisibleNodeRow {
+                            depth: r.depth,
+                            label: Arc::from(format!("{:?}", r.kind)), // Placeholder
+                            status: match r.status {
+                                crate::state::NodeStatus::Pending => tree::TreeNodeStatus::Pending,
+                                crate::state::NodeStatus::Running => tree::TreeNodeStatus::Running,
+                                crate::state::NodeStatus::Done => tree::TreeNodeStatus::Success,
+                                crate::state::NodeStatus::Failed => tree::TreeNodeStatus::Failure,
+                                crate::state::NodeStatus::Skipped => tree::TreeNodeStatus::Skipped,
+                                crate::state::NodeStatus::WaitingUser => tree::TreeNodeStatus::Pending,
+                                _ => tree::TreeNodeStatus::Pending,
+                            },
+                            has_children: r.has_children,
+                            is_expanded: false, // Not available on VisibleNodeRow directly
+                            run_id: r.backing_leaf_run_id,
+                        })
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                ),
+                selected_index: Some(self.selected),
+            },
+            chat: ChatView {
+                messages: Arc::from(
+                    self.messages
+                        .iter()
+                        .map(|m| chat::ChatMessage {
+                            kind: match m.kind {
+                                crate::state::MessageKind::Started => {
+                                    chat::ChatMessageKind::Started
+                                }
+                                crate::state::MessageKind::Brief => chat::ChatMessageKind::Brief,
+                                crate::state::MessageKind::UserInput => {
+                                    chat::ChatMessageKind::UserInput
+                                }
+                                crate::state::MessageKind::AgentText => {
+                                    chat::ChatMessageKind::AgentText
+                                }
+                                crate::state::MessageKind::AgentThought => {
+                                    chat::ChatMessageKind::AgentThought
+                                }
+                                crate::state::MessageKind::Summary => chat::ChatMessageKind::Summary,
+                                crate::state::MessageKind::SummaryWarn => {
+                                    chat::ChatMessageKind::SummaryWarn
+                                }
+                                crate::state::MessageKind::End => chat::ChatMessageKind::End,
+                            },
+                            content: Arc::from(m.text.as_str()),
+                            timestamp: Arc::from(m.ts.to_rfc3339()),
+                        })
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                ),
+                scroll: chat::ChatScrollWindow::default(),
+                follow_tail: self.split_follow_tail,
+            },
+            modal: self.active_modal().map(|m| match m {
+                crate::app::ModalKind::SkipToImpl => modal::ModalKind::SkipToImpl,
+                crate::app::ModalKind::GitGuard => modal::ModalKind::GitGuard,
+                crate::app::ModalKind::QuitRunningAgent => modal::ModalKind::QuitRunningAgent,
+                crate::app::ModalKind::CancelSession => modal::ModalKind::CancelSession,
+                crate::app::ModalKind::InteractiveExitPrompt => modal::ModalKind::InteractiveExitPrompt,
+                crate::app::ModalKind::SpecReviewPaused => modal::ModalKind::SpecReviewPaused,
+                crate::app::ModalKind::PlanReviewPaused => modal::ModalKind::PlanReviewPaused,
+                crate::app::ModalKind::StageError(id) => modal::ModalKind::StageError(match id {
+                    crate::app::StageId::Brainstorm => modal::StageId::Brainstorm,
+                    crate::app::StageId::SpecReview => modal::StageId::SpecReview,
+                    crate::app::StageId::Planning => modal::StageId::Planning,
+                    crate::app::StageId::PlanReview => modal::StageId::PlanReview,
+                    crate::app::StageId::RepoStateUpdate => modal::StageId::RepoStateUpdate,
+                    crate::app::StageId::Sharding => modal::StageId::Sharding,
+                    crate::app::StageId::Implementation => modal::StageId::Implementation,
+                    crate::app::StageId::Recovery => modal::StageId::Recovery,
+                    crate::app::StageId::RecoveryPlanReview => modal::StageId::RecoveryPlanReview,
+                    crate::app::StageId::RecoverySharding => modal::StageId::RecoverySharding,
+                    crate::app::StageId::Review => modal::StageId::Review,
+                    crate::app::StageId::Simplification => modal::StageId::Simplification,
+                    crate::app::StageId::FinalValidation => modal::StageId::FinalValidation,
+                    crate::app::StageId::Dreaming => modal::StageId::Dreaming,
+                }),
+                crate::app::ModalKind::FinalValidationBlocked => modal::ModalKind::FinalValidationBlocked,
+                crate::app::ModalKind::DreamingDecision => modal::ModalKind::DreamingDecision,
+            }),
+            agent_runs: Arc::from(
+                self.state
+                    .agent_runs
+                    .iter()
+                    .map(session::AgentRunSummary::from_record)
+                    .collect::<Vec<_>>(),
+            ),
+            modes: session::ModeFlags {
+                yolo: self.state.modes.yolo,
+                cheap: self.state.modes.cheap,
+            },
+            stage: self.state.current_stage,
+            status: self
+                .status_line
+                .borrow()
+                .current_message()
+                .map(|m| status_line::StatusMessage {
+                    text: Arc::from(m.text.as_str()),
+                    severity: match m.severity {
+                        crate::app::status_line::Severity::Info => {
+                            status_line::StatusSeverity::Info
+                        }
+                        crate::app::status_line::Severity::Warn => {
+                            status_line::StatusSeverity::Warn
+                        }
+                        crate::app::status_line::Severity::Error => {
+                            status_line::StatusSeverity::Error
+                        }
+                    },
+                }),
+            ..Default::default()
+        }
+    }
     pub(crate) fn active_modal(&self) -> Option<ModalKind> {
         if self.pending_quit_confirmation_run_id.is_some() {
             return Some(ModalKind::QuitRunningAgent);

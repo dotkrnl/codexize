@@ -115,11 +115,6 @@ impl App {
             self.clear_agent_error();
             return Ok(());
         }
-        if run.stage == "final-validation" {
-            self.record_agent_error(error);
-            self.transition_to_blocked(crate::state::BlockOrigin::FinalValidation)?;
-            return Ok(());
-        }
         if run.stage == "dreaming" {
             self.record_agent_error(error);
             return Ok(());
@@ -169,8 +164,14 @@ enum PendingAfterStop {
 mod tests {
     use super::*;
     use crate::app::test_support::{mk_app, with_temp_root};
+    use crate::app::{TestLaunchHarness, TestLaunchOutcome};
     use crate::data::adapters::EffortLevel;
+    use crate::logic::selection::{
+        CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind,
+    };
     use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState};
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
 
     fn run_record(id: u64, stage: &str, window_name: &str) -> RunRecord {
         RunRecord {
@@ -197,6 +198,48 @@ mod tests {
             mount_device_id: None,
             section_path: None,
         }
+    }
+
+    fn cached_build_model(vendor: SubscriptionKind, name: &str) -> CachedModel {
+        let candidate = Candidate {
+            subscription: vendor,
+            cli: vendor.direct_cli().unwrap_or(CliKind::Codex),
+            launch_name: name.to_string(),
+            quota_percent: Some(80),
+            quota_resets_at: None,
+            display_order: 0,
+            enabled: true,
+            free: false,
+            official: true,
+            quota_disabled: false,
+            cheap_eligible: true,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_mapping: crate::data::config::schema::EffortMapping::default(),
+            quota_failed: false,
+        };
+        CachedModel {
+            subscription: vendor,
+            name: name.to_string(),
+            ipbr_stage_scores: IpbrStageScores {
+                idea: Some(80.0),
+                planning: Some(80.0),
+                build: Some(80.0),
+                review: Some(80.0),
+            },
+            score_source: ScoreSource::Ipbr,
+            candidates: vec![candidate],
+            selected_candidate: Some(0),
+            quota_percent: Some(80),
+            quota_resets_at: None,
+            display_order: 0,
+        }
+    }
+
+    fn write_final_validation_inputs(session_id: &str) {
+        let artifacts = crate::state::session_dir(session_id).join("artifacts");
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::write(artifacts.join("spec.md"), "# spec\n").unwrap();
     }
 
     #[test]
@@ -239,6 +282,50 @@ mod tests {
             let finished = app.state.agent_runs.iter().find(|r| r.id == 8).unwrap();
             assert_eq!(finished.status, RunStatus::Done);
             assert_eq!(app.state.current_stage, Stage::PlanReviewRunning);
+        });
+    }
+
+    #[test]
+    fn failed_final_validation_auto_retries_instead_of_blocking_immediately() {
+        with_temp_root(|| {
+            let session_id = "20260515-101500-000000003";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_stage = Stage::FinalValidation(1);
+            let mut run = run_record(9, "final-validation", "[FinalValidation] failed-model");
+            run.model = "failed-model".to_string();
+            run.subscription_label = "claude".to_string();
+            state.agent_runs.push(run.clone());
+            state.save().unwrap();
+            write_final_validation_inputs(session_id);
+
+            let mut app = mk_app(state);
+            app.models = vec![
+                cached_build_model(SubscriptionKind::Claude, "failed-model"),
+                cached_build_model(SubscriptionKind::Codex, "retry-model"),
+            ];
+            app.test_launch_harness = Some(Arc::new(Mutex::new(TestLaunchHarness {
+                outcomes: VecDeque::from([TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: None,
+                    launch_error: None,
+                }]),
+            })));
+            app.run_launched = false;
+            app.current_run_id = None;
+
+            app.complete_run_finalization(&run, Some("artifact validation failed".to_string()))
+                .expect("finalization failure should be handled");
+
+            let failed = app.state.agent_runs.iter().find(|r| r.id == 9).unwrap();
+            assert_eq!(failed.status, RunStatus::Failed);
+            assert_eq!(app.state.current_stage, Stage::FinalValidation(1));
+            assert_eq!(app.state.agent_error, None);
+            assert_eq!(app.state.block_origin, None);
+            let retry = app.state.agent_runs.last().unwrap();
+            assert_eq!(retry.stage, "final-validation");
+            assert_eq!(retry.status, RunStatus::Running);
+            assert_eq!(retry.attempt, 2);
+            assert_eq!(retry.model, "retry-model");
         });
     }
 }

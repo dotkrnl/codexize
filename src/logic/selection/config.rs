@@ -11,25 +11,6 @@ pub enum SelectionStage {
     Review,
 }
 impl SelectionStage {
-    pub fn axes(self) -> &'static [&'static str] {
-        match self {
-            SelectionStage::Idea => &[
-                "complexity",
-                "edgecases",
-                "contextawareness",
-                "taskcompletion",
-            ],
-            SelectionStage::Planning => &["correctness", "complexity", "edgecases", "stability"],
-            SelectionStage::Build => &["codequality", "correctness", "debugging", "safety"],
-            SelectionStage::Review => &[
-                "correctness",
-                "debugging",
-                "edgecases",
-                "safety",
-                "stability",
-            ],
-        }
-    }
     /// Interactive stages put the user in the loop and expose model
     /// staleness directly; non-interactive stages run headless in rounds.
     pub fn is_interactive(self) -> bool {

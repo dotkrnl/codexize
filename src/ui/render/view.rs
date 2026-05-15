@@ -80,7 +80,7 @@ fn modal_from_runtime(modal: crate::app_runtime::ModalKind) -> ModalKind {
 }
 impl App {
     pub(crate) fn draw(&mut self, frame: &mut Frame<'_>, view: &AppView) {
-        self.draw_in_area(frame, view, frame.area())
+        self.draw_in_area(frame, view, frame.area());
     }
 
     pub(crate) fn draw_in_area(

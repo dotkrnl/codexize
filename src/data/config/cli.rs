@@ -147,7 +147,7 @@ pub fn run_reset(
             match std::fs::remove_file(&path) {
                 Ok(()) => writeln!(out, "deleted {}", path.display())?,
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                    writeln!(out, "{} already absent", path.display())?
+                    writeln!(out, "{} already absent", path.display())?;
                 }
                 Err(err) => {
                     return Err(anyhow!(

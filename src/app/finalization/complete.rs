@@ -39,10 +39,10 @@ impl App {
             Stage::ReviewRound(round) => self.finalize_reviewer_success(run, round)?,
             Stage::BuilderRecovery(round) => self.finalize_recovery_success(run, round)?,
             Stage::BuilderRecoveryPlanReview(round) => {
-                self.handle_recovery_plan_review_completed(run, round)?
+                self.handle_recovery_plan_review_completed(run, round)?;
             }
             Stage::BuilderRecoverySharding(round) => {
-                self.handle_recovery_sharding_completed(run, round)?
+                self.handle_recovery_sharding_completed(run, round)?;
             }
             Stage::FinalValidation(round) => self.finalize_final_validation_success(run, round)?,
             Stage::Simplification(round) => self.finalize_simplification_success(run, round)?,

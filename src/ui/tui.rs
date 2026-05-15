@@ -129,7 +129,7 @@ impl CrosstermInputAdapter {
         match crate::data::async_bridge::block_on_io(tokio::time::timeout(timeout, self.rx.recv()))
         {
             Ok(Ok(Some(event))) => Ok(command_from_event(event, view)),
-            Ok(Ok(None)) | Ok(Err(_)) => Ok(None),
+            Ok(Ok(None) | Err(_)) => Ok(None),
             Err(err) => {
                 tracing::warn!("event poll bridge failed: {err}");
                 Ok(None)

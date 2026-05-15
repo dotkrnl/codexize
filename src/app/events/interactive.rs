@@ -47,7 +47,7 @@ impl App {
         };
         if !self.state.agent_runs.iter().any(|run| run.id == run_id) {
             return;
-        };
+        }
         if self.runner_supervisor.send_run_input(run_id, input.clone()) {
             let message = Message {
                 ts: chrono::Utc::now(),
@@ -104,7 +104,7 @@ impl App {
         };
         if !self.state.agent_runs.iter().any(|run| run.id == run_id) {
             return;
-        };
+        }
         if self
             .runner_supervisor
             .interrupt_run_input(run_id, trimmed.clone())

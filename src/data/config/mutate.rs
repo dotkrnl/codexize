@@ -212,13 +212,13 @@ pub fn set_value(config: &mut Config, key: &str, raw_value: &str) -> Result<(), 
                 .set(parse_u32(key, raw_value)?);
         }
         ["ntfy", "events", "stage_wait"] => {
-            set_bool(&mut config.ntfy.events.stage_wait, key, raw_value)?
+            set_bool(&mut config.ntfy.events.stage_wait, key, raw_value)?;
         }
         ["ntfy", "events", "interactive_wait"] => {
-            set_bool(&mut config.ntfy.events.interactive_wait, key, raw_value)?
+            set_bool(&mut config.ntfy.events.interactive_wait, key, raw_value)?;
         }
         ["ntfy", "events", "pipeline_done"] => {
-            set_bool(&mut config.ntfy.events.pipeline_done, key, raw_value)?
+            set_bool(&mut config.ntfy.events.pipeline_done, key, raw_value)?;
         }
 
         ["acp", "policy", "shell_policy"] => {
@@ -302,10 +302,10 @@ pub fn set_value(config: &mut Config, key: &str, raw_value: &str) -> Result<(), 
         ["paths", "memory_root"] => config.paths.memory_root.set(raw_value.to_string()),
 
         ["ui", "prefer_split_on_open"] => {
-            set_bool(&mut config.ui.prefer_split_on_open, key, raw_value)?
+            set_bool(&mut config.ui.prefer_split_on_open, key, raw_value)?;
         }
         ["ui", "colon_palette", "show_help"] => {
-            set_bool(&mut config.ui.colon_palette.show_help, key, raw_value)?
+            set_bool(&mut config.ui.colon_palette.show_help, key, raw_value)?;
         }
         ["ui", "footer", "show_keys"] => set_bool(&mut config.ui.footer.show_keys, key, raw_value)?,
 
@@ -317,7 +317,7 @@ pub fn set_value(config: &mut Config, key: &str, raw_value: &str) -> Result<(), 
             config.diagnostics.log_level.set(parsed);
         }
         ["diagnostics", "json_logs"] => {
-            set_bool(&mut config.diagnostics.json_logs, key, raw_value)?
+            set_bool(&mut config.diagnostics.json_logs, key, raw_value)?;
         }
 
         ["memory", "enabled"] => set_bool(&mut config.memory.enabled, key, raw_value)?,

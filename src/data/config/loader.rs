@@ -267,7 +267,7 @@ fn decode_ntfy_events(item: &Item, out: &mut NtfyEvents, parent: &str) -> Result
         match k {
             "stage_wait" => out.stage_wait = Override::explicit(require_bool(v, &path)?),
             "interactive_wait" => {
-                out.interactive_wait = Override::explicit(require_bool(v, &path)?)
+                out.interactive_wait = Override::explicit(require_bool(v, &path)?);
             }
             "pipeline_done" => out.pipeline_done = Override::explicit(require_bool(v, &path)?),
             other => return unknown(parent, other, v, known),

@@ -10,6 +10,7 @@ pub mod app_shell;
 pub mod coder_summary;
 pub mod data;
 pub mod diagnostics;
+pub(crate) mod input_key;
 pub mod lifecycle;
 pub mod logic;
 pub mod model_names;

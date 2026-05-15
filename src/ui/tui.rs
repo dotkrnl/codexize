@@ -1,8 +1,8 @@
-use crate::app::keys::{UiKey, UiKeyCode};
 use crate::app_runtime::commands::{
     GlobalCommand, InputCommand, ModalAction, ModalCommand, SessionCommand, ShellCommand,
 };
 use crate::app_runtime::{AppCommand, AppView, ModalKind};
+use crate::input_key::{UiKey, UiKeyCode};
 use anyhow::Result;
 use crossterm::{
     event::{

@@ -1,5 +1,6 @@
 #[cfg(test)]
 use crate::data::config::{Config, mutate, schema::Override};
+use crate::input_key::UiKeyCode;
 use crate::ui::chrome::{bottom_rule, top_rule_with_left_spans};
 use crossterm::event::KeyEvent;
 #[cfg(test)]
@@ -52,24 +53,14 @@ impl ConfigPanelState {
         // the panel is in navigation mode.
         let cmd = if self.editing.is_some() || self.searching.is_some() {
             match ui_key.code {
-                crate::app::keys::UiKeyCode::Esc => {
-                    crate::app_runtime::commands::ConfigPanelCommand::Close
-                }
-                crate::app::keys::UiKeyCode::Enter => {
-                    crate::app_runtime::commands::ConfigPanelCommand::Activate
-                }
-                crate::app::keys::UiKeyCode::Up => {
-                    crate::app_runtime::commands::ConfigPanelCommand::MoveUp
-                }
-                crate::app::keys::UiKeyCode::Down => {
-                    crate::app_runtime::commands::ConfigPanelCommand::MoveDown
-                }
-                crate::app::keys::UiKeyCode::Backspace => {
-                    crate::app_runtime::commands::ConfigPanelCommand::Edit(
-                        crate::app_runtime::commands::InputCommand::Backspace,
-                    )
-                }
-                crate::app::keys::UiKeyCode::Char(c) if !ui_key.ctrl && !ui_key.alt => {
+                UiKeyCode::Esc => crate::app_runtime::commands::ConfigPanelCommand::Close,
+                UiKeyCode::Enter => crate::app_runtime::commands::ConfigPanelCommand::Activate,
+                UiKeyCode::Up => crate::app_runtime::commands::ConfigPanelCommand::MoveUp,
+                UiKeyCode::Down => crate::app_runtime::commands::ConfigPanelCommand::MoveDown,
+                UiKeyCode::Backspace => crate::app_runtime::commands::ConfigPanelCommand::Edit(
+                    crate::app_runtime::commands::InputCommand::Backspace,
+                ),
+                UiKeyCode::Char(c) if !ui_key.ctrl && !ui_key.alt => {
                     crate::app_runtime::commands::ConfigPanelCommand::Edit(
                         crate::app_runtime::commands::InputCommand::InsertText(c.to_string()),
                     )

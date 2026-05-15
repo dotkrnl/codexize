@@ -1,10 +1,16 @@
 use crate::app::ModalKind;
-use crate::app::test_support::mk_app;
+use crate::app::test_support::{mk_app, with_temp_root};
+use crate::app::{TestLaunchHarness, TestLaunchOutcome};
+use crate::logic::selection::{
+    CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind,
+};
 use crate::state::{
     BlockOrigin, LaunchModes, Message, MessageKind, MessageSender, RunRecord, RunStatus,
     SessionState, Stage,
 };
 use crossterm::event::KeyCode;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 fn running_recovery_run(id: u64) -> RunRecord {
     RunRecord {
@@ -46,6 +52,42 @@ fn finished_run(id: u64) -> RunRecord {
     let mut run = running_recovery_run(id);
     run.status = RunStatus::Done;
     run
+}
+
+fn cached_start_model() -> CachedModel {
+    let candidate = Candidate {
+        subscription: SubscriptionKind::Codex,
+        cli: CliKind::Codex,
+        launch_name: "test-start-model".to_string(),
+        quota_percent: Some(80),
+        quota_resets_at: None,
+        display_order: 0,
+        enabled: true,
+        free: false,
+        official: true,
+        quota_disabled: false,
+        cheap_eligible: true,
+        tough_eligible: true,
+        effort_eligible: true,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        quota_failed: false,
+    };
+    CachedModel {
+        subscription: SubscriptionKind::Codex,
+        name: "test-start-model".to_string(),
+        ipbr_stage_scores: IpbrStageScores {
+            idea: Some(80.0),
+            planning: Some(80.0),
+            build: Some(80.0),
+            review: Some(80.0),
+        },
+        score_source: ScoreSource::Ipbr,
+        candidates: vec![candidate],
+        selected_candidate: Some(0),
+        quota_percent: Some(80),
+        quota_resets_at: None,
+        display_order: 0,
+    }
 }
 
 fn app_with_stage(stage: Stage) -> crate::app::App {
@@ -152,6 +194,85 @@ fn palette_interrupt_absent_with_empty_runs() {
         !commands.iter().any(|cmd| cmd.name == "interrupt"),
         ":interrupt must not appear in palette when there are no runs"
     );
+}
+
+#[test]
+fn palette_start_registered_for_idle_startable_stage() {
+    let mut state = SessionState::new("start-palette-test".to_string());
+    state.current_stage = Stage::BrainstormRunning;
+    let app = mk_app(state);
+    let commands = app.palette_commands();
+    assert!(
+        commands.iter().any(|cmd| cmd.name == "start"),
+        ":start must appear when a startable stage has no running agent"
+    );
+}
+
+#[test]
+fn palette_start_hidden_while_agent_running() {
+    let mut state = SessionState::new("start-palette-test".to_string());
+    state.current_stage = Stage::BuilderRecovery(1);
+    state.agent_runs.push(running_noninteractive_run(10));
+    let app = mk_app(state);
+    let commands = app.palette_commands();
+    assert!(
+        !commands.iter().any(|cmd| cmd.name == "start"),
+        ":start must not appear while an agent is already running"
+    );
+}
+
+#[test]
+fn palette_start_clears_stale_launch_state_and_starts_model_refresh() {
+    let mut state = SessionState::new("start-palette-test".to_string());
+    state.current_stage = Stage::BrainstormRunning;
+    let mut app = mk_app(state);
+    app.models.clear();
+    app.current_run_id = Some(99);
+    app.run_launched = true;
+
+    let should_exit = app.execute_palette_command("start", "");
+
+    assert!(!should_exit);
+    assert_eq!(app.current_run_id, None);
+    assert!(!app.run_launched);
+    assert!(
+        matches!(
+            app.model_refresh,
+            crate::app::ModelRefreshState::Fetching { .. }
+        ),
+        ":start should kick model refresh when no model candidates are loaded"
+    );
+}
+
+#[test]
+fn palette_start_launches_current_stage_when_models_are_available() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("start-palette-launch-test".to_string());
+        state.current_stage = Stage::BrainstormRunning;
+        state.idea_text = Some("build a reliable manual start command".to_string());
+        let mut app = mk_app(state);
+        app.models.push(cached_start_model());
+        app.test_launch_harness = Some(Arc::new(Mutex::new(TestLaunchHarness {
+            outcomes: VecDeque::from([TestLaunchOutcome {
+                exit_code: 0,
+                artifact_contents: None,
+                launch_error: None,
+            }]),
+        })));
+
+        let should_exit = app.execute_palette_command("start", "");
+
+        assert!(!should_exit);
+        assert!(app.run_launched);
+        assert_eq!(app.current_run_id, Some(1));
+        assert!(
+            app.state
+                .agent_runs
+                .iter()
+                .any(|run| run.stage == "brainstorm" && run.status == RunStatus::Running),
+            ":start should append a running brainstorm run"
+        );
+    });
 }
 
 #[test]

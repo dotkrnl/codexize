@@ -75,6 +75,14 @@ impl App {
                 key_hint: None,
             });
         }
+        if self.start_command_available() {
+            commands.push(PaletteCommand {
+                name: "start",
+                aliases: &[],
+                help: "Start the current stage agent",
+                key_hint: None,
+            });
+        }
         if self.has_running_agent() {
             commands.push(PaletteCommand {
                 name: "interrupt",
@@ -265,6 +273,10 @@ impl App {
                         Duration::from_secs(3),
                     );
                 }
+                false
+            }
+            "start" => {
+                self.start_agent_manually();
                 false
             }
             "cancel" => {

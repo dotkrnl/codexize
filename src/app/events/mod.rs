@@ -3,7 +3,7 @@ mod input_focus;
 mod interactive;
 mod split;
 use super::status_line::Severity;
-use super::{App, ModalKind};
+use super::{App, AppStartupOrigin, ModalKind};
 use crate::app_runtime::{AppCommand, UiKey, UiKeyCode};
 use crate::state::RunStatus;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -49,6 +49,74 @@ impl App {
         self.sync_fsm_running_state();
         let outcome = self.with_lifecycle_ops_ctx(crate::lifecycle::LifecycleOps::restart);
         self.apply_op_outcome(outcome, "retry");
+    }
+    pub(crate) fn start_command_available(&self) -> bool {
+        !self.has_running_agent()
+            && matches!(
+                self.state.current_stage,
+                crate::state::Stage::BrainstormRunning
+                    | crate::state::Stage::SpecReviewRunning
+                    | crate::state::Stage::PlanningRunning
+                    | crate::state::Stage::PlanReviewRunning
+                    | crate::state::Stage::WaitingToImplement
+                    | crate::state::Stage::RepoStateUpdateRunning
+                    | crate::state::Stage::ShardingRunning
+                    | crate::state::Stage::ImplementationRound(_)
+                    | crate::state::Stage::ReviewRound(_)
+                    | crate::state::Stage::BuilderRecovery(_)
+                    | crate::state::Stage::BuilderRecoveryPlanReview(_)
+                    | crate::state::Stage::BuilderRecoverySharding(_)
+                    | crate::state::Stage::Simplification(_)
+                    | crate::state::Stage::FinalValidation(_)
+                    | crate::state::Stage::Dreaming(_)
+            )
+    }
+    pub(crate) fn start_agent_manually(&mut self) {
+        if self.has_running_agent() {
+            self.push_status(
+                "Agent is already running.".to_string(),
+                Severity::Info,
+                Duration::from_secs(3),
+            );
+            return;
+        }
+        self.current_run_id = None;
+        self.run_launched = false;
+        if !matches!(self.fsm.view(), crate::lifecycle::AgentState::Idle) {
+            self.fsm = crate::lifecycle::Fsm::new();
+        }
+        if !self.start_command_available() {
+            self.push_status(
+                "No startable agent for the current stage.".to_string(),
+                Severity::Info,
+                Duration::from_secs(3),
+            );
+            return;
+        }
+        if self.state.agent_error.is_some() {
+            self.push_status(
+                "Resolve or retry the stage error before starting.".to_string(),
+                Severity::Warn,
+                Duration::from_secs(3),
+            );
+            return;
+        }
+        self.startup_origin = AppStartupOrigin::Default;
+        if matches!(
+            self.state.current_stage,
+            crate::state::Stage::WaitingToImplement
+        ) {
+            self.dispatch_waiting_to_implement();
+        }
+        self.maybe_auto_launch();
+        let status = if self.run_launched {
+            "Starting agent..."
+        } else if self.models.is_empty() {
+            "Loading models before start..."
+        } else {
+            "No startable agent for the current stage."
+        };
+        self.push_status(status.to_string(), Severity::Info, Duration::from_secs(3));
     }
     fn open_quit_running_agent_modal(&mut self) {
         let running = self

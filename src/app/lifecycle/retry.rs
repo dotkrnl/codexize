@@ -137,9 +137,8 @@ impl App {
             }
         }
         // Rewinding away from a stage that owns the skip-to-impl proposal
-        // must clear the proposal too. The persisted go_back's SkipToImplPending
-        // branch did this inline; preserve it here so the modal doesn't
-        // re-fire after a rewind to brainstorm.
+        // must clear the proposal too so the modal doesn't re-fire after a
+        // rewind to brainstorm.
         if self.state.current_stage == Stage::SkipToImplPending {
             session_state::clear_skip_to_impl_proposal(&mut self.state);
         }
@@ -172,7 +171,8 @@ pub(crate) fn lifecycle_stage_for_task_retry(
 /// Lifecycle stage to rewind to when the operator retries a stage by name.
 pub(crate) fn lifecycle_stage_for_stage_retry(stage: &str) -> LifecycleStage {
     use crate::logic::rules::retry_stage_for_stage;
-    retry_stage_for_stage(stage)
-        .map(|p| p.to_lifecycle_stage())
-        .unwrap_or(LifecycleStage::Plan)
+    retry_stage_for_stage(stage).map_or(
+        LifecycleStage::Plan,
+        crate::logic::pipeline::stage::Stage::to_lifecycle_stage,
+    )
 }

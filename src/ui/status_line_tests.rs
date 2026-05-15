@@ -117,3 +117,21 @@ fn explicit_clear_allows_lower_severity_replacement() {
     let rendered = line.render().expect("info should render after clear");
     assert_eq!(rendered.to_string(), "info msg");
 }
+
+#[test]
+fn renders_status_line_view_from_root_view_seed() {
+    use crate::app_runtime::views::status_line::{StatusLineView, StatusMessage, StatusSeverity};
+    use std::sync::Arc;
+
+    let view = StatusLineView {
+        current: Some(StatusMessage {
+            text: Arc::from("Hello from RootView"),
+            severity: StatusSeverity::Warn,
+        }),
+    };
+
+    let line = view.render().expect("should render a line");
+    assert_eq!(line.to_string(), "Hello from RootView");
+    // Yellow for Warn
+    assert_eq!(line.spans[0].style.fg, Some(ratatui::style::Color::Yellow));
+}

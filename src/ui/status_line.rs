@@ -17,6 +17,22 @@ impl crate::app_runtime::views::status_line::StatusLine {
         )))
     }
 }
+
+impl crate::app_runtime::views::status_line::StatusLineView {
+    #[allow(dead_code)]
+    pub(crate) fn render(&self) -> Option<Line<'static>> {
+        let msg = self.current.as_ref()?;
+        let color = match msg.severity {
+            crate::app_runtime::views::status_line::StatusSeverity::Info => Color::Gray,
+            crate::app_runtime::views::status_line::StatusSeverity::Warn => Color::Yellow,
+            crate::app_runtime::views::status_line::StatusSeverity::Error => Color::Red,
+        };
+        Some(Line::from(Span::styled(
+            msg.text.to_string(),
+            Style::default().fg(color),
+        )))
+    }
+}
 /// A single transient status message with a TTL.
 #[derive(Debug)]
 pub(crate) struct StatusMessage {

@@ -411,7 +411,11 @@ impl App {
         // When a run is active, show "<agent-name> · <live-summary-title>".
         // Otherwise show "<stage-label> · <state-label>".
         if let Some(run_id) = self.current_run_id
-            && let Some(run) = self.state.agent_runs.iter().find(|r| r.id == run_id)
+            && let Some(run) = self
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == run_id && r.status == RunStatus::Running)
         {
             let agent = &run.window_name;
             let summary = if self.live_summary_cached_text.is_empty() {
@@ -429,12 +433,24 @@ impl App {
         if self.state.agent_error.is_some() {
             return "error";
         }
+        if self
+            .state
+            .agent_runs
+            .iter()
+            .any(|run| run.status == RunStatus::Running)
+        {
+            return "running";
+        }
         match self.state.current_stage {
             Stage::IdeaInput | Stage::BlockedNeedsUser => "awaiting input",
             Stage::SpecReviewPaused | Stage::PlanReviewPaused => "paused",
-            Stage::SkipToImplPending | Stage::GitGuardPending => "awaiting input",
+            Stage::SkipToImplPending | Stage::GitGuardPending | Stage::DreamingPending => {
+                "awaiting input"
+            }
+            Stage::WaitingToImplement => "pending",
             Stage::Done => "done",
-            _ => "running",
+            Stage::Cancelled => "cancelled",
+            _ => "pending",
         }
     }
     fn unread_badge(&self) -> Option<UnreadBadge> {

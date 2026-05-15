@@ -5,7 +5,7 @@
 // [`crate::lifecycle::StageSpec`] and hands it to [`App::dispatch_start`]
 // for stage-specific launch wiring.
 use crate::{
-    app::{App, AppStartupOrigin},
+    app::{App, AppStartupOrigin, ModelRefreshState},
     lifecycle::{TickInput, TickOutcome},
     state::Stage,
 };
@@ -29,6 +29,9 @@ impl App {
             return;
         }
         if self.models.is_empty() {
+            if matches!(self.model_refresh, ModelRefreshState::Idle(_)) {
+                self.force_refresh_models();
+            }
             return;
         }
         // The shell scheduler owns the WaitingToImplement → Sharding /
@@ -131,6 +134,28 @@ mod tests {
             mount_device_id: None,
             section_path: None,
         }
+    }
+
+    #[test]
+    fn auto_launch_without_models_starts_model_refresh() {
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let _guard = runtime.enter();
+        let mut state = SessionState::new("20260511-093000-000000002".to_string());
+        state.current_stage = Stage::BrainstormRunning;
+        let mut app = mk_app(state);
+        app.models.clear();
+        app.run_launched = false;
+        app.current_run_id = None;
+
+        app.maybe_auto_launch();
+
+        assert!(
+            matches!(
+                app.model_refresh,
+                crate::app::ModelRefreshState::Fetching { .. }
+            ),
+            "auto-launch should start model refresh instead of staying idle with no candidates"
+        );
     }
 
     #[test]

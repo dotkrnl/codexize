@@ -31,9 +31,7 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
                 .join(ArtifactKind::SkipToImpl.filename());
             match SkipToImplProposal::read_from_path(&path) {
                 Ok((Some(p), warnings)) if p.proposed => {
-                    for w in warnings {
-                        let _ = state.log_event(format!("resume: skip_proposal.toml: {w}"));
-                    }
+                    log_skip_proposal_warnings(state, warnings);
                     state.skip_to_impl_rationale = Some(p.rationale);
                     state.skip_to_impl_kind = Some(p.status);
                     if let Err(e) = state.save() {
@@ -41,18 +39,14 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
                     }
                 }
                 Ok((Some(_), warnings)) => {
-                    for w in warnings {
-                        let _ = state.log_event(format!("resume: skip_proposal.toml: {w}"));
-                    }
+                    log_skip_proposal_warnings(state, warnings);
                     return Err(ResumeError::InvalidState(
                         "skip_proposal.toml must contain proposed = true while resuming SkipToImplPending"
                             .to_string(),
                     ));
                 }
                 Ok((None, warnings)) => {
-                    for w in warnings {
-                        let _ = state.log_event(format!("resume: skip_proposal.toml: {w}"));
-                    }
+                    log_skip_proposal_warnings(state, warnings);
                     return Err(ResumeError::InvalidState(
                         "skip_proposal.toml is required while resuming SkipToImplPending"
                             .to_string(),
@@ -68,6 +62,11 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
         _ => {}
     }
     Ok(())
+}
+fn log_skip_proposal_warnings(state: &mut SessionState, warnings: Vec<String>) {
+    for warning in warnings {
+        let _ = state.log_event(format!("resume: skip_proposal.toml: {warning}"));
+    }
 }
 #[cfg(test)]
 #[path = "resume_tests.rs"]

@@ -80,9 +80,7 @@ pub fn parse(toml_str: &str) -> Result<RepoStateUpdateReport> {
     };
     match status {
         RepoStateUpdateStatus::Implementable => {
-            let rewrote_spec = raw.rewrote_spec.unwrap_or(false);
-            let rewrote_plan = raw.rewrote_plan.unwrap_or(false);
-            if !rewrote_spec || !rewrote_plan {
+            if raw.rewrote_spec != Some(true) || raw.rewrote_plan != Some(true) {
                 bail!(
                     "repo-state-update.toml: status = \"implementable\" requires rewrote_spec = true and rewrote_plan = true"
                 );
@@ -97,6 +95,11 @@ pub fn parse(toml_str: &str) -> Result<RepoStateUpdateReport> {
             if raw.blockers.is_empty() {
                 bail!(
                     "repo-state-update.toml: status = \"not_implementable\" requires at least one [[blockers]] entry"
+                );
+            }
+            if raw.rewrote_spec.is_some() || raw.rewrote_plan.is_some() {
+                bail!(
+                    "repo-state-update.toml: rewrote_spec and rewrote_plan are forbidden when status = \"not_implementable\""
                 );
             }
             for (idx, blocker) in raw.blockers.iter().enumerate() {
@@ -211,6 +214,25 @@ evidence = ["src/cache.rs", "artifacts/spec.md"]
         assert_eq!(report.status, RepoStateUpdateStatus::NotImplementable);
         assert_eq!(report.blockers.len(), 1);
         assert_eq!(report.blockers[0].evidence.len(), 2);
+    }
+
+    #[test]
+    fn not_implementable_rejects_rewrite_flags() {
+        let toml_str = r#"
+status = "not_implementable"
+summary = "Already shipped."
+rewrote_spec = true
+rewrote_plan = true
+
+[[blockers]]
+description = "Earlier session's cache layer already provides the user-visible behavior."
+evidence = ["src/cache.rs", "artifacts/spec.md"]
+"#;
+        let err = parse(toml_str).expect_err("expected failure");
+        assert!(
+            err.to_string().contains("rewrote_spec") || err.to_string().contains("rewrote_plan"),
+            "error should mention forbidden rewrite flags, got: {err}"
+        );
     }
 
     #[test]

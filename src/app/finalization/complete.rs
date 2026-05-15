@@ -328,4 +328,31 @@ mod tests {
             assert_eq!(retry.model, "retry-model");
         });
     }
+
+    #[test]
+    fn failed_final_validation_with_empty_model_cache_stays_retryable() {
+        with_temp_root(|| {
+            let session_id = "20260515-101500-000000004";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_stage = Stage::FinalValidation(1);
+            let mut run = run_record(9, "final-validation", "[FinalValidation] failed-model");
+            run.model = "failed-model".to_string();
+            run.subscription_label = "claude".to_string();
+            state.agent_runs.push(run.clone());
+            state.save().unwrap();
+            write_final_validation_inputs(session_id);
+
+            let mut app = mk_app(state);
+            app.models.clear();
+
+            app.complete_run_finalization(&run, Some("exit(1)".to_string()))
+                .expect("finalization failure should remain operator-retryable");
+
+            let failed = app.state.agent_runs.iter().find(|r| r.id == 9).unwrap();
+            assert_eq!(failed.status, RunStatus::Failed);
+            assert_eq!(app.state.current_stage, Stage::FinalValidation(1));
+            assert_eq!(app.state.agent_error.as_deref(), Some("exit(1)"));
+            assert_eq!(app.state.block_origin, None);
+        });
+    }
 }

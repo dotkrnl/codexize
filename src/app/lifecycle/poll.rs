@@ -3,6 +3,14 @@ use crate::app_runtime::views::split::SplitTargetView as SplitTarget;
 use crate::state::{MessageKind, SessionState};
 use std::time::{Duration, Instant};
 impl App {
+    pub(crate) fn messages_file_observed_state(
+        session_id: &str,
+    ) -> Option<(std::time::SystemTime, u64)> {
+        let path = crate::state::session_dir(session_id).join("messages.toml");
+        let meta = std::fs::metadata(path).ok()?;
+        Some((meta.modified().ok()?, meta.len()))
+    }
+
     pub(crate) fn observed_path_state(path: &std::path::Path) -> ObservedPathState {
         match std::fs::metadata(path) {
             Ok(meta) => ObservedPathState {
@@ -16,10 +24,14 @@ impl App {
         }
     }
     pub(crate) fn update_agent_progress(&mut self) {
-        if let Ok(messages) = SessionState::load_messages(&self.state.session_id)
-            && messages != self.messages
-        {
-            self.messages = messages;
+        let observed_state = Self::messages_file_observed_state(&self.state.session_id);
+        if observed_state != self.messages_observed_state {
+            if let Ok(messages) = SessionState::load_messages(&self.state.session_id)
+                && messages != self.messages
+            {
+                self.messages = messages;
+            }
+            self.messages_observed_state = observed_state;
         }
         let Some(run) = self.running_run() else {
             self.agent_line_count = 0;

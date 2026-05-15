@@ -55,6 +55,7 @@ impl App {
             &config.acp_install_view(),
         );
         let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
+        let messages_observed_state = Self::messages_file_observed_state(&state.session_id);
         let paths_view = config.paths_view();
         let memory_view = config.memory_view();
         let ui_view = config.ui_view();
@@ -173,6 +174,7 @@ impl App {
             #[cfg(test)]
             test_launch_harness: None,
             messages,
+            messages_observed_state,
             status_line: Rc::new(RefCell::new(crate::app::status_line::StatusLine::new())),
             prev_models_mode: crate::app::models::ModelsAreaMode::default(),
             palette: crate::app::palette::PaletteState::default(),
@@ -230,16 +232,22 @@ impl App {
         // did. The pre-existing `resume_running_runs` hostname/mount-mismatch
         // path remains below as a defense-in-depth no-op on top of this.
         backfill_orphaned_running_runs(&mut app.state);
-        if let Ok(_run_id) = session_state::resume_running_runs(&mut app.state) {
+        if let Ok(run_id) = session_state::resume_running_runs(&mut app.state) {
             // FSM is Idle on resume; force the persisted mirrors to match.
             // Whatever `resume_running_runs` reports is moot — the backfill
             // above has already finalized every Running record.
             app.current_run_id = None;
             app.run_launched = false;
-            app.messages = SessionState::load_messages(&app.state.session_id).unwrap_or_default();
+            if run_id.is_some() {
+                app.messages =
+                    SessionState::load_messages(&app.state.session_id).unwrap_or_default();
+                app.messages_observed_state =
+                    Self::messages_file_observed_state(&app.state.session_id);
+            }
             app.rebuild_tree_view(None);
             app.maybe_refocus_to_progress();
         }
+        app.reopen_failed_final_validation_block();
         // Resume validation: if the session was interrupted mid-guard-decision,
         // restore the modal or fail closed.
         if app.state.current_stage == Stage::GitGuardPending {
@@ -336,6 +344,36 @@ impl App {
         // the run state directly.
         app.setup_watcher();
         app
+    }
+
+    fn reopen_failed_final_validation_block(&mut self) {
+        if self.state.current_stage != Stage::BlockedNeedsUser
+            || self.state.block_origin != Some(crate::state::BlockOrigin::FinalValidation)
+        {
+            return;
+        }
+        let Some(round) = self
+            .state
+            .agent_runs
+            .iter()
+            .rev()
+            .find(|run| {
+                run.stage == "final-validation"
+                    && matches!(
+                        run.status,
+                        crate::state::RunStatus::Failed | crate::state::RunStatus::FailedUnverified
+                    )
+            })
+            .map(|run| run.round)
+        else {
+            return;
+        };
+        let _ = self
+            .state
+            .log_event("resume: reopening failed final-validation block as retryable stage error");
+        if let Err(err) = self.transition_to_stage(Stage::FinalValidation(round)) {
+            tracing::warn!("resume: failed to reopen final-validation block: {err}");
+        }
     }
 }
 

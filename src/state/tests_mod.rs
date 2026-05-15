@@ -292,6 +292,44 @@ fn test_append_message() {
 }
 
 #[test]
+fn append_message_preserves_existing_message_file_bytes() {
+    with_temp_root(|| {
+        let state = SessionState::new("test-msg-append-only".to_string());
+        state.save().unwrap();
+        let path = session_dir("test-msg-append-only").join("messages.toml");
+        let original = r#"# retained operator note
+[[messages]]
+ts = "2026-04-24T00:00:00Z"
+run_id = 1
+kind = "Brief"
+sender = "System"
+text = "First"
+"#;
+        std::fs::write(&path, original).unwrap();
+
+        let msg = Message {
+            ts: chrono::Utc::now(),
+            run_id: 2,
+            kind: MessageKind::End,
+            sender: MessageSender::System,
+            text: "done".to_string(),
+        };
+
+        state.append_message(&msg).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.starts_with(original),
+            "append_message must not rewrite the existing transcript"
+        );
+        let loaded = SessionState::load_messages("test-msg-append-only").unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].text, "First");
+        assert_eq!(loaded[1].text, "done");
+    });
+}
+
+#[test]
 fn test_load_messages() {
     with_temp_root(|| {
         let state = SessionState::new("test-load-msg".to_string());

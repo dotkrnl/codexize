@@ -118,6 +118,13 @@ impl App {
                 .or_default()
                 .insert((vendor, failed_run.model.clone()));
         }
+        if self.models.is_empty() {
+            let _ = self.state.log_event(format!(
+                "auto-retry unavailable for {} round {} attempt {}: model cache empty",
+                failed_run.stage, failed_run.round, failed_run.attempt
+            ));
+            return false;
+        }
         let max_attempts = self.models.len() as u32 + 2;
         if failed_run.attempt >= max_attempts {
             let summary = self.retry_exhausted_summary(failed_run);

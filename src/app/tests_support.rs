@@ -106,6 +106,7 @@ pub(crate) fn mk_app(state: SessionState) -> App {
         watchdog: watchdog::WatchdogRegistry::new(),
         test_launch_harness: None,
         messages: Vec::new(),
+        messages_observed_state: None,
         status_line: Rc::new(RefCell::new(crate::app::status_line::StatusLine::new())),
         prev_models_mode: crate::app::models::ModelsAreaMode::default(),
         palette: crate::app::palette::PaletteState::default(),

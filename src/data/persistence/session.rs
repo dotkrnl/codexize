@@ -12,6 +12,7 @@ use crate::state::{
 };
 use anyhow::{Context, Result};
 use std::fs;
+use std::io::Write;
 impl SessionState {
     pub fn load(session_id: &str) -> Result<Self> {
         let path = session_dir(session_id).join("session.toml");
@@ -64,11 +65,22 @@ impl SessionState {
         let dir = session_dir(&self.session_id);
         fs::create_dir_all(&dir)?;
         let path = dir.join("messages.toml");
-        let mut file = read_messages_file(&path)?;
-        file.messages.push(message.clone());
-        let text = toml::to_string_pretty(&file).context("failed to serialize messages")?;
-        crate::data::atomic::atomic_write(&path, text.as_bytes())
-            .with_context(|| format!("failed to write messages to {}", path.display()))?;
+        let text = toml::to_string_pretty(&MessagesFile {
+            messages: vec![message.clone()],
+        })
+        .context("failed to serialize message")?;
+        let needs_separator = path.metadata().is_ok_and(|meta| meta.len() > 0);
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .with_context(|| format!("failed to open messages for append {}", path.display()))?;
+        if needs_separator {
+            file.write_all(b"\n")
+                .with_context(|| format!("failed to append separator to {}", path.display()))?;
+        }
+        file.write_all(text.as_bytes())
+            .with_context(|| format!("failed to append message to {}", path.display()))?;
         Ok(())
     }
     /// Load all messages for a session from messages.toml.

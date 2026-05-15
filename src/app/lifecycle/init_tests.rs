@@ -38,6 +38,17 @@ fn running_run_record(id: u64) -> RunRecord {
     }
 }
 
+fn failed_final_validation_run(id: u64, round: u32) -> RunRecord {
+    let mut run = running_run_record(id);
+    run.stage = "final-validation".to_string();
+    run.round = round;
+    run.window_name = "[FinalValidation] test".to_string();
+    run.status = RunStatus::Failed;
+    run.error = Some("exit(1)".to_string());
+    run.ended_at = Some(chrono::Utc::now());
+    run
+}
+
 fn build_app(state: SessionState) -> App {
     let config = Arc::new(crate::data::config::Config::baked_defaults());
     App::new_with_startup_origin_config_without_model_refresh(
@@ -133,5 +144,26 @@ fn session_round_trips_paused_at_stage_and_pending_decisions() {
         let reloaded = SessionState::load(&session_id).expect("reload session");
         assert_eq!(reloaded.paused_at_stage, expected_paused);
         assert_eq!(reloaded.pending_decisions, expected_pending);
+    });
+}
+
+#[test]
+fn resume_reopens_failed_final_validation_block_as_retryable_stage_error() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("20260513-150000-000000005".to_string());
+        state.current_stage = PersistedStage::BlockedNeedsUser;
+        state.block_origin = Some(crate::state::BlockOrigin::FinalValidation);
+        state.agent_error = Some("exit(1)".to_string());
+        state.agent_runs.push(failed_final_validation_run(9, 3));
+        state.save().unwrap();
+        let session_id = state.session_id.clone();
+
+        drop(state);
+        let loaded = SessionState::load(&session_id).expect("reload session");
+        let app = build_app(loaded);
+
+        assert_eq!(app.state.current_stage, PersistedStage::FinalValidation(3));
+        assert_eq!(app.state.block_origin, None);
+        assert_eq!(app.state.agent_error.as_deref(), Some("exit(1)"));
     });
 }

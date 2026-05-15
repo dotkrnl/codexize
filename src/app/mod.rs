@@ -346,6 +346,7 @@ pub struct App {
     #[cfg(test)]
     pub(crate) test_launch_harness: Option<std::sync::Arc<std::sync::Mutex<TestLaunchHarness>>>,
     pub(crate) messages: Vec<Message>,
+    pub(crate) messages_observed_state: Option<(SystemTime, u64)>,
     pub(crate) status_line: Rc<RefCell<self::status_line::StatusLine>>,
     pub(crate) prev_models_mode: ModelsAreaMode,
     pub(crate) palette: self::palette::PaletteState,

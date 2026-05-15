@@ -6,11 +6,23 @@
 //! guarantees that whenever a frontend observes `RootEvent { seq: N, .. }`,
 //! the next `snapshot.read()` has `RootView::seq >= N` — the publish
 //! strictly follows the write under the snapshot lock.
-//!
-//! This task lands the spec-pinned shapes with deliberately minimal
-//! sub-view stubs. Later tasks extract per-surface fields into
-//! `app_runtime/views/` and enrich `ShellView` / `SessionView` with the
-//! real surfaces (tree, chat, palette, …) the TUI renders today.
+use crate::app_runtime::views::chat::ChatView;
+use crate::app_runtime::views::clock::ClockView;
+use crate::app_runtime::views::config_panel::ConfigPanelView;
+use crate::app_runtime::views::footer::FooterView;
+use crate::app_runtime::views::modal::ModalKind;
+use crate::app_runtime::views::models::ModelsView;
+use crate::app_runtime::views::palette::PaletteView;
+use crate::app_runtime::views::picker::PickerView;
+use crate::app_runtime::views::render::RenderView;
+use crate::app_runtime::views::session::{AgentRunSummary, ModeFlags, SessionView};
+use crate::app_runtime::views::shell::{ShellFocus, ShellView, SidebarRow};
+use crate::app_runtime::views::sheet::SheetView;
+use crate::app_runtime::views::split::SplitView;
+use crate::app_runtime::views::status_line::{StatusLineView, StatusMessage};
+use crate::app_runtime::views::tree::TreeView;
+use crate::app_runtime::views::watchdog::WatchdogView;
+use crate::logic::pipeline::Stage;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -87,32 +99,7 @@ pub enum RootEventPayload {
     Error(String),
 }
 
-/// Stub shell view. Later tasks migrate sidebar rows, shell focus, and
-/// related projections into per-surface files under `app_runtime/views/`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
-pub struct ShellView {}
-
-/// Placeholder for the sidebar row projection. The actual fields land in
-/// `app_runtime/views/shell.rs` in a later task.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct SidebarRow {}
-
-/// Placeholder for the shell focus enum. The actual variants land in
-/// `app_runtime/views/shell.rs` in a later task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub enum ShellFocus {
-    /// Shell focus stub — replaced with the real variants later.
-    Placeholder,
-}
-
-/// Stub session view. Later tasks attach per-surface sub-views (tree,
-/// chat, palette, …) plus the spec-pinned scalar fields (`stage`,
-/// `modes`, `status`, `agent_runs`, `modal`).
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
-pub struct SessionView {}
-
-/// Granular shell-level delta. Variants are stubs today; the real set is
-/// extended as `ShellView` grows real fields.
+/// Granular shell-level delta.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum ShellViewDelta {
     /// Whole-shell replacement, used on recovery or first emit.
@@ -124,11 +111,27 @@ pub enum ShellViewDelta {
 }
 
 /// Granular session-level delta. The spec guarantees one variant per
-/// mutable field of `SessionView`; today's stub `SessionView` has no
-/// fields so only `Full` is meaningful. Later tasks add one variant per
-/// extracted sub-view.
+/// mutable field of `SessionView`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum SessionViewDelta {
     /// Whole-session replacement, used on `SessionAdded` or recovery.
     Full(SessionView),
+    Tree(TreeView),
+    Chat(ChatView),
+    Palette(PaletteView),
+    StatusLine(StatusLineView),
+    Footer(FooterView),
+    Models(ModelsView),
+    Render(RenderView),
+    ConfigPanel(ConfigPanelView),
+    Picker(PickerView),
+    Sheet(SheetView),
+    Split(SplitView),
+    Clock(ClockView),
+    Watchdog(WatchdogView),
+    Modal(Option<ModalKind>),
+    AgentRuns(Arc<[AgentRunSummary]>),
+    Modes(ModeFlags),
+    Stage(Stage),
+    Status(Option<StatusMessage>),
 }

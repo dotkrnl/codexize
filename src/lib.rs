@@ -20,3 +20,4 @@ pub mod simplification;
 pub mod state;
 pub mod tasks;
 pub mod ui;
+pub mod ui_headless;

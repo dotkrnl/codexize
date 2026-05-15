@@ -5,6 +5,7 @@ use codexize::{
     data::{app_lock, config::cli as config_cli},
     state::{self},
     ui::{preflight, tui, widgets::picker::state as picker},
+    ui_headless::HeadlessFrontend,
 };
 use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
@@ -30,6 +31,18 @@ struct Cli {
 }
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run in headless (line-delimited JSON) mode.
+    Headless {
+        /// Initial idea for the session.
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        /// Seed the session with YOLO mode.
+        #[arg(long)]
+        yolo: bool,
+        /// Seed the session with Cheap mode.
+        #[arg(long)]
+        cheap: bool,
+    },
     /// Mint and print the active ntfy topic.
     Ntfy,
     /// Inspect or mutate the unified config file.
@@ -122,6 +135,9 @@ fn main() -> ExitCode {
 }
 fn try_main() -> Result<()> {
     let cli = Cli::parse();
+    if matches!(&cli.command, Some(Command::Headless { .. })) {
+        return run_headless();
+    }
     if cli.command.is_some() {
         return run_cli_command(&cli);
     }
@@ -139,6 +155,9 @@ fn run_cli_command(cli: &Cli) -> Result<()> {
     match &cli.command {
         Some(Command::Ntfy) => run_ntfy_command(),
         Some(Command::Config(command)) => run_config_command(command),
+        Some(Command::Headless { .. }) => {
+            unreachable!("Headless is intercepted in try_main before reaching run_cli_command")
+        }
         None => bail!("error: no subcommand provided"),
     }
 }
@@ -179,6 +198,16 @@ fn run_config_command(command: &ConfigCommand) -> Result<()> {
 /// refuses to launch on a malformed file rather than silently degrading.
 fn load_config_for_launch() -> Result<codexize::data::config::Config> {
     codexize::data::config::load_or_default().map_err(anyhow::Error::from)
+}
+
+/// Launch the headless (line-delimited JSON) frontend.
+///
+/// Uses the same `run_frontend` helper as the TUI path. The connector is
+/// seeded with an empty `RootView`; no session or AppShell is created yet
+/// — the full runtime wiring (command processing, granular event publish)
+/// lands in a follow-up task.
+fn run_headless() -> Result<()> {
+    app_runtime::run_frontend(HeadlessFrontend::new())
 }
 
 async fn try_main_async(plan: LaunchPlan) -> Result<()> {

@@ -394,7 +394,7 @@ fn probability_unavailable_span(label: &str) -> Span<'static> {
 const STATUS_DOT: &str = "●";
 /// Bracketed brand tag drawn in the vendor column.
 fn display_vendor_tag(model: &CachedModel) -> String {
-    let dv = crate::model_names::display_vendor(&model.name)
+    let dv = model_names::display_vendor(&model.name)
         .unwrap_or_else(|| subscription_tag(model.subscription));
     format!("[{dv}]")
 }

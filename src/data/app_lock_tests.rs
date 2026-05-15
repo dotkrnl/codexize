@@ -34,7 +34,7 @@ fn writes_lock_with_required_fields_when_no_lock_exists() {
     let dir = TempDir::new().unwrap();
     let now = Utc::now();
     let guard = acquire_default(&dir, &MockProbe::dead(), now).expect("acquire");
-    let raw = std::fs::read_to_string(guard.path()).unwrap();
+    let raw = fs::read_to_string(guard.path()).unwrap();
     let parsed: AppLockContents = toml::from_str(&raw).expect("valid TOML");
     assert_eq!(parsed.pid, SELF_PID);
     assert_eq!(parsed.hostname, HOST);
@@ -52,8 +52,8 @@ fn refuses_when_same_host_holder_is_alive_with_matching_start_time() {
     let holder_pid = 9001;
     let holder_started = Utc::now();
     // Pre-write a lock owned by the live holder.
-    std::fs::create_dir_all(lock_path(&dir).parent().unwrap()).unwrap();
-    std::fs::write(
+    fs::create_dir_all(lock_path(&dir).parent().unwrap()).unwrap();
+    fs::write(
         lock_path(&dir),
         toml::to_string(&AppLockContents {
             pid: holder_pid,
@@ -75,7 +75,7 @@ fn refuses_when_same_host_holder_is_alive_with_matching_start_time() {
         other => panic!("expected AlreadyRunningSameHost, got {other:?}"),
     }
     // Refusal must not mutate the lock file.
-    let raw_after = std::fs::read_to_string(lock_path(&dir)).unwrap();
+    let raw_after = fs::read_to_string(lock_path(&dir)).unwrap();
     let still: AppLockContents = toml::from_str(&raw_after).unwrap();
     assert_eq!(still.pid, holder_pid);
     // The error string must match the spec-pinned message exactly.
@@ -89,8 +89,8 @@ fn refuses_when_same_host_holder_is_alive_with_matching_start_time() {
 fn replaces_stale_same_host_lock_when_pid_is_dead() {
     let dir = TempDir::new().unwrap();
     let dead_pid = 9001;
-    std::fs::create_dir_all(lock_path(&dir).parent().unwrap()).unwrap();
-    std::fs::write(
+    fs::create_dir_all(lock_path(&dir).parent().unwrap()).unwrap();
+    fs::write(
         lock_path(&dir),
         toml::to_string(&AppLockContents {
             pid: dead_pid,
@@ -103,7 +103,7 @@ fn replaces_stale_same_host_lock_when_pid_is_dead() {
     .unwrap();
     let guard = acquire_default(&dir, &MockProbe::dead(), Utc::now()).expect("acquire");
     let parsed: AppLockContents =
-        toml::from_str(&std::fs::read_to_string(guard.path()).unwrap()).unwrap();
+        toml::from_str(&fs::read_to_string(guard.path()).unwrap()).unwrap();
     assert_eq!(
         parsed.pid, SELF_PID,
         "stale lock must be replaced with ours"
@@ -115,8 +115,8 @@ fn replaces_stale_lock_when_pid_recycled_with_mismatched_start_time() {
     let dir = TempDir::new().unwrap();
     let pid = 9001;
     let recorded = Utc::now() - chrono::Duration::hours(2);
-    std::fs::create_dir_all(lock_path(&dir).parent().unwrap()).unwrap();
-    std::fs::write(
+    fs::create_dir_all(lock_path(&dir).parent().unwrap()).unwrap();
+    fs::write(
         lock_path(&dir),
         toml::to_string(&AppLockContents {
             pid,
@@ -132,7 +132,7 @@ fn replaces_stale_lock_when_pid_recycled_with_mismatched_start_time() {
     let probe = MockProbe::live(pid, Utc::now(), PathBuf::from("/bin/sleep"));
     let guard = acquire_default(&dir, &probe, Utc::now()).expect("acquire");
     let parsed: AppLockContents =
-        toml::from_str(&std::fs::read_to_string(guard.path()).unwrap()).unwrap();
+        toml::from_str(&fs::read_to_string(guard.path()).unwrap()).unwrap();
     assert_eq!(parsed.pid, SELF_PID);
 }
 
@@ -141,7 +141,7 @@ fn refuses_cross_host_lock_with_pinned_message_and_no_mutation() {
     let dir = TempDir::new().unwrap();
     let other_host = "other-host";
     let other_pid = 5678;
-    std::fs::create_dir_all(lock_path(&dir).parent().unwrap()).unwrap();
+    fs::create_dir_all(lock_path(&dir).parent().unwrap()).unwrap();
     let original = toml::to_string(&AppLockContents {
         pid: other_pid,
         hostname: other_host.to_string(),
@@ -149,7 +149,7 @@ fn refuses_cross_host_lock_with_pinned_message_and_no_mutation() {
         project_root: project_root(&dir),
     })
     .unwrap();
-    std::fs::write(lock_path(&dir), &original).unwrap();
+    fs::write(lock_path(&dir), &original).unwrap();
     // Even if the local probe would say "alive" for the recorded pid, we
     // must NOT probe (or mutate) — the cross-host branch is decided purely
     // from the on-disk hostname.
@@ -162,7 +162,7 @@ fn refuses_cross_host_lock_with_pinned_message_and_no_mutation() {
         }
         other => panic!("expected OwnedByOtherHost, got {other:?}"),
     }
-    let after = std::fs::read_to_string(lock_path(&dir)).unwrap();
+    let after = fs::read_to_string(lock_path(&dir)).unwrap();
     assert_eq!(after, original, "cross-host lock must be untouched");
     let msg = AcquireError::OwnedByOtherHost {
         hostname: other_host.to_string(),
@@ -183,7 +183,7 @@ fn refuses_cross_host_lock_with_pinned_message_and_no_mutation() {
 fn release_returns_ok_when_lock_already_gone() {
     let dir = TempDir::new().unwrap();
     let guard = acquire_default(&dir, &MockProbe::dead(), Utc::now()).expect("acquire");
-    std::fs::remove_file(guard.path()).unwrap();
+    fs::remove_file(guard.path()).unwrap();
     guard
         .release()
         .expect("release on missing file must succeed");
@@ -195,7 +195,7 @@ fn release_refuses_to_remove_lock_owned_by_another_pid() {
     let dir = TempDir::new().unwrap();
     let guard = acquire_default(&dir, &MockProbe::dead(), Utc::now()).expect("acquire");
     let path = guard.path().to_path_buf();
-    std::fs::write(
+    fs::write(
         &path,
         toml::to_string(&AppLockContents {
             pid: SELF_PID + 1,
@@ -213,11 +213,11 @@ fn release_refuses_to_remove_lock_owned_by_another_pid() {
 #[test]
 fn malformed_existing_lock_is_replaced() {
     let dir = TempDir::new().unwrap();
-    std::fs::create_dir_all(lock_path(&dir).parent().unwrap()).unwrap();
-    std::fs::write(lock_path(&dir), "not valid = toml = at all").unwrap();
+    fs::create_dir_all(lock_path(&dir).parent().unwrap()).unwrap();
+    fs::write(lock_path(&dir), "not valid = toml = at all").unwrap();
     let guard = acquire_default(&dir, &MockProbe::dead(), Utc::now()).expect("acquire");
     let parsed: AppLockContents =
-        toml::from_str(&std::fs::read_to_string(guard.path()).unwrap()).unwrap();
+        toml::from_str(&fs::read_to_string(guard.path()).unwrap()).unwrap();
     assert_eq!(parsed.pid, SELF_PID);
 }
 
@@ -227,12 +227,12 @@ fn release_failure_propagates_through_explicit_release() {
     let dir = TempDir::new().unwrap();
     let guard = acquire_default(&dir, &MockProbe::dead(), Utc::now()).expect("acquire");
     let parent = guard.path().parent().unwrap().to_path_buf();
-    let original = std::fs::metadata(&parent).unwrap().permissions();
+    let original = fs::metadata(&parent).unwrap().permissions();
     let mut readonly = original.clone();
     readonly.set_mode(0o555);
-    std::fs::set_permissions(&parent, readonly).unwrap();
+    fs::set_permissions(&parent, readonly).unwrap();
     let result = guard.release();
-    std::fs::set_permissions(&parent, original).unwrap();
+    fs::set_permissions(&parent, original).unwrap();
     let err = result.expect_err("release must surface remove_file errors");
     assert!(
         format!("{err:#}").contains("failed to remove lock"),

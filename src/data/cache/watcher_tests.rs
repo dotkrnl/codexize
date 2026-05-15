@@ -3,7 +3,7 @@ use std::io::Write;
 use std::time::SystemTime;
 use tempfile::TempDir;
 
-fn write_models(dir: &std::path::Path, body: &str) -> SystemTime {
+fn write_models(dir: &Path, body: &str) -> SystemTime {
     let path = dir.join("models.json");
     let mut f = std::fs::File::create(&path).expect("create models.json");
     f.write_all(body.as_bytes()).expect("write models.json");
@@ -29,11 +29,11 @@ fn poll_fires_once_when_no_baseline() {
         CacheWatcherOutcome::Active(w) | CacheWatcherOutcome::PollOnly { watcher: w, .. } => w,
     };
     let _ = write_models(dir.path(), "{}");
-    watcher.next_poll_after = std::time::Instant::now();
+    watcher.next_poll_after = Instant::now();
     assert!(
         watcher.poll(),
         "first publish from a None baseline must trigger a reload"
     );
-    watcher.next_poll_after = std::time::Instant::now();
+    watcher.next_poll_after = Instant::now();
     assert!(!watcher.poll(), "no further change → no further reload");
 }

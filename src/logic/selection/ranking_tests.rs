@@ -6,7 +6,7 @@ fn sample_cached_model() -> CachedModel {
         subscription: SubscriptionKind::Codex,
         name: "gpt-5.5".to_string(),
         ipbr_stage_scores: crate::selection::IpbrStageScores::default(),
-        score_source: crate::selection::ScoreSource::None,
+        score_source: ScoreSource::None,
         candidates: Vec::new(),
         selected_candidate: None,
         quota_percent: Some(80),
@@ -41,7 +41,7 @@ fn ipbr_model(name: &str, score: f64, quota_percent: Option<u8>) -> CachedModel 
             build: Some(score),
             review: Some(score + 3.0),
         },
-        score_source: crate::selection::ScoreSource::Ipbr,
+        score_source: ScoreSource::Ipbr,
         candidates: vec![candidate],
         selected_candidate: Some(0),
         quota_percent,
@@ -58,7 +58,7 @@ fn stage_rank_score_maps_each_stage_to_ipbr_field() {
             build: Some(33.0),
             review: Some(44.0),
         },
-        score_source: crate::selection::ScoreSource::Ipbr,
+        score_source: ScoreSource::Ipbr,
         ..sample_cached_model()
     };
 
@@ -78,7 +78,7 @@ fn stage_rank_score_returns_none_when_stage_score_or_ipbr_source_missing() {
             build: None,
             ..crate::selection::IpbrStageScores::default()
         },
-        score_source: crate::selection::ScoreSource::Ipbr,
+        score_source: ScoreSource::Ipbr,
         ..sample_cached_model()
     };
     let unranked = CachedModel {
@@ -86,7 +86,7 @@ fn stage_rank_score_returns_none_when_stage_score_or_ipbr_source_missing() {
             build: Some(99.0),
             ..crate::selection::IpbrStageScores::default()
         },
-        score_source: crate::selection::ScoreSource::None,
+        score_source: ScoreSource::None,
         ..sample_cached_model()
     };
 

@@ -100,7 +100,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         status_line: std::rc::Rc::new(std::cell::RefCell::new(
             super::super::status_line::StatusLine::new(),
         )),
-        prev_models_mode: super::super::models_area::ModelsAreaMode::default(),
+        prev_models_mode: models_area::ModelsAreaMode::default(),
         palette: super::super::palette::PaletteState::default(),
         command_return_target: None,
         config_panel: None,
@@ -1772,7 +1772,7 @@ fn interactive_split_owned_input_still_renders_footer_sheet() {
         vec![agent_text(7, "waiting for operator")],
     );
     app.current_run_id = Some(7);
-    app.state.current_stage = crate::state::Stage::BrainstormRunning;
+    app.state.current_stage = Stage::BrainstormRunning;
     app.split_target = Some(super::super::split::SplitTarget::Run(7));
     app.input_mode = true;
     crate::data::runner::request_run_label_interactive_input_for_test("[Run 7]");

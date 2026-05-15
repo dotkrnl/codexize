@@ -3,7 +3,7 @@ use crate::tasks::Task;
 
 fn write_verdict(dir: &tempfile::TempDir, content: &str) -> std::path::PathBuf {
     let path = dir.path().join("final_validation.toml");
-    std::fs::write(&path, content).unwrap();
+    fs::write(&path, content).unwrap();
     path
 }
 
@@ -402,7 +402,7 @@ fn missing_file_fails() {
 fn malformed_toml_fails() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("bad.toml");
-    std::fs::write(&path, "this is [[[ not valid toml").unwrap();
+    fs::write(&path, "this is [[[ not valid toml").unwrap();
     let err = validate(&path).unwrap_err();
     assert!(format!("{err:#}").contains("malformed validation TOML"));
 }

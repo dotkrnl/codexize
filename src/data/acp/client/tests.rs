@@ -1285,8 +1285,8 @@ async fn read_server_line(server_in: &mut tokio::io::DuplexStream) -> String {
     String::from_utf8(buf).expect("utf-8 line")
 }
 
-fn test_runtime() -> std::sync::Arc<tokio::runtime::Runtime> {
-    std::sync::Arc::new(
+fn test_runtime() -> Arc<Runtime> {
+    Arc::new(
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -1412,7 +1412,7 @@ fn transcript_replay_server_request_is_answered_with_permission_response() {
 
 #[test]
 fn actor_shutdown_flushes_queued_requests_before_exit() {
-    let runtime = std::sync::Arc::new(
+    let runtime = Arc::new(
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1441,7 +1441,7 @@ fn actor_shutdown_flushes_queued_requests_before_exit() {
 
 #[test]
 fn actor_preserves_partial_inbound_line_when_command_interleaves() {
-    let runtime = std::sync::Arc::new(
+    let runtime = Arc::new(
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

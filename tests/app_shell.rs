@@ -641,7 +641,7 @@ fn scheduler_tick_does_not_duplicate_background_planning_run_when_models_loaded(
             window_name: "[Planning]".to_string(),
             started_at: Utc::now(),
             ended_at: None,
-            status: codexize::state::RunStatus::Running,
+            status: RunStatus::Running,
             error: None,
             effort: codexize::data::adapters::EffortLevel::Normal,
             effort_mapping: codexize::data::config::schema::EffortMapping::default(),

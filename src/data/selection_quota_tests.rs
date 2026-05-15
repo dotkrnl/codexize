@@ -108,9 +108,9 @@ fn live_map_passes_provider_keys_through_unchanged() {
             name: "claude-shared".to_string(),
             quota_percent: Some(80),
             quota_resets_at: Some(
-                chrono::DateTime::parse_from_rfc3339("2026-05-09T12:00:00Z")
+                DateTime::parse_from_rfc3339("2026-05-09T12:00:00Z")
                     .unwrap()
-                    .with_timezone(&chrono::Utc),
+                    .with_timezone(&Utc),
             ),
         },
         LiveModel {

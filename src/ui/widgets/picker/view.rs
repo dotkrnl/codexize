@@ -85,7 +85,7 @@ impl SessionPicker {
     fn draw_list(
         &mut self,
         frame: &mut ratatui::Frame<'_>,
-        area: ratatui::layout::Rect,
+        area: Rect,
         degenerate: bool,
     ) {
         let visible = self.visible_entries();
@@ -282,7 +282,7 @@ impl SessionPicker {
     fn draw_footer(
         &self,
         frame: &mut ratatui::Frame<'_>,
-        area: ratatui::layout::Rect,
+        area: Rect,
         degenerate: bool,
     ) {
         let caps_fn = |cap: Option<Capability>| -> bool {
@@ -312,7 +312,7 @@ impl SessionPicker {
             }
         }
     }
-    fn draw_input(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
+    fn draw_input(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
         let inner_width = area.width.saturating_sub(4).max(1) as usize;
         let placeholder = "describe your idea...";
         let (text, text_style) = if self.input_buffer.is_empty() {
@@ -399,7 +399,7 @@ impl SessionPicker {
     fn draw_modal(
         &self,
         frame: &mut ratatui::Frame<'_>,
-        area: ratatui::layout::Rect,
+        area: Rect,
         kind: ConfirmKind,
     ) {
         let entry = self
@@ -455,7 +455,7 @@ impl SessionPicker {
         render_modal_overlay(
             frame,
             area,
-            ratatui::style::Color::Yellow,
+            Color::Yellow,
             Some(title),
             content,
             modal_keymap,

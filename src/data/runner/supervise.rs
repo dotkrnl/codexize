@@ -177,7 +177,7 @@ impl Supervisor {
     }
     fn spawn<F>(&self, task: F) -> Result<JoinHandle<()>>
     where
-        F: std::future::Future<Output = ()> + Send + 'static,
+        F: Future<Output = ()> + Send + 'static,
     {
         let Some(handle) = &self.inner.handle else {
             bail!("runner supervisor requires an active tokio runtime");

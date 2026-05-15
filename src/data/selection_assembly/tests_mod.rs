@@ -102,7 +102,7 @@ async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
         ("claude", "claude-opus-4.1", Some(80)),
     ]);
     let resets = make_reset_payload(&[("claude", "claude-shared", None)]);
-    let available = BTreeSet::from([crate::selection::CliKind::Claude]);
+    let available = BTreeSet::from([CliKind::Claude]);
     let temp = tempfile::TempDir::new().unwrap();
     let bin_dir = temp.path().join("bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
@@ -172,7 +172,7 @@ async fn assemble_models_async_elects_publisher_when_reset_coverage_is_partial()
     // Only one of the two quota models has a reset entry — the other
     // creates the coverage gap.
     let resets = make_reset_payload(&[("claude", "claude-shared", None)]);
-    let available = BTreeSet::from([crate::selection::CliKind::Claude]);
+    let available = BTreeSet::from([CliKind::Claude]);
     let temp = tempfile::TempDir::new().unwrap();
     let bin_dir = temp.path().join("bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
@@ -249,7 +249,7 @@ fn refresh_needed_treats_missing_reset_coverage_as_stale() {
             expired: false,
         }),
     };
-    assert!(super::refresh_needed(&loaded));
+    assert!(refresh_needed(&loaded));
 
     // Fully covered + fresh → no refresh needed.
     let quotas = make_quota_payload(&[("claude", "claude-shared", Some(80))]);
@@ -268,7 +268,7 @@ fn refresh_needed_treats_missing_reset_coverage_as_stale() {
             expired: false,
         }),
     };
-    assert!(!super::refresh_needed(&loaded_clean));
+    assert!(!refresh_needed(&loaded_clean));
 
     // Fresh quotas but the resets section missing entirely is a gap too.
     let quotas = make_quota_payload(&[("claude", "claude-shared", Some(80))]);
@@ -283,7 +283,7 @@ fn refresh_needed_treats_missing_reset_coverage_as_stale() {
         }),
         quota_resets: None,
     };
-    assert!(super::refresh_needed(&loaded_no_resets));
+    assert!(refresh_needed(&loaded_no_resets));
 }
 
 #[test]
@@ -374,7 +374,7 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
 fn with_temp_home_cache<T>(
     dashboard: Vec<DashboardEntry>,
     quotas: QuotaPayload,
-    f: impl FnOnce(&std::path::Path) -> T,
+    f: impl FnOnce(&Path) -> T,
 ) -> T {
     let _guard = crate::state::test_fs_lock().lock();
     let temp = tempfile::TempDir::new().unwrap();

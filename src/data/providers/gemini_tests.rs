@@ -25,9 +25,9 @@ fn duplicate_buckets_are_min_d() {
     assert_eq!(
         models[0].quota_resets_at,
         Some(
-            chrono::DateTime::parse_from_rfc3339("2026-05-11T00:00:00Z")
+            DateTime::parse_from_rfc3339("2026-05-11T00:00:00Z")
                 .unwrap()
-                .with_timezone(&chrono::Utc)
+                .with_timezone(&Utc)
         )
     );
 }

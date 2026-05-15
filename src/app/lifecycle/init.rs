@@ -267,7 +267,7 @@ impl App {
         // correspond to a Running run record.
         {
             let artifacts_dir = app.session_dir().join("artifacts");
-            let running_keys: std::collections::HashSet<String> = app
+            let running_keys: HashSet<String> = app
                 .state
                 .agent_runs
                 .iter()
@@ -393,14 +393,14 @@ fn approximate_death_time(session_id: &str) -> chrono::DateTime<chrono::Utc> {
 }
 #[cfg(test)]
 fn app_runner_supervisor(
-    config: &std::sync::Arc<crate::data::config::Config>,
+    config: &Arc<crate::data::config::Config>,
 ) -> crate::data::runner::Supervisor {
     let _ = config;
     crate::data::runner::Supervisor::shared_for_test()
 }
 #[cfg(not(test))]
 fn app_runner_supervisor(
-    config: &std::sync::Arc<crate::data::config::Config>,
+    config: &Arc<crate::data::config::Config>,
 ) -> crate::data::runner::Supervisor {
     crate::data::runner::Supervisor::new(config.clone())
 }

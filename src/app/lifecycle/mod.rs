@@ -725,7 +725,7 @@ impl App {
         self.live_summary_cached_mtime = None;
         // The validated path captures the round base at Implementation(r)
         // entry; mirror that so the simplifier still sees a fresh base_sha.
-        if let crate::state::Stage::ImplementationRound(round) = persisted {
+        if let Stage::ImplementationRound(round) = persisted {
             let round_dir = self
                 .session_dir()
                 .join("rounds")
@@ -775,7 +775,7 @@ impl App {
                 // encodes a passed baseline check.
                 if matches!(
                     self.state.current_stage,
-                    crate::state::Stage::ShardingRunning
+                    Stage::ShardingRunning
                 ) {
                     let _ = self.launch_sharding_with_model(override_model);
                 }
@@ -1056,7 +1056,7 @@ impl App {
     /// force-ship guard has a value to read.
     pub(crate) fn transition_to_blocked(
         &mut self,
-        origin: crate::state::BlockOrigin,
+        origin: BlockOrigin,
     ) -> Result<()> {
         self.state.block_origin = Some(origin);
         self.transition_to_stage(Stage::BlockedNeedsUser)

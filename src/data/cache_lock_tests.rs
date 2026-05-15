@@ -5,7 +5,7 @@ use tempfile::TempDir;
 
 const HOST: &str = "test-host";
 
-fn lock_path(dir: &TempDir) -> std::path::PathBuf {
+fn lock_path(dir: &TempDir) -> PathBuf {
     dir.path().join("test.lock")
 }
 

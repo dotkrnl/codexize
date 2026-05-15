@@ -64,7 +64,7 @@ fn exit_interactive_run_pushes_fsm_into_stopping_go_idle() {
     // 5c-C reads the stop intent from the FSM rather than the persisted
     // pending_termination mirror; assert on the FSM transition.
     let mut state = SessionState::new("interactive-test".to_string());
-    state.current_stage = crate::state::Stage::BuilderRecovery(1);
+    state.current_stage = Stage::BuilderRecovery(1);
     state.agent_runs.push(running_recovery_run(7));
     let mut app = mk_app(state);
     app.current_run_id = Some(7);

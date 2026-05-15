@@ -131,8 +131,8 @@ fn gitignore_generation_is_deterministic_without_runtime_launch() {
 fn git_available() -> bool {
     Command::new("git")
         .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false)

@@ -32,12 +32,12 @@ fn notification_dedupe_is_process_local_and_suppresses_same_marker() {
     let mut first_runtime = NotificationRuntime::enabled_for_test();
 
     first_runtime.emit_interactive_wait(
-        crate::state::Stage::BrainstormRunning,
+        Stage::BrainstormRunning,
         context.clone(),
         marker,
     );
     first_runtime.emit_interactive_wait(
-        crate::state::Stage::BrainstormRunning,
+        Stage::BrainstormRunning,
         context.clone(),
         marker,
     );
@@ -46,7 +46,7 @@ fn notification_dedupe_is_process_local_and_suppresses_same_marker() {
 
     let mut restarted_runtime = NotificationRuntime::enabled_for_test();
     restarted_runtime.emit_interactive_wait(
-        crate::state::Stage::BrainstormRunning,
+        Stage::BrainstormRunning,
         context,
         marker,
     );
@@ -63,7 +63,7 @@ fn formatter_uses_prose_and_attaches_last_agent_response_for_interactive_wait() 
     let mut event = sample_event(
         NotificationEventKind::InputNeeded,
         NotificationReason::InteractiveRunWait,
-        crate::state::Stage::BrainstormRunning,
+        Stage::BrainstormRunning,
     );
     event.context.last_agent_response = Some(
         "Should I keep going on the implementation plan, or focus on tests first?".to_string(),
@@ -114,7 +114,7 @@ fn formatter_attaches_last_live_summary_for_stage_wait_and_pipeline_done() {
     let mut spec_review_event = sample_event(
         NotificationEventKind::InputNeeded,
         NotificationReason::StageWait,
-        crate::state::Stage::SpecReviewPaused,
+        Stage::SpecReviewPaused,
     );
     spec_review_event.context.last_live_summary =
         Some("drafted §3 about caching layer invariants".to_string());
@@ -135,7 +135,7 @@ fn formatter_attaches_last_live_summary_for_stage_wait_and_pipeline_done() {
     let mut done_event = sample_event(
         NotificationEventKind::PipelineDone,
         NotificationReason::StageWait,
-        crate::state::Stage::Done,
+        Stage::Done,
     );
     done_event.context.last_live_summary = Some("ran final validation, all green".to_string());
 
@@ -156,7 +156,7 @@ fn formatter_excerpts_long_context_lines() {
     let mut event = sample_event(
         NotificationEventKind::InputNeeded,
         NotificationReason::InteractiveRunWait,
-        crate::state::Stage::BrainstormRunning,
+        Stage::BrainstormRunning,
     );
     event.context.last_agent_response = Some("x".repeat(5_000));
 
@@ -174,7 +174,7 @@ fn formatter_normalizes_title_and_truncates_body_on_utf8_boundaries() {
     let mut event = sample_event(
         NotificationEventKind::PipelineDone,
         NotificationReason::StageWait,
-        crate::state::Stage::Done,
+        Stage::Done,
     );
     event.context.session_label = "title ".repeat(2000);
 
@@ -200,7 +200,7 @@ async fn publisher_posts_to_configured_endpoint_with_formatted_title_and_body() 
     let context = sample_context("session-a", "brainstorm");
 
     runtime.emit_stage_wait(
-        crate::state::Stage::SpecReviewPaused,
+        Stage::SpecReviewPaused,
         NotificationContext {
             last_live_summary: None,
             ..context
@@ -241,9 +241,9 @@ fn event_gates_suppress_disabled_events() {
     let context = sample_context("session-gate", "brainstorm");
 
     // stage_wait and interactive_wait are disabled
-    runtime.emit_stage_wait(crate::state::Stage::SpecReviewPaused, context.clone());
+    runtime.emit_stage_wait(Stage::SpecReviewPaused, context.clone());
     runtime.emit_interactive_wait(
-        crate::state::Stage::BrainstormRunning,
+        Stage::BrainstormRunning,
         context.clone(),
         InteractiveWaitMarker {
             run_id: 1,
@@ -252,7 +252,7 @@ fn event_gates_suppress_disabled_events() {
     );
 
     // pipeline_done is enabled
-    runtime.emit_pipeline_done(crate::state::Stage::Done, context);
+    runtime.emit_pipeline_done(Stage::Done, context);
 
     assert_eq!(runtime.events().len(), 1);
     assert_eq!(
@@ -305,7 +305,7 @@ fn sample_context(session_id: &str, stage: &str) -> NotificationContext {
 fn sample_event(
     kind: NotificationEventKind,
     reason: NotificationReason,
-    stage: crate::state::Stage,
+    stage: Stage,
 ) -> NotificationEvent {
     let context = sample_context("session-a", "brainstorm");
     NotificationEvent {
@@ -343,7 +343,7 @@ struct MockNtfyServer {
 impl MockNtfyServer {
     async fn spawn(
         responses: Vec<MockResponse>,
-    ) -> (Self, tokio::task::JoinHandle<Vec<RecordedRequest>>) {
+    ) -> (Self, JoinHandle<Vec<RecordedRequest>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let url = format!("http://{}", listener.local_addr().expect("addr"));
         let task = tokio::spawn(async move {

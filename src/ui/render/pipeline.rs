@@ -24,17 +24,17 @@ fn into_pipeline(lines: Vec<Line<'static>>) -> Vec<PipelineLine> {
         })
         .collect()
 }
-fn node_status_style(status: crate::state::NodeStatus) -> ratatui::style::Style {
+fn node_status_style(status: NodeStatus) -> Style {
     use ratatui::style::{Color, Style};
     match status {
-        crate::state::NodeStatus::Pending => Style::default().fg(Color::DarkGray),
-        crate::state::NodeStatus::Running => Style::default().fg(Color::Cyan),
-        crate::state::NodeStatus::WaitingUser | crate::state::NodeStatus::Skipped => {
+        NodeStatus::Pending => Style::default().fg(Color::DarkGray),
+        NodeStatus::Running => Style::default().fg(Color::Cyan),
+        NodeStatus::WaitingUser | NodeStatus::Skipped => {
             Style::default().fg(Color::Yellow)
         }
-        crate::state::NodeStatus::Done => Style::default().fg(Color::Green),
-        crate::state::NodeStatus::Failed => Style::default().fg(Color::Red),
-        crate::state::NodeStatus::FailedUnverified => Style::default().fg(Color::LightYellow),
+        NodeStatus::Done => Style::default().fg(Color::Green),
+        NodeStatus::Failed => Style::default().fg(Color::Red),
+        NodeStatus::FailedUnverified => Style::default().fg(Color::LightYellow),
     }
 }
 impl Widget for PipelineWidget<'_> {
@@ -221,7 +221,7 @@ impl App {
         }
         let stage_label = self.state.current_stage.label();
         let fetcher = CachedSummaryFetcher::new(&self.live_summary_cached_text, &stage_label);
-        let clock = crate::app::clock::WallClock::new();
+        let clock = WallClock::new();
         let line = if self.live_agent_progress_recent() {
             format_running_transcript_leaf(
                 TranscriptLeafMarker::new(),

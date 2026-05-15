@@ -13,7 +13,7 @@ fn test_picker(input_buffer: &str, input_cursor: usize) -> SessionPicker {
         input_cursor,
         show_archived: false,
         confirm_modal: None,
-        create_modes: crate::state::Modes::default(),
+        create_modes: Modes::default(),
         palette: PaletteState::default(),
         status_line: StatusLine::new(),
         config_panel: None,
@@ -70,7 +70,7 @@ fn scan_sessions_skips_directories_without_session_toml() {
 #[test]
 fn new_session_seeds_create_modes() {
     with_temp_codexize_root(|| {
-        let mut picker = SessionPicker::new_with_create_modes(crate::state::Modes {
+        let mut picker = SessionPicker::new_with_create_modes(Modes {
             yolo: false,
             cheap: true,
         })
@@ -82,7 +82,7 @@ fn new_session_seeds_create_modes() {
         let action = picker
             .handle_input_key(KeyEvent::new(
                 KeyCode::Enter,
-                crossterm::event::KeyModifiers::NONE,
+                KeyModifiers::NONE,
             ))
             .unwrap();
         let KeyAction::SelectSession(selection) = action else {
@@ -104,7 +104,7 @@ fn direct_n_key_enters_input_mode_outside_palette() {
         picker
             .handle_key(KeyEvent::new(
                 KeyCode::Char('n'),
-                crossterm::event::KeyModifiers::NONE,
+                KeyModifiers::NONE,
             ))
             .unwrap(),
         KeyAction::Continue
@@ -120,7 +120,7 @@ fn direct_n_key_enters_input_mode_outside_palette() {
         picker
             .handle_key(KeyEvent::new(
                 KeyCode::Esc,
-                crossterm::event::KeyModifiers::NONE,
+                KeyModifiers::NONE,
             ))
             .unwrap(),
         KeyAction::Continue
@@ -136,7 +136,7 @@ fn direct_a_key_remains_palette_only_and_q_quits() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::Char('a'),
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
     assert!(
@@ -148,7 +148,7 @@ fn direct_a_key_remains_palette_only_and_q_quits() {
         picker
             .handle_key(KeyEvent::new(
                 KeyCode::Char('q'),
-                crossterm::event::KeyModifiers::NONE,
+                KeyModifiers::NONE,
             ))
             .unwrap(),
         KeyAction::Quit
@@ -164,7 +164,7 @@ fn picker_quit_and_cancel_keys_have_escape_q_parity() {
         picker
             .handle_key(KeyEvent::new(
                 KeyCode::Char('q'),
-                crossterm::event::KeyModifiers::NONE,
+                KeyModifiers::NONE,
             ))
             .unwrap(),
         KeyAction::Quit
@@ -175,7 +175,7 @@ fn picker_quit_and_cancel_keys_have_escape_q_parity() {
         picker
             .handle_key(KeyEvent::new(
                 KeyCode::Char('q'),
-                crossterm::event::KeyModifiers::NONE,
+                KeyModifiers::NONE,
             ))
             .unwrap(),
         KeyAction::Continue
@@ -187,7 +187,7 @@ fn picker_quit_and_cancel_keys_have_escape_q_parity() {
         picker
             .handle_key(KeyEvent::new(
                 KeyCode::Char('q'),
-                crossterm::event::KeyModifiers::NONE,
+                KeyModifiers::NONE,
             ))
             .unwrap(),
         KeyAction::Continue
@@ -205,7 +205,7 @@ fn input_mode_keeps_colon_literal() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::Char(':'),
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
 
@@ -313,7 +313,7 @@ fn palette_new_without_args_opens_input_modal() {
 fn palette_new_with_args_creates_session_immediately() {
     with_temp_codexize_root(|| {
         let mut picker =
-            SessionPicker::new_with_create_modes(crate::state::Modes::default()).unwrap();
+            SessionPicker::new_with_create_modes(Modes::default()).unwrap();
         picker.input_mode = false;
 
         let action = picker.execute_palette_input("new ship cheap mode").unwrap();
@@ -337,7 +337,7 @@ fn create_session_helper_persists_brainstorm_running_with_modes() {
     with_temp_codexize_root(|| {
         let session_id = create_session(
             "ship the dashboard",
-            crate::state::Modes {
+            Modes {
                 yolo: true,
                 cheap: true,
             },
@@ -358,7 +358,7 @@ fn create_session_helper_logs_session_created_and_mode_events() {
     with_temp_codexize_root(|| {
         let session_id = create_session(
             "log it",
-            crate::state::Modes {
+            Modes {
                 yolo: true,
                 cheap: false,
             },
@@ -382,7 +382,7 @@ fn create_session_helper_logs_session_created_and_mode_events() {
 fn palette_idea_alias_creates_session_immediately() {
     with_temp_codexize_root(|| {
         let mut picker =
-            SessionPicker::new_with_create_modes(crate::state::Modes::default()).unwrap();
+            SessionPicker::new_with_create_modes(Modes::default()).unwrap();
         picker.input_mode = false;
 
         let action = picker
@@ -405,7 +405,7 @@ fn palette_idea_alias_creates_session_immediately() {
 
 #[test]
 fn mode_badge_labels_include_cheap_marker() {
-    let labels = mode_badge_labels(crate::state::Modes {
+    let labels = mode_badge_labels(Modes {
         yolo: false,
         cheap: true,
     });
@@ -441,7 +441,7 @@ fn picker_with_entries(entries: Vec<SessionEntry>, selected: usize) -> SessionPi
         input_cursor: 0,
         show_archived: false,
         confirm_modal: None,
-        create_modes: crate::state::Modes::default(),
+        create_modes: Modes::default(),
         palette: PaletteState::default(),
         status_line: StatusLine::new(),
         config_panel: None,
@@ -455,7 +455,7 @@ fn dummy_entry(id: &str, summary: &str) -> SessionEntry {
         session_id: id.to_string(),
         idea_summary: summary.to_string(),
         current_stage: Stage::IdeaInput,
-        modes: crate::state::Modes::default(),
+        modes: Modes::default(),
         last_modified: SystemTime::now(),
         archived: false,
     }
@@ -547,7 +547,7 @@ fn space_toggles_expansion_on_selected_session() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::Char(' '),
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
     assert_eq!(picker.expanded, Some("alpha".to_string()));
@@ -555,7 +555,7 @@ fn space_toggles_expansion_on_selected_session() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::Char(' '),
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
     assert_eq!(picker.expanded, None);
@@ -576,7 +576,7 @@ fn navigation_collapses_expanded_session() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::Char(' '),
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
     assert_eq!(picker.expanded, Some("beta".to_string()));
@@ -585,7 +585,7 @@ fn navigation_collapses_expanded_session() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::Up,
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
     assert_eq!(picker.selected, 0);
@@ -595,7 +595,7 @@ fn navigation_collapses_expanded_session() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::Char(' '),
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
     assert_eq!(picker.expanded, Some("alpha".to_string()));
@@ -604,7 +604,7 @@ fn navigation_collapses_expanded_session() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::Down,
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
     assert_eq!(picker.selected, 1);
@@ -630,7 +630,7 @@ fn pgup_pgdn_use_visible_body_step_and_collapse_expansion() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::Char(' '),
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
     assert_eq!(picker.expanded, Some("sess-8".to_string()));
@@ -639,7 +639,7 @@ fn pgup_pgdn_use_visible_body_step_and_collapse_expansion() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::PageUp,
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
     assert_eq!(picker.expanded, None);
@@ -650,7 +650,7 @@ fn pgup_pgdn_use_visible_body_step_and_collapse_expansion() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::Char(' '),
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
     assert_eq!(picker.expanded, Some("sess-8".to_string()));
@@ -658,7 +658,7 @@ fn pgup_pgdn_use_visible_body_step_and_collapse_expansion() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::PageDown,
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
     assert_eq!(picker.expanded, None);
@@ -683,7 +683,7 @@ fn expanded_details_force_viewport_to_scroll_when_off_screen() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::Char(' '),
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
 
@@ -695,7 +695,7 @@ fn expanded_details_force_viewport_to_scroll_when_off_screen() {
         picker
             .handle_key(KeyEvent::new(
                 KeyCode::Down,
-                crossterm::event::KeyModifiers::NONE,
+                KeyModifiers::NONE,
             ))
             .unwrap();
     }
@@ -720,7 +720,7 @@ fn expanded_session_renders_detail_lines() {
     picker
         .handle_key(KeyEvent::new(
             KeyCode::Char(' '),
-            crossterm::event::KeyModifiers::NONE,
+            KeyModifiers::NONE,
         ))
         .unwrap();
 
@@ -925,7 +925,7 @@ fn palette_config_handles_loader_error() {
 #[test]
 fn create_session_sets_planned_after_session_id_to_none_when_no_earlier_done() {
     with_temp_codexize_root(|| {
-        let session_id = create_session("first idea", crate::state::Modes::default(), None)
+        let session_id = create_session("first idea", Modes::default(), None)
             .expect("create_session succeeds");
 
         let state = SessionState::load(&session_id).expect("load new session");
@@ -940,14 +940,14 @@ fn create_session_sets_planned_after_session_id_to_none_when_no_earlier_done() {
 fn create_session_sets_planned_after_session_id_to_newest_earlier_done() {
     with_temp_codexize_root(|| {
         // Create an earlier session and mark it Done.
-        let earlier_id = create_session("earlier idea", crate::state::Modes::default(), None)
+        let earlier_id = create_session("earlier idea", Modes::default(), None)
             .expect("create earlier session");
         let mut earlier = SessionState::load(&earlier_id).unwrap();
         earlier.current_stage = Stage::Done;
         earlier.save().unwrap();
 
         // Create a later session — it should baseline to the earlier Done one.
-        let later_id = create_session("later idea", crate::state::Modes::default(), None)
+        let later_id = create_session("later idea", Modes::default(), None)
             .expect("create later session");
         let later = SessionState::load(&later_id).expect("load later session");
         assert_eq!(
@@ -962,7 +962,7 @@ fn create_session_sets_planned_after_session_id_to_newest_earlier_done() {
 fn create_session_ignores_archived_done_sessions_for_baseline() {
     with_temp_codexize_root(|| {
         // Create an earlier session, mark it Done and archived.
-        let archived_id = create_session("archived idea", crate::state::Modes::default(), None)
+        let archived_id = create_session("archived idea", Modes::default(), None)
             .expect("create archived session");
         let mut archived = SessionState::load(&archived_id).unwrap();
         archived.current_stage = Stage::Done;
@@ -970,7 +970,7 @@ fn create_session_ignores_archived_done_sessions_for_baseline() {
         archived.save().unwrap();
 
         // Create a later session — archived Done sessions are excluded.
-        let later_id = create_session("later idea", crate::state::Modes::default(), None)
+        let later_id = create_session("later idea", Modes::default(), None)
             .expect("create later session");
         let later = SessionState::load(&later_id).expect("load later session");
         assert!(
@@ -1009,7 +1009,7 @@ fn newest_earlier_done_baseline_selects_newest_earlier_done() {
             session_id: "20250101-000000-000000000".to_string(),
             idea_summary: "a".to_string(),
             current_stage: Stage::Done,
-            modes: crate::state::Modes::default(),
+            modes: Modes::default(),
             last_modified: SystemTime::now(),
             archived: false,
         },
@@ -1017,7 +1017,7 @@ fn newest_earlier_done_baseline_selects_newest_earlier_done() {
             session_id: "20250601-000000-000000000".to_string(),
             idea_summary: "b".to_string(),
             current_stage: Stage::BrainstormRunning,
-            modes: crate::state::Modes::default(),
+            modes: Modes::default(),
             last_modified: SystemTime::now(),
             archived: false,
         },
@@ -1025,7 +1025,7 @@ fn newest_earlier_done_baseline_selects_newest_earlier_done() {
             session_id: "20250801-000000-000000000".to_string(),
             idea_summary: "c".to_string(),
             current_stage: Stage::Done,
-            modes: crate::state::Modes::default(),
+            modes: Modes::default(),
             last_modified: SystemTime::now(),
             archived: false,
         },
@@ -1048,7 +1048,7 @@ fn newest_earlier_done_baseline_returns_none_when_no_earlier_done() {
         session_id: "20250101-000000-000000000".to_string(),
         idea_summary: "a".to_string(),
         current_stage: Stage::BrainstormRunning,
-        modes: crate::state::Modes::default(),
+        modes: Modes::default(),
         last_modified: SystemTime::now(),
         archived: false,
     }];
@@ -1067,7 +1067,7 @@ fn newest_earlier_done_baseline_ignores_later_sessions() {
             session_id: "20250101-000000-000000000".to_string(),
             idea_summary: "a".to_string(),
             current_stage: Stage::Done,
-            modes: crate::state::Modes::default(),
+            modes: Modes::default(),
             last_modified: SystemTime::now(),
             archived: false,
         },
@@ -1075,7 +1075,7 @@ fn newest_earlier_done_baseline_ignores_later_sessions() {
             session_id: "20251201-000000-000000000".to_string(),
             idea_summary: "b".to_string(),
             current_stage: Stage::Done,
-            modes: crate::state::Modes::default(),
+            modes: Modes::default(),
             last_modified: SystemTime::now(),
             archived: false,
         },

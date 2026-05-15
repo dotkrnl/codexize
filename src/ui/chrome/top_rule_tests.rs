@@ -80,7 +80,7 @@ fn styled_left_spans_preserve_badge_style() {
                 "[CHEAP]".to_string(),
                 Style::default()
                     .fg(Color::Green)
-                    .add_modifier(ratatui::style::Modifier::BOLD),
+                    .add_modifier(Modifier::BOLD),
             ),
         ],
         Some("running"),
@@ -97,7 +97,7 @@ fn styled_left_spans_preserve_badge_style() {
         cheap
             .style
             .add_modifier
-            .contains(ratatui::style::Modifier::BOLD)
+            .contains(Modifier::BOLD)
     );
 }
 

@@ -2,7 +2,7 @@ use super::*;
 
 fn write_verdict(dir: &tempfile::TempDir, content: &str) -> std::path::PathBuf {
     let path = dir.path().join("simplification.toml");
-    std::fs::write(&path, content).unwrap();
+    fs::write(&path, content).unwrap();
     path
 }
 

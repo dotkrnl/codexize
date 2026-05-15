@@ -254,7 +254,7 @@ fn make_acp_test_launch(session_id: &str, window_name: &str, temp: &Path) -> Man
                 model: "model".to_string(),
                 reasoning_effort: crate::data::acp::AcpReasoningEffort::Medium,
                 permission_mode: crate::data::acp::AcpPermissionMode::Ask,
-                policy: crate::data::acp::AcpLaunchPolicy::default(),
+                policy: AcpLaunchPolicy::default(),
                 metadata: std::collections::BTreeMap::new(),
             },
         },

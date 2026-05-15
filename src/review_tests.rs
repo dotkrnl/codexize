@@ -2,7 +2,7 @@ use super::*;
 
 fn write_review(dir: &tempfile::TempDir, content: &str) -> std::path::PathBuf {
     let path = dir.path().join("review.toml");
-    std::fs::write(&path, content).unwrap();
+    fs::write(&path, content).unwrap();
     path
 }
 
@@ -312,7 +312,7 @@ summary = "Looks good"
     approved.enforce_terminal_review(true).unwrap();
 
     let revise_path = dir.path().join("revise.toml");
-    std::fs::write(
+    fs::write(
         &revise_path,
         r#"status = "revise"
 summary = "Fix the loop"

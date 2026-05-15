@@ -25,7 +25,7 @@ fn sample_request(cli: CliKind) -> AcpLaunchRequest {
             cheap: true,
             interactive: false,
         },
-        policy: acp::AcpLaunchPolicy::default(),
+        policy: AcpLaunchPolicy::default(),
     }
 }
 
@@ -182,7 +182,7 @@ fn opencode_go_launch_name_passes_through_verbatim() {
             cheap: false,
             interactive: false,
         },
-        policy: acp::AcpLaunchPolicy::default(),
+        policy: AcpLaunchPolicy::default(),
     };
 
     let resolved = AcpConfig::default().resolve(&request).expect("resolve");
@@ -265,7 +265,7 @@ fn final_validation_policy_is_exported_to_session_env_and_metadata() {
         .join("artifacts/live_summary.final-validation-r1.txt");
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
-        policy: acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
+        policy: AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
         ..sample_request(CliKind::Codex)
     };
 
@@ -285,7 +285,7 @@ fn final_validation_policy_is_exported_to_session_env_and_metadata() {
     assert!(resolved.session.policy.enforce_readonly_workspace);
     assert!(matches!(
         resolved.session.policy.shell_policy,
-        acp::AcpShellCommandPolicy::Allowlist(_)
+        AcpShellCommandPolicy::Allowlist(_)
     ));
     assert_eq!(
         resolved
@@ -350,7 +350,7 @@ fn dreaming_policy_allows_only_memory_report_and_live_summary_writes() {
         .join(".codexize/sessions/session/artifacts/live_summary.dreaming-r2-a1.txt");
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
-        policy: acp::AcpLaunchPolicy::dreaming(&report_path, &live_summary_path),
+        policy: AcpLaunchPolicy::dreaming(&report_path, &live_summary_path),
         ..sample_request(CliKind::Codex)
     };
 
@@ -370,7 +370,7 @@ fn dreaming_policy_allows_only_memory_report_and_live_summary_writes() {
     assert!(resolved.session.policy.enforce_readonly_workspace);
     assert!(matches!(
         resolved.session.policy.shell_policy,
-        acp::AcpShellCommandPolicy::Allowlist(_)
+        AcpShellCommandPolicy::Allowlist(_)
     ));
     assert_eq!(
         resolved
@@ -404,7 +404,7 @@ fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
         .join("artifacts/live_summary.simplifier-stage-r1-a1.txt");
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
-        policy: acp::AcpLaunchPolicy::simplifier(&simplification_path, &live_summary_path),
+        policy: AcpLaunchPolicy::simplifier(&simplification_path, &live_summary_path),
         ..sample_request(CliKind::Codex)
     };
 
@@ -418,7 +418,7 @@ fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
     assert!(!resolved.session.policy.enforce_readonly_workspace);
     assert!(matches!(
         resolved.session.policy.shell_policy,
-        acp::AcpShellCommandPolicy::FullAccess
+        AcpShellCommandPolicy::FullAccess
     ));
     // Mandatory write paths still advertised so the runtime can surface
     // misrouted required-output writes. Memory glob is included so the

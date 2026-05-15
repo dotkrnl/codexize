@@ -3612,7 +3612,7 @@ mod tests {
     #[test]
     fn model_tab_x_deletes_user_added_provider() {
         let mut config = Config::baked_defaults();
-        config.providers = crate::data::config::schema::Override::explicit(vec![
+        config.providers = Override::explicit(vec![
             crate::data::config::schema::ProviderEntry {
                 cli: crate::selection::CliKind::Opencode,
                 launch_name: "custom-opus".to_string(),
@@ -3976,7 +3976,7 @@ mod tests {
         // points at a row no provider serves yet. The matched entry renders
         // bare; the unmatched entry trails the soft-warning suffix.
         let mut config = Config::baked_defaults();
-        config.providers = crate::data::config::schema::Override::explicit(vec![
+        config.providers = Override::explicit(vec![
             crate::data::config::schema::ProviderEntry {
                 cli: crate::selection::CliKind::Claude,
                 launch_name: "claude-opus-4.7".to_string(),
@@ -4183,7 +4183,7 @@ mod tests {
             quota_lookup_key: None,
             display_order: 0,
         });
-        config.providers = crate::data::config::schema::Override::explicit(overrides);
+        config.providers = Override::explicit(overrides);
 
         let mut state = ConfigPanelState::open_at(
             &config,
@@ -4581,7 +4581,7 @@ mod tests {
             quota_lookup_key: None,
             display_order: 0,
         });
-        config.providers = crate::data::config::schema::Override::explicit(overrides);
+        config.providers = Override::explicit(overrides);
 
         let mut state = ConfigPanelState::open_at(
             &config,

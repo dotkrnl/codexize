@@ -1,8 +1,8 @@
 use super::*;
 
-fn write(path: &std::path::Path, body: &str) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, body).unwrap();
+fn write(path: &Path, body: &str) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, body).unwrap();
 }
 
 fn valid_manifest_body() -> String {
@@ -30,7 +30,7 @@ supersedes = []
 
 #[test]
 fn memory_root_resolves_from_codexize_parent_not_artifact_dir() {
-    let path = std::path::Path::new(
+    let path = Path::new(
         "/repo/.codexize/sessions/20260506-150024/artifacts/final_validation_1.toml",
     );
 
@@ -138,10 +138,10 @@ fn ensure_memory_bootstrap_seeds_index_and_manifest_idempotently() {
     assert!(manifest.entries.is_empty());
 
     // Hand-edit the seed and ensure a second call leaves it alone.
-    std::fs::write(root.join("index.md"), "# Memory\n\n- existing entry\n").unwrap();
+    fs::write(root.join("index.md"), "# Memory\n\n- existing entry\n").unwrap();
     ensure_memory_bootstrap(&root).unwrap();
     assert_eq!(
-        std::fs::read_to_string(root.join("index.md")).unwrap(),
+        fs::read_to_string(root.join("index.md")).unwrap(),
         "# Memory\n\n- existing entry\n"
     );
 }
@@ -177,7 +177,7 @@ fn prune_journal_entries_keeps_recent_and_drops_old() {
     let dir = tempfile::TempDir::new().unwrap();
     let memory_root = dir.path().join(".codexize/memory");
     let journal = memory_root.join("journal");
-    std::fs::create_dir_all(&journal).unwrap();
+    fs::create_dir_all(&journal).unwrap();
 
     let now = Utc::now();
     let now_index = (now.year() as i64) * 12 + (now.month() as i64 - 1);
@@ -218,7 +218,7 @@ fn prune_journal_entries_keeps_recent_and_drops_old() {
 fn prune_journal_entries_noops_when_directory_missing() {
     let dir = tempfile::TempDir::new().unwrap();
     let memory_root = dir.path().join(".codexize/memory");
-    std::fs::create_dir_all(&memory_root).unwrap();
+    fs::create_dir_all(&memory_root).unwrap();
     // No journal/ subdir; the helper must not error and must not create
     // any directory of its own.
     let pruned = prune_journal_entries(&memory_root, 6).unwrap();
@@ -231,7 +231,7 @@ fn prune_journal_entries_skips_when_retention_is_zero() {
     let dir = tempfile::TempDir::new().unwrap();
     let memory_root = dir.path().join(".codexize/memory");
     let journal = memory_root.join("journal");
-    std::fs::create_dir_all(&journal).unwrap();
+    fs::create_dir_all(&journal).unwrap();
     let ancient = journal.join("1970-01.md");
     write(&ancient, "# pin\n");
 

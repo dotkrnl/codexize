@@ -257,7 +257,7 @@ fn make_entry_with_order(name: &str, _vendor: &str, display_order: usize) -> Das
     DashboardEntry {
         name: name.to_string(),
         ipbr_stage_scores: crate::selection::IpbrStageScores::default(),
-        score_source: crate::selection::ScoreSource::None,
+        score_source: ScoreSource::None,
         display_order,
     }
 }
@@ -447,7 +447,7 @@ fn assemble_omits_models_with_unknown_vendor() {
 #[test]
 fn assemble_warns_only_for_provider_models_missing_from_ipbr() {
     use crate::data::config::schema::{EffortMapping, ProviderEntry};
-    let mut dashboard: Vec<DashboardEntry> = crate::logic::selection::baked::BAKED_TABLE
+    let mut dashboard: Vec<DashboardEntry> = baked::BAKED_TABLE
         .iter()
         .map(|row| make_ipbr_entry(row.model, "ipbr", row.model))
         .collect();
@@ -491,7 +491,7 @@ fn assemble_collapsed_kimi_selection_uses_ipbr_stage_scores() {
     use crate::selection::ranking::stage_rank_score;
 
     let mut entry = make_entry_with_order("kimi-k2.6", "moonshotai", 0);
-    entry.score_source = crate::selection::ScoreSource::Ipbr;
+    entry.score_source = ScoreSource::Ipbr;
     entry.ipbr_stage_scores = crate::selection::IpbrStageScores {
         build: Some(82.0),
         review: Some(79.0),

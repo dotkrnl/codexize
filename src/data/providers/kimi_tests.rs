@@ -13,9 +13,9 @@ fn usage_limit_reset_time_is_preserved() {
     assert_eq!(
         usage_reset_time(object),
         Some(
-            chrono::DateTime::parse_from_rfc3339("2026-05-10T12:00:00Z")
+            DateTime::parse_from_rfc3339("2026-05-10T12:00:00Z")
                 .unwrap()
-                .with_timezone(&chrono::Utc)
+                .with_timezone(&Utc)
         )
     );
 }

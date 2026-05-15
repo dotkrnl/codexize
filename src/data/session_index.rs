@@ -468,7 +468,7 @@ mod tests {
             index.refresh().expect("first refresh");
             assert_eq!(index.snapshot_for_scheduler().len(), 2);
 
-            std::fs::remove_dir_all(state::session_dir("20260511-080000-000000001"))
+            fs::remove_dir_all(state::session_dir("20260511-080000-000000001"))
                 .expect("rm session dir");
             index.refresh().expect("second refresh");
 
@@ -487,8 +487,8 @@ mod tests {
             // Truncate the second session's toml to invalid bytes — load
             // will fail with a parse error.
             let bad_id = "20260511-090000-000000001";
-            std::fs::create_dir_all(state::session_dir(bad_id)).expect("mkdir bad session");
-            std::fs::write(
+            fs::create_dir_all(state::session_dir(bad_id)).expect("mkdir bad session");
+            fs::write(
                 state::session_dir(bad_id).join("session.toml"),
                 b"!!! not valid toml",
             )

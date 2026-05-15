@@ -12,10 +12,10 @@ pub struct DashboardModel {
     pub name: String,
     /// Per-stage ipbr rank scores. `None` per stage means the matched
     /// ipbr row did not provide that stage score.
-    pub ipbr_stage_scores: crate::selection::IpbrStageScores,
+    pub ipbr_stage_scores: IpbrStageScores,
     /// Where the per-stage rank scores came from. Defaults to
     /// `ScoreSource::None`; only `Ipbr` may drive automatic selection.
-    pub score_source: crate::selection::ScoreSource,
+    pub score_source: ScoreSource,
     pub display_order: usize,
 }
 /// Outcome of a dashboard refresh. ipbr is the sole authoritative source;

@@ -2,7 +2,7 @@ use super::*;
 
 fn write_summary(dir: &tempfile::TempDir, content: &str) -> std::path::PathBuf {
     let path = dir.path().join("coder_summary.toml");
-    std::fs::write(&path, content).unwrap();
+    fs::write(&path, content).unwrap();
     path
 }
 

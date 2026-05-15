@@ -274,7 +274,7 @@ fn capture_mount_device_id_for_path(path: &std::path::Path) -> Option<u64> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        std::fs::metadata(path).ok().map(|m| m.dev())
+        fs::metadata(path).ok().map(|m| m.dev())
     }
     #[cfg(not(unix))]
     {

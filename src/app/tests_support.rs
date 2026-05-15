@@ -32,7 +32,7 @@ pub(crate) fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
     result.expect("test panicked")
 }
 
-pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
+pub(crate) fn mk_app(state: SessionState) -> App {
     let nodes = build_tree(&state);
     let current = current_node_index(&nodes);
     let selected_key = node_key_at_path(&nodes, &[current]);
@@ -103,10 +103,10 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
         paths: crate::data::config::Config::baked_defaults().paths_view(),
         memory_view: crate::data::config::Config::baked_defaults().memory_view(),
         ui_view: crate::data::config::Config::baked_defaults().ui_view(),
-        watchdog: super::watchdog::WatchdogRegistry::new(),
+        watchdog: watchdog::WatchdogRegistry::new(),
         test_launch_harness: None,
         messages: Vec::new(),
-        status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
+        status_line: Rc::new(RefCell::new(StatusLine::new())),
         prev_models_mode: models_area::ModelsAreaMode::default(),
         palette: palette::PaletteState::default(),
         command_return_target: None,

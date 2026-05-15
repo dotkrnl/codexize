@@ -1438,12 +1438,12 @@ mod tests {
         let cfg = load_str(toml).unwrap();
         assert_eq!(cfg.providers.value().len(), 1);
         let p = &cfg.providers.value()[0];
-        assert_eq!(p.cli, crate::selection::CliKind::Opencode);
+        assert_eq!(p.cli, CliKind::Opencode);
         assert_eq!(p.launch_name, "opencode-go/deepseek-v4-flash");
         assert_eq!(p.model, "deepseek-v4-flash");
         assert_eq!(
             p.subscription,
-            crate::selection::SubscriptionKind::OpencodeGo
+            SubscriptionKind::OpencodeGo
         );
     }
 
@@ -1452,14 +1452,14 @@ mod tests {
         let toml = "[meta]\nversion = 1\n\n[[providers]]\nlaunch = \"opencode/opencode-go/deepseek-v4-flash\"\nmodel = \"deepseek-v4-flash\"\nsubscription = \"codex\"\nquota_disabled = true\n";
         let cfg = load_str(toml).unwrap();
         let p = &cfg.providers.value()[0];
-        assert_eq!(p.cli, crate::selection::CliKind::Opencode);
-        assert_eq!(p.subscription, crate::selection::SubscriptionKind::Codex);
+        assert_eq!(p.cli, CliKind::Opencode);
+        assert_eq!(p.subscription, SubscriptionKind::Codex);
         assert!(p.quota_disabled);
     }
 
     #[test]
     fn cli_kind_parse_rejects_slash() {
-        assert!(crate::selection::CliKind::parse("claude/foo").is_none());
-        assert!(crate::selection::CliKind::parse("opencode/").is_none());
+        assert!(CliKind::parse("claude/foo").is_none());
+        assert!(CliKind::parse("opencode/").is_none());
     }
 }

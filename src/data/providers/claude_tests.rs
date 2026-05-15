@@ -16,9 +16,9 @@ fn min_across_windows() {
     assert_eq!(
         models[0].quota_resets_at,
         Some(
-            chrono::DateTime::parse_from_rfc3339("2026-04-30T00:00:00Z")
+            DateTime::parse_from_rfc3339("2026-04-30T00:00:00Z")
                 .unwrap()
-                .with_timezone(&chrono::Utc)
+                .with_timezone(&Utc)
         )
     );
 }

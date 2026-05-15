@@ -67,12 +67,12 @@ impl App {
         if !Self::test_uses_real_live_summary_watcher() {
             return;
         }
-        let initial_mtime = crate::data::cache::watcher::current_mtime(&dir.join("models.json"));
-        match crate::data::cache::CacheWatcher::start(&dir, initial_mtime) {
-            crate::data::cache::CacheWatcherOutcome::Active(watcher) => {
+        let initial_mtime = cache::watcher::current_mtime(&dir.join("models.json"));
+        match cache::CacheWatcher::start(&dir, initial_mtime) {
+            cache::CacheWatcherOutcome::Active(watcher) => {
                 self.cache_watcher = Some(watcher);
             }
-            crate::data::cache::CacheWatcherOutcome::PollOnly { reason, watcher } => {
+            cache::CacheWatcherOutcome::PollOnly { reason, watcher } => {
                 self.cache_watcher = Some(watcher);
                 self.surface_boundary_error(reason, false);
             }
@@ -95,7 +95,7 @@ impl App {
             cache_path = %cache_path.display(),
             "external publish observed; reloading model strip"
         );
-        let loaded = crate::data::cache::load(&self.paths.cache_root);
+        let loaded = cache::load(&self.paths.cache_root);
         let providers = self.config.providers.value().clone();
         let available = self.available_clis_for_cache_watcher();
         let models =
@@ -106,12 +106,12 @@ impl App {
             // the follower does NOT need to re-fetch quotas right now,
             // so reset its retry clock the same way a successful refresh
             // would.
-            self.model_refresh = super::state::ModelRefreshState::Idle(std::time::Instant::now());
+            self.model_refresh = ModelRefreshState::Idle(Instant::now());
         }
     }
     fn available_clis_for_cache_watcher(
         &self,
-    ) -> std::collections::BTreeSet<crate::selection::CliKind> {
+    ) -> BTreeSet<crate::selection::CliKind> {
         crate::data::acp::AcpConfig::from_config_views(
             &self.config.acp.agents,
             &self.config.acp_install_view(),
@@ -234,11 +234,11 @@ impl App {
         let decisions = self.watchdog.evaluate_all(now);
         for (run_id, decision) in decisions {
             match decision {
-                super::watchdog::WatchdogDecision::Idle => {}
-                super::watchdog::WatchdogDecision::EmitWarning => {
+                watchdog::WatchdogDecision::Idle => {}
+                watchdog::WatchdogDecision::EmitWarning => {
                     self.dispatch_watchdog_warning(run_id, now);
                 }
-                super::watchdog::WatchdogDecision::EmitKill => {
+                watchdog::WatchdogDecision::EmitKill => {
                     self.dispatch_watchdog_kill(run_id, now);
                 }
             }
@@ -260,9 +260,9 @@ impl App {
             return;
         };
         let prompt_body = observation::read_prompt_body(&prompt_path)
-            .unwrap_or_else(|| super::watchdog::PROMPT_UNAVAILABLE_BODY.to_string());
+            .unwrap_or_else(|| watchdog::PROMPT_UNAVAILABLE_BODY.to_string());
         let warning_text =
-            super::watchdog::warning_text(idle_minutes, remaining_minutes, &prompt_body);
+            watchdog::warning_text(idle_minutes, remaining_minutes, &prompt_body);
         let interrupt_sent = self
             .runner_supervisor
             .force_interrupt_run(run_id, warning_text);

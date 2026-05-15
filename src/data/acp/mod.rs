@@ -7,7 +7,7 @@ mod tool_call;
 pub(crate) fn client_updates_from_session_updates_for_test(
     values: impl IntoIterator<Item = serde_json::Value>,
     cwd: &std::path::Path,
-) -> Vec<crate::data::acp::ClientUpdate> {
+) -> Vec<ClientUpdate> {
     let mut map = tool_call::ToolCallMap::new();
     let mut boundary = dispatch::AcpBoundaryState::new();
     let mut out = std::collections::VecDeque::new();

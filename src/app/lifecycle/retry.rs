@@ -174,6 +174,6 @@ pub(crate) fn lifecycle_stage_for_stage_retry(stage: &str) -> LifecycleStage {
     use crate::logic::rules::retry_stage_for_stage;
     retry_stage_for_stage(stage).map_or(
         LifecycleStage::Plan,
-        crate::logic::pipeline::stage::Stage::to_lifecycle_stage,
+        Stage::to_lifecycle_stage,
     )
 }

@@ -31,7 +31,7 @@ impl App {
         };
         self.push_status(
             status.to_string(),
-            status_line::Severity::Info,
+            Severity::Info,
             Duration::from_secs(5),
         );
     }
@@ -193,7 +193,7 @@ impl App {
             .join("rounds")
             .join(format!("{:03}", run.round))
             .join("recovery.toml");
-        if super::prompts::validate_stage_toml_writes(&session_dir, "recovery", run.round).is_err()
+        if prompts::validate_stage_toml_writes(&session_dir, "recovery", run.round).is_err()
         {
             return false;
         }

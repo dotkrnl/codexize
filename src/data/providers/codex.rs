@@ -134,12 +134,14 @@ async fn fetch_usage_payload(identity: &UsageIdentity) -> Result<Value> {
             .ok()
             .unwrap_or_else(|| DEFAULT_CHATGPT_BASE_URL.to_string()),
     );
-    let usage_url = if base_url.contains("/backend-api") {
-        let account_id = identity
+    let backend_api = base_url.contains("/backend-api");
+    if backend_api {
+        identity
             .account_id
             .as_deref()
-            .context("no ChatGPT account id found for backend-api usage request")?;
-        let _ = account_id;
+            .context("no CODEX_ACCOUNT_ID found for backend-api usage request")?;
+    }
+    let usage_url = if backend_api {
         format!("{base_url}/wham/usage")
     } else {
         format!("{base_url}/api/codex/usage")
@@ -158,13 +160,8 @@ fn record_rate_limit(quotas: &mut BTreeMap<String, ModelQuota>, name: &str, rate
     let quota = quotas.entry(name.to_string()).or_default();
     for key in ["primary_window", "secondary_window"] {
         let window = rate_limit.get(key);
-        let used_percent = rate_limit
-            .get(key)
-            .and_then(|window| {
-                window
-                    .get("used_percent")
-                    .or_else(|| window.get("usedPercent"))
-            })
+        let used_percent = window
+            .and_then(|window| window.get("used_percent").or_else(|| window.get("usedPercent")))
             .and_then(Value::as_f64);
         if let Some(used_percent) = used_percent {
             let remaining = (100.0 - used_percent).clamp(0.0, 100.0);

@@ -188,7 +188,9 @@ impl Supervisor {
         let Some(handle) = &self.inner.handle else {
             return;
         };
-        if Handle::try_current().is_ok() {
+        if Handle::try_current().is_ok_and(|h| {
+            matches!(h.runtime_flavor(), tokio::runtime::RuntimeFlavor::MultiThread)
+        }) {
             tokio::task::block_in_place(|| {
                 let _ = handle.block_on(join);
             });

@@ -4,9 +4,8 @@ use crate::selection::types::{Candidate, CliKind, IpbrStageScores, ScoreSource};
 /// Derive cheap/tough/effort eligibility flags from a model name, used
 /// by the `sample_model` fixture to seed a single Candidate that
 /// `is_cheap_eligible` / `is_tough_eligible` can read. Mirrors the
-/// pre-task-2 vendor.rs heuristics so the existing test contract keeps
-/// asserting the same eligibility outcomes — the heuristic now lives in
-/// fixture code instead of production selection logic.
+/// production eligibility rules enough for tests to build focused model
+/// fixtures without running the full assembly path.
 fn eligibility_for_name(vendor: SubscriptionKind, name: &str) -> (bool, bool) {
     let lower = name.to_lowercase();
     let cheap = match vendor {

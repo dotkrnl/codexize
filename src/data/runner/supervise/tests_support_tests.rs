@@ -26,9 +26,7 @@ fn insert_fixture_run(
 
 #[test]
 fn supervisor_targets_input_by_run_id_when_labels_match() {
-    let supervisor = Supervisor::new(Arc::new(
-        crate::data::config::Config::baked_defaults(),
-    ));
+    let supervisor = Supervisor::new(Arc::new(crate::data::config::Config::baked_defaults()));
     let mut first_rx = insert_fixture_run(&supervisor, 10, "[Duplicate]", true);
     let mut second_rx = insert_fixture_run(&supervisor, 11, "[Duplicate]", true);
 

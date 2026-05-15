@@ -109,9 +109,7 @@ impl App {
             self.model_refresh = ModelRefreshState::Idle(Instant::now());
         }
     }
-    fn available_clis_for_cache_watcher(
-        &self,
-    ) -> BTreeSet<crate::selection::CliKind> {
+    fn available_clis_for_cache_watcher(&self) -> BTreeSet<crate::selection::CliKind> {
         crate::data::acp::AcpConfig::from_config_views(
             &self.config.acp.agents,
             &self.config.acp_install_view(),
@@ -261,8 +259,7 @@ impl App {
         };
         let prompt_body = observation::read_prompt_body(&prompt_path)
             .unwrap_or_else(|| watchdog::PROMPT_UNAVAILABLE_BODY.to_string());
-        let warning_text =
-            watchdog::warning_text(idle_minutes, remaining_minutes, &prompt_body);
+        let warning_text = watchdog::warning_text(idle_minutes, remaining_minutes, &prompt_body);
         let interrupt_sent = self
             .runner_supervisor
             .force_interrupt_run(run_id, warning_text);

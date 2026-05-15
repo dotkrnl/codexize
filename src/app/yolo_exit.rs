@@ -29,11 +29,7 @@ impl App {
         } else {
             "yolo: OFF"
         };
-        self.push_status(
-            status.to_string(),
-            Severity::Info,
-            Duration::from_secs(5),
-        );
+        self.push_status(status.to_string(), Severity::Info, Duration::from_secs(5));
     }
     pub(crate) fn live_yolo_paused_gate(&self) -> Option<&'static str> {
         match self.state.current_stage {
@@ -193,8 +189,7 @@ impl App {
             .join("rounds")
             .join(format!("{:03}", run.round))
             .join("recovery.toml");
-        if prompts::validate_stage_toml_writes(&session_dir, "recovery", run.round).is_err()
-        {
+        if prompts::validate_stage_toml_writes(&session_dir, "recovery", run.round).is_err() {
             return false;
         }
         if tasks::validate(&tasks_path).is_err() {

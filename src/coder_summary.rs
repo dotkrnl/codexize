@@ -58,9 +58,7 @@ impl SpecPlanDefect {
 }
 pub(crate) fn validate_spec_plan_ref(label: &str, target: &str, r: &Ref) -> Result<()> {
     if !matches!(target, "spec" | "plan" | "tasks") {
-        bail!(
-            "{label}: target must be one of \"spec\", \"plan\", \"tasks\" (got {target:?})"
-        );
+        bail!("{label}: target must be one of \"spec\", \"plan\", \"tasks\" (got {target:?})");
     }
     match r.path.as_str() {
         "artifacts/spec.md" | "artifacts/plan.md" | "artifacts/tasks.toml" => {}

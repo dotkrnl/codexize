@@ -444,5 +444,3 @@ fn assemble_models_uses_supplied_cache_dir_when_fresh() {
         assert_eq!(models[0].quota_percent, Some(80));
     });
 }
-
-

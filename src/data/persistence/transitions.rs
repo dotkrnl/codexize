@@ -39,9 +39,7 @@ pub fn execute_transition(state: &mut SessionState, to: Stage) -> Result<()> {
         state.block_origin = None;
     }
     state
-        .log_event(format!(
-            "transitioned stage from {old_stage:?} to {to:?}"
-        ))
+        .log_event(format!("transitioned stage from {old_stage:?} to {to:?}"))
         .context("failed to log transition event")?;
     state
         .save()

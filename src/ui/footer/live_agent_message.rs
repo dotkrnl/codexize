@@ -147,10 +147,7 @@ pub(crate) fn format_running_transcript_leaf<C: Clock>(
     let spinner = SPINNER[spinner_tick % SPINNER.len()];
     let body = capitalize_first(&fetcher.fetch());
     let mut spans = vec![
-        Span::styled(
-            format!("{timestamp} "),
-            Style::default().fg(RUNNING_COLOR),
-        ),
+        Span::styled(format!("{timestamp} "), Style::default().fg(RUNNING_COLOR)),
         Span::styled(
             format!("{spinner} "),
             Style::default()
@@ -174,10 +171,7 @@ pub(crate) fn format_stalled_transcript_leaf<C: Clock>(
     let timestamp = clock.timestamp_string();
     let body = capitalize_first(&fetcher.fetch());
     Line::from(vec![
-        Span::styled(
-            format!("{timestamp} "),
-            Style::default().fg(Color::Yellow),
-        ),
+        Span::styled(format!("{timestamp} "), Style::default().fg(Color::Yellow)),
         Span::styled(
             format!("{} ", SPINNER[0]),
             Style::default()

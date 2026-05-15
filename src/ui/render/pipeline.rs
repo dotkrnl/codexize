@@ -29,9 +29,7 @@ fn node_status_style(status: NodeStatus) -> Style {
     match status {
         NodeStatus::Pending => Style::default().fg(Color::DarkGray),
         NodeStatus::Running => Style::default().fg(Color::Cyan),
-        NodeStatus::WaitingUser | NodeStatus::Skipped => {
-            Style::default().fg(Color::Yellow)
-        }
+        NodeStatus::WaitingUser | NodeStatus::Skipped => Style::default().fg(Color::Yellow),
         NodeStatus::Done => Style::default().fg(Color::Green),
         NodeStatus::Failed => Style::default().fg(Color::Red),
         NodeStatus::FailedUnverified => Style::default().fg(Color::LightYellow),

@@ -164,9 +164,7 @@ pub fn validate_manifest(
     for (i, entry) in manifest.entries.iter().enumerate() {
         for superseded in &entry.supersedes {
             if !ids.contains(superseded.as_str()) {
-                bail!(
-                    "entries[{i}]: unknown supersession reference {superseded}"
-                );
+                bail!("entries[{i}]: unknown supersession reference {superseded}");
             }
         }
     }

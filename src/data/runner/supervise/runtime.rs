@@ -394,7 +394,9 @@ pub(super) async fn finalize_managed_acp_launch(
                 tracing::warn!("failed to write panic launch cause: {e}");
             }
             let head_before = git_rev_parse_head().unwrap_or_default();
-            if let Err(e) = write_finish_stamp_for_outcome(&launch.stamp_path, head_before, 1, "").await {
+            if let Err(e) =
+                write_finish_stamp_for_outcome(&launch.stamp_path, head_before, 1, "").await
+            {
                 tracing::warn!("failed to write panic finish stamp: {e}");
             }
             return;

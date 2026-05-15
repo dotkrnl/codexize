@@ -31,25 +31,13 @@ fn notification_dedupe_is_process_local_and_suppresses_same_marker() {
     };
     let mut first_runtime = NotificationRuntime::enabled_for_test();
 
-    first_runtime.emit_interactive_wait(
-        Stage::BrainstormRunning,
-        context.clone(),
-        marker,
-    );
-    first_runtime.emit_interactive_wait(
-        Stage::BrainstormRunning,
-        context.clone(),
-        marker,
-    );
+    first_runtime.emit_interactive_wait(Stage::BrainstormRunning, context.clone(), marker);
+    first_runtime.emit_interactive_wait(Stage::BrainstormRunning, context.clone(), marker);
 
     assert_eq!(first_runtime.events().len(), 1);
 
     let mut restarted_runtime = NotificationRuntime::enabled_for_test();
-    restarted_runtime.emit_interactive_wait(
-        Stage::BrainstormRunning,
-        context,
-        marker,
-    );
+    restarted_runtime.emit_interactive_wait(Stage::BrainstormRunning, context, marker);
 
     assert_eq!(restarted_runtime.events().len(), 1);
     assert_eq!(
@@ -341,9 +329,7 @@ struct MockNtfyServer {
 }
 
 impl MockNtfyServer {
-    async fn spawn(
-        responses: Vec<MockResponse>,
-    ) -> (Self, JoinHandle<Vec<RecordedRequest>>) {
+    async fn spawn(responses: Vec<MockResponse>) -> (Self, JoinHandle<Vec<RecordedRequest>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let url = format!("http://{}", listener.local_addr().expect("addr"));
         let task = tokio::spawn(async move {

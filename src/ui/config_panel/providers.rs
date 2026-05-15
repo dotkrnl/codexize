@@ -5,11 +5,11 @@
 //! per-provider detail drawer (see `render_provider_detail_overlay`),
 //! not through inline column-cycling.
 
+use super::pad_right;
 use crate::data::config::Config;
 use crate::data::config::schema::{EffortMapping, Override, ProviderEntry};
 use crate::logic::selection::baked;
 use crate::selection::{CliKind, SubscriptionKind};
-use super::pad_right;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -520,4 +520,3 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
         }
     }
 }
-

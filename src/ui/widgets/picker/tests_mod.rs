@@ -80,10 +80,7 @@ fn new_session_seeds_create_modes() {
         picker.input_cursor = picker.input_buffer.chars().count();
 
         let action = picker
-            .handle_input_key(KeyEvent::new(
-                KeyCode::Enter,
-                KeyModifiers::NONE,
-            ))
+            .handle_input_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
             .unwrap();
         let KeyAction::SelectSession(selection) = action else {
             panic!("expected new session selection");
@@ -102,10 +99,7 @@ fn direct_n_key_enters_input_mode_outside_palette() {
 
     assert!(matches!(
         picker
-            .handle_key(KeyEvent::new(
-                KeyCode::Char('n'),
-                KeyModifiers::NONE,
-            ))
+            .handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE,))
             .unwrap(),
         KeyAction::Continue
     ));
@@ -118,10 +112,7 @@ fn direct_n_key_enters_input_mode_outside_palette() {
     // Esc exits without creating a session
     assert!(matches!(
         picker
-            .handle_key(KeyEvent::new(
-                KeyCode::Esc,
-                KeyModifiers::NONE,
-            ))
+            .handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE,))
             .unwrap(),
         KeyAction::Continue
     ));
@@ -134,10 +125,7 @@ fn direct_a_key_remains_palette_only_and_q_quits() {
     picker.input_mode = false;
 
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::Char('a'),
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
         .unwrap();
     assert!(
         !picker.show_archived,
@@ -146,10 +134,7 @@ fn direct_a_key_remains_palette_only_and_q_quits() {
 
     assert!(matches!(
         picker
-            .handle_key(KeyEvent::new(
-                KeyCode::Char('q'),
-                KeyModifiers::NONE,
-            ))
+            .handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE,))
             .unwrap(),
         KeyAction::Quit
     ));
@@ -162,10 +147,7 @@ fn picker_quit_and_cancel_keys_have_escape_q_parity() {
 
     assert!(matches!(
         picker
-            .handle_key(KeyEvent::new(
-                KeyCode::Char('q'),
-                KeyModifiers::NONE,
-            ))
+            .handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE,))
             .unwrap(),
         KeyAction::Quit
     ));
@@ -173,10 +155,7 @@ fn picker_quit_and_cancel_keys_have_escape_q_parity() {
     picker.palette.open();
     assert!(matches!(
         picker
-            .handle_key(KeyEvent::new(
-                KeyCode::Char('q'),
-                KeyModifiers::NONE,
-            ))
+            .handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE,))
             .unwrap(),
         KeyAction::Continue
     ));
@@ -185,10 +164,7 @@ fn picker_quit_and_cancel_keys_have_escape_q_parity() {
     picker.confirm_modal = Some(ConfirmKind::Archive);
     assert!(matches!(
         picker
-            .handle_key(KeyEvent::new(
-                KeyCode::Char('q'),
-                KeyModifiers::NONE,
-            ))
+            .handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE,))
             .unwrap(),
         KeyAction::Continue
     ));
@@ -203,10 +179,7 @@ fn input_mode_keeps_colon_literal() {
     let mut picker = test_picker("", 0);
 
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::Char(':'),
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::Char(':'), KeyModifiers::NONE))
         .unwrap();
 
     assert_eq!(picker.input_buffer, ":");
@@ -312,8 +285,7 @@ fn palette_new_without_args_opens_input_modal() {
 #[test]
 fn palette_new_with_args_creates_session_immediately() {
     with_temp_codexize_root(|| {
-        let mut picker =
-            SessionPicker::new_with_create_modes(Modes::default()).unwrap();
+        let mut picker = SessionPicker::new_with_create_modes(Modes::default()).unwrap();
         picker.input_mode = false;
 
         let action = picker.execute_palette_input("new ship cheap mode").unwrap();
@@ -381,8 +353,7 @@ fn create_session_helper_logs_session_created_and_mode_events() {
 #[test]
 fn palette_idea_alias_creates_session_immediately() {
     with_temp_codexize_root(|| {
-        let mut picker =
-            SessionPicker::new_with_create_modes(Modes::default()).unwrap();
+        let mut picker = SessionPicker::new_with_create_modes(Modes::default()).unwrap();
         picker.input_mode = false;
 
         let action = picker
@@ -545,18 +516,12 @@ fn space_toggles_expansion_on_selected_session() {
     assert_eq!(picker.expanded, None);
 
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::Char(' '),
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
         .unwrap();
     assert_eq!(picker.expanded, Some("alpha".to_string()));
 
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::Char(' '),
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
         .unwrap();
     assert_eq!(picker.expanded, None);
 }
@@ -574,38 +539,26 @@ fn navigation_collapses_expanded_session() {
 
     // Expand beta
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::Char(' '),
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
         .unwrap();
     assert_eq!(picker.expanded, Some("beta".to_string()));
 
     // Move up collapses
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::Up,
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
         .unwrap();
     assert_eq!(picker.selected, 0);
     assert_eq!(picker.expanded, None);
 
     // Expand alpha
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::Char(' '),
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
         .unwrap();
     assert_eq!(picker.expanded, Some("alpha".to_string()));
 
     // Move down collapses
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::Down,
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
         .unwrap();
     assert_eq!(picker.selected, 1);
     assert_eq!(picker.expanded, None);
@@ -628,19 +581,13 @@ fn pgup_pgdn_use_visible_body_step_and_collapse_expansion() {
 
     // Expand sess-8.
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::Char(' '),
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
         .unwrap();
     assert_eq!(picker.expanded, Some("sess-8".to_string()));
 
     // PageUp collapses and moves by body_h - 1 sessions.
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::PageUp,
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE))
         .unwrap();
     assert_eq!(picker.expanded, None);
     assert_eq!(picker.selected, 2);
@@ -648,18 +595,12 @@ fn pgup_pgdn_use_visible_body_step_and_collapse_expansion() {
     // Re-expand and PageDown
     picker.selected = 8;
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::Char(' '),
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
         .unwrap();
     assert_eq!(picker.expanded, Some("sess-8".to_string()));
 
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::PageDown,
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
         .unwrap();
     assert_eq!(picker.expanded, None);
     assert_eq!(picker.selected, 14);
@@ -681,10 +622,7 @@ fn expanded_details_force_viewport_to_scroll_when_off_screen() {
 
     // Expand sess-0 (adds 4 detail rows).
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::Char(' '),
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
         .unwrap();
 
     // Now select sess-7. With sess-0 expanded we have 8 header + 4 detail = 12 rows.
@@ -693,10 +631,7 @@ fn expanded_details_force_viewport_to_scroll_when_off_screen() {
     // 7 >= 0 + 7, so viewport_top should become 7 + 1 - 7 = 1.
     for _ in 0..7 {
         picker
-            .handle_key(KeyEvent::new(
-                KeyCode::Down,
-                KeyModifiers::NONE,
-            ))
+            .handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
             .unwrap();
     }
     assert_eq!(picker.selected, 7);
@@ -718,10 +653,7 @@ fn expanded_session_renders_detail_lines() {
 
     // Expand
     picker
-        .handle_key(KeyEvent::new(
-            KeyCode::Char(' '),
-            KeyModifiers::NONE,
-        ))
+        .handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
         .unwrap();
 
     terminal.draw(|frame| picker.draw(frame)).unwrap();
@@ -925,8 +857,8 @@ fn palette_config_handles_loader_error() {
 #[test]
 fn create_session_sets_planned_after_session_id_to_none_when_no_earlier_done() {
     with_temp_codexize_root(|| {
-        let session_id = create_session("first idea", Modes::default(), None)
-            .expect("create_session succeeds");
+        let session_id =
+            create_session("first idea", Modes::default(), None).expect("create_session succeeds");
 
         let state = SessionState::load(&session_id).expect("load new session");
         assert!(
@@ -940,15 +872,15 @@ fn create_session_sets_planned_after_session_id_to_none_when_no_earlier_done() {
 fn create_session_sets_planned_after_session_id_to_newest_earlier_done() {
     with_temp_codexize_root(|| {
         // Create an earlier session and mark it Done.
-        let earlier_id = create_session("earlier idea", Modes::default(), None)
-            .expect("create earlier session");
+        let earlier_id =
+            create_session("earlier idea", Modes::default(), None).expect("create earlier session");
         let mut earlier = SessionState::load(&earlier_id).unwrap();
         earlier.current_stage = Stage::Done;
         earlier.save().unwrap();
 
         // Create a later session — it should baseline to the earlier Done one.
-        let later_id = create_session("later idea", Modes::default(), None)
-            .expect("create later session");
+        let later_id =
+            create_session("later idea", Modes::default(), None).expect("create later session");
         let later = SessionState::load(&later_id).expect("load later session");
         assert_eq!(
             later.planned_after_session_id,
@@ -970,8 +902,8 @@ fn create_session_ignores_archived_done_sessions_for_baseline() {
         archived.save().unwrap();
 
         // Create a later session — archived Done sessions are excluded.
-        let later_id = create_session("later idea", Modes::default(), None)
-            .expect("create later session");
+        let later_id =
+            create_session("later idea", Modes::default(), None).expect("create later session");
         let later = SessionState::load(&later_id).expect("load later session");
         assert!(
             later.planned_after_session_id.is_none(),

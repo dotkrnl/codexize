@@ -30,9 +30,8 @@ supersedes = []
 
 #[test]
 fn memory_root_resolves_from_codexize_parent_not_artifact_dir() {
-    let path = Path::new(
-        "/repo/.codexize/sessions/20260506-150024/artifacts/final_validation_1.toml",
-    );
+    let path =
+        Path::new("/repo/.codexize/sessions/20260506-150024/artifacts/final_validation_1.toml");
 
     assert_eq!(
         memory_root_from_session_path(path),

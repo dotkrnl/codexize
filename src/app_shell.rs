@@ -955,8 +955,8 @@ impl SchedulerDrive {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{TestLaunchHarness, TestLaunchOutcome};
     use crate::app::test_support::with_temp_root;
+    use crate::app::{TestLaunchHarness, TestLaunchOutcome};
     use crate::app_runtime::{AppCommand, UiKey, UiKeyCode};
     use crate::logic::selection::{
         CachedModel, Candidate, CliKind, IpbrStageScores, ScoreSource, SubscriptionKind,

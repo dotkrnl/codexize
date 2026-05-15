@@ -40,5 +40,7 @@ pub(crate) fn sleep_blocking(duration: Duration) {
     let mutex = Mutex::new(());
     let condvar = Condvar::new();
     let guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
-    let _ = condvar.wait_timeout(guard, duration).unwrap_or_else(|e| e.into_inner());
+    let _ = condvar
+        .wait_timeout(guard, duration)
+        .unwrap_or_else(|e| e.into_inner());
 }

@@ -16,9 +16,8 @@ fn resume_skip_to_impl_pending_with_overlength_proposal_keeps_modal() {
         fs::create_dir_all(&artifacts).expect("mk artifacts dir");
 
         let rationale = "x".repeat(520);
-        let proposal_toml = format!(
-            "proposed = true\nstatus = \"nothing_to_do\"\nrationale = \"{rationale}\"\n"
-        );
+        let proposal_toml =
+            format!("proposed = true\nstatus = \"nothing_to_do\"\nrationale = \"{rationale}\"\n");
         fs::write(artifacts.join("skip_proposal.toml"), proposal_toml)
             .expect("write skip proposal");
 

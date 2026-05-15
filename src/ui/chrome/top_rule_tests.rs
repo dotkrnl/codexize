@@ -93,12 +93,7 @@ fn styled_left_spans_preserve_badge_style() {
         .find(|span| span.content == "[CHEAP]")
         .expect("cheap badge span");
     assert_eq!(cheap.style.fg, Some(Color::Green));
-    assert!(
-        cheap
-            .style
-            .add_modifier
-            .contains(Modifier::BOLD)
-    );
+    assert!(cheap.style.add_modifier.contains(Modifier::BOLD));
 }
 
 #[test]

@@ -1441,10 +1441,7 @@ mod tests {
         assert_eq!(p.cli, CliKind::Opencode);
         assert_eq!(p.launch_name, "opencode-go/deepseek-v4-flash");
         assert_eq!(p.model, "deepseek-v4-flash");
-        assert_eq!(
-            p.subscription,
-            SubscriptionKind::OpencodeGo
-        );
+        assert_eq!(p.subscription, SubscriptionKind::OpencodeGo);
     }
 
     #[test]

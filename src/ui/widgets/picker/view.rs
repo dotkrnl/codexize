@@ -82,12 +82,7 @@ impl SessionPicker {
             }
         }
     }
-    fn draw_list(
-        &mut self,
-        frame: &mut ratatui::Frame<'_>,
-        area: Rect,
-        degenerate: bool,
-    ) {
+    fn draw_list(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect, degenerate: bool) {
         let visible = self.visible_entries();
         if visible.is_empty() {
             let message = Paragraph::new("No sessions yet — press n to create one")
@@ -279,12 +274,7 @@ impl SessionPicker {
         ];
         render_keymap_line(&[&nav, &actions, &system], caps_fn, width)
     }
-    fn draw_footer(
-        &self,
-        frame: &mut ratatui::Frame<'_>,
-        area: Rect,
-        degenerate: bool,
-    ) {
+    fn draw_footer(&self, frame: &mut ratatui::Frame<'_>, area: Rect, degenerate: bool) {
         let caps_fn = |cap: Option<Capability>| -> bool {
             match cap {
                 Some(Capability::Expand) => !self.entries.is_empty(),
@@ -396,12 +386,7 @@ impl SessionPicker {
             }
         }
     }
-    fn draw_modal(
-        &self,
-        frame: &mut ratatui::Frame<'_>,
-        area: Rect,
-        kind: ConfirmKind,
-    ) {
+    fn draw_modal(&self, frame: &mut ratatui::Frame<'_>, area: Rect, kind: ConfirmKind) {
         let entry = self
             .selected_entry()
             .map(|e| e.idea_summary.clone())

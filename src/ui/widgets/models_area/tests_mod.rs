@@ -77,10 +77,7 @@ fn vendor_model_with_axis_score(
     model
 }
 
-fn model_with_reset(
-    mut model: CachedModel,
-    quota_resets_at: DateTime<chrono::Utc>,
-) -> CachedModel {
+fn model_with_reset(mut model: CachedModel, quota_resets_at: DateTime<chrono::Utc>) -> CachedModel {
     model.quota_resets_at = Some(quota_resets_at);
     model
 }

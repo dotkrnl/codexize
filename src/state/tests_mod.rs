@@ -127,8 +127,6 @@ fn pending_guard_decision_round_trips() {
     assert_eq!(back.pending_guard_decision, state.pending_guard_decision);
 }
 
-
-
 #[test]
 fn test_new_session_defaults_to_v4_with_zero_validation_attempts() {
     let state = SessionState::new("fresh".to_string());

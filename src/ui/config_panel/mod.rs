@@ -3612,24 +3612,22 @@ mod tests {
     #[test]
     fn model_tab_x_deletes_user_added_provider() {
         let mut config = Config::baked_defaults();
-        config.providers = Override::explicit(vec![
-            crate::data::config::schema::ProviderEntry {
-                cli: crate::selection::CliKind::Opencode,
-                launch_name: "custom-opus".to_string(),
-                model: "claude-opus-4.7".to_string(),
-                subscription: crate::selection::SubscriptionKind::Claude,
-                enabled: true,
-                free: false,
-                official: false,
-                quota_disabled: false,
-                cheap_eligible: false,
-                tough_eligible: true,
-                effort_eligible: true,
-                effort_mapping: Default::default(),
-                quota_lookup_key: None,
-                display_order: 0,
-            },
-        ]);
+        config.providers = Override::explicit(vec![crate::data::config::schema::ProviderEntry {
+            cli: crate::selection::CliKind::Opencode,
+            launch_name: "custom-opus".to_string(),
+            model: "claude-opus-4.7".to_string(),
+            subscription: crate::selection::SubscriptionKind::Claude,
+            enabled: true,
+            free: false,
+            official: false,
+            quota_disabled: false,
+            cheap_eligible: false,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_mapping: Default::default(),
+            quota_lookup_key: None,
+            display_order: 0,
+        }]);
         let mut state = ConfigPanelState::open_at(
             &config,
             PathBuf::from("/tmp/example/config.toml"),
@@ -3976,24 +3974,22 @@ mod tests {
         // points at a row no provider serves yet. The matched entry renders
         // bare; the unmatched entry trails the soft-warning suffix.
         let mut config = Config::baked_defaults();
-        config.providers = Override::explicit(vec![
-            crate::data::config::schema::ProviderEntry {
-                cli: crate::selection::CliKind::Claude,
-                launch_name: "claude-opus-4.7".to_string(),
-                model: "claude-opus-4.7".to_string(),
-                subscription: crate::selection::SubscriptionKind::Claude,
-                enabled: true,
-                free: false,
-                official: true,
-                quota_disabled: false,
-                cheap_eligible: false,
-                tough_eligible: true,
-                effort_eligible: true,
-                effort_mapping: Default::default(),
-                quota_lookup_key: None,
-                display_order: 0,
-            },
-        ]);
+        config.providers = Override::explicit(vec![crate::data::config::schema::ProviderEntry {
+            cli: crate::selection::CliKind::Claude,
+            launch_name: "claude-opus-4.7".to_string(),
+            model: "claude-opus-4.7".to_string(),
+            subscription: crate::selection::SubscriptionKind::Claude,
+            enabled: true,
+            free: false,
+            official: true,
+            quota_disabled: false,
+            cheap_eligible: false,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_mapping: Default::default(),
+            quota_lookup_key: None,
+            display_order: 0,
+        }]);
         let mut state = ConfigPanelState::open_at(
             &config,
             PathBuf::from("/tmp/example/config.toml"),

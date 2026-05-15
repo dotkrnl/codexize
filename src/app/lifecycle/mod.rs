@@ -773,10 +773,7 @@ impl App {
                 // baseline. The auto-launch path only fires this branch when
                 // persisted `current_stage == ShardingRunning`, which already
                 // encodes a passed baseline check.
-                if matches!(
-                    self.state.current_stage,
-                    Stage::ShardingRunning
-                ) {
+                if matches!(self.state.current_stage, Stage::ShardingRunning) {
                     let _ = self.launch_sharding_with_model(override_model);
                 }
             }
@@ -1054,10 +1051,7 @@ impl App {
     /// `BlockedNeedsUser`. The single throat for entering a block from app
     /// code so the persisted provenance is always populated and the
     /// force-ship guard has a value to read.
-    pub(crate) fn transition_to_blocked(
-        &mut self,
-        origin: BlockOrigin,
-    ) -> Result<()> {
+    pub(crate) fn transition_to_blocked(&mut self, origin: BlockOrigin) -> Result<()> {
         self.state.block_origin = Some(origin);
         self.transition_to_stage(Stage::BlockedNeedsUser)
     }

@@ -172,8 +172,5 @@ pub(crate) fn lifecycle_stage_for_task_retry(
 /// Lifecycle stage to rewind to when the operator retries a stage by name.
 pub(crate) fn lifecycle_stage_for_stage_retry(stage: &str) -> LifecycleStage {
     use crate::logic::rules::retry_stage_for_stage;
-    retry_stage_for_stage(stage).map_or(
-        LifecycleStage::Plan,
-        Stage::to_lifecycle_stage,
-    )
+    retry_stage_for_stage(stage).map_or(LifecycleStage::Plan, Stage::to_lifecycle_stage)
 }

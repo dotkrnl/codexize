@@ -131,7 +131,7 @@ impl App {
         );
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
-        self.transition_to_stage(Stage::ImplementationRound(1))?;
+        self.transition_to_stage(Stage::Implementation(1))?;
         Ok(())
     }
 }

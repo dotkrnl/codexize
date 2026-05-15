@@ -30,31 +30,10 @@ pub enum StageLane {
 /// they are not active automation stages. `WaitingToImplement` is the
 /// implementation lane's head-of-queue candidate, not an occupant.
 pub fn stage_lane(stage: Stage) -> StageLane {
-    match stage {
-        Stage::BrainstormRunning
-        | Stage::SpecReviewRunning
-        | Stage::SpecReviewPaused
-        | Stage::PlanningRunning
-        | Stage::PlanReviewRunning
-        | Stage::PlanReviewPaused => StageLane::Planning,
-        Stage::RepoStateUpdateRunning
-        | Stage::ShardingRunning
-        | Stage::ImplementationRound(_)
-        | Stage::ReviewRound(_)
-        | Stage::BuilderRecovery(_)
-        | Stage::BuilderRecoveryPlanReview(_)
-        | Stage::BuilderRecoverySharding(_)
-        | Stage::Simplification(_)
-        | Stage::FinalValidation(_)
-        | Stage::DreamingPending
-        | Stage::Dreaming(_) => StageLane::Implementation,
-        Stage::IdeaInput
-        | Stage::WaitingToImplement
-        | Stage::SkipToImplPending
-        | Stage::GitGuardPending
-        | Stage::Done
-        | Stage::Cancelled
-        | Stage::BlockedNeedsUser => StageLane::Other,
+    match stage.stage_lane() {
+        crate::lifecycle::StageLane::Planning => StageLane::Planning,
+        crate::lifecycle::StageLane::Implementation => StageLane::Implementation,
+        crate::lifecycle::StageLane::Other => StageLane::Other,
     }
 }
 
@@ -350,12 +329,12 @@ mod tests {
         for stage in [
             Stage::RepoStateUpdateRunning,
             Stage::ShardingRunning,
-            Stage::ImplementationRound(1),
-            Stage::ReviewRound(2),
-            Stage::BuilderRecovery(1),
-            Stage::BuilderRecoveryPlanReview(1),
-            Stage::BuilderRecoverySharding(1),
-            Stage::Simplification(1),
+            Stage::Implementation(1),
+            Stage::Review(2),
+            Stage::Implementation(1),
+            Stage::Implementation(1),
+            Stage::Implementation(1),
+            Stage::Review(1),
             Stage::FinalValidation(1),
             Stage::DreamingPending,
             Stage::Dreaming(1),
@@ -624,13 +603,13 @@ mod tests {
         // Cover the rest of the impl-lane stages the dispatch table can
         // retry (Recovery / Coder / Reviewer / FinalValidation /
         // Dreaming) to ensure they all gate on lane occupancy.
-        let scan = vec![loaded("01-busy", Stage::ImplementationRound(1))];
+        let scan = vec![loaded("01-busy", Stage::Implementation(1))];
         for target in [
             Stage::ShardingRunning,
-            Stage::BuilderRecovery(2),
-            Stage::ImplementationRound(2),
-            Stage::ReviewRound(2),
-            Stage::Simplification(2),
+            Stage::Implementation(2),
+            Stage::Implementation(2),
+            Stage::Review(2),
+            Stage::Review(2),
             Stage::FinalValidation(2),
             Stage::Dreaming(2),
         ] {

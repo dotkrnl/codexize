@@ -106,7 +106,7 @@ fn exit_interactive_run_pushes_fsm_into_stopping_go_idle() {
     // 5c-C reads the stop intent from the FSM rather than the persisted
     // pending_termination mirror; assert on the FSM transition.
     let mut state = SessionState::new("interactive-test".to_string());
-    state.current_stage = Stage::BuilderRecovery(1);
+    state.current_stage = Stage::Implementation(1);
     state.agent_runs.push(running_recovery_run(7));
     let mut app = mk_app(state);
     app.current_run_id = Some(7);
@@ -211,7 +211,7 @@ fn palette_start_registered_for_idle_startable_stage() {
 #[test]
 fn palette_start_hidden_while_agent_running() {
     let mut state = SessionState::new("start-palette-test".to_string());
-    state.current_stage = Stage::BuilderRecovery(1);
+    state.current_stage = Stage::Implementation(1);
     state.agent_runs.push(running_noninteractive_run(10));
     let app = mk_app(state);
     let commands = app.palette_commands();

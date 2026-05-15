@@ -208,7 +208,7 @@ impl StageRegistry {
         // pipeline sequence within each stage — first candidate "with pending
         // work" wins. stage-driver impls' `stage_when_running()` confirms the
         // mappings here.
-        let candidates: &[(StageId, GateFn)] = match stage {
+        let candidates: &[(StageId, GateFn)] = match stage.to_lifecycle_stage() {
             Stage::Idea => &[(StageId::Brainstorm, gate_always)],
             Stage::Spec => &[(StageId::SpecReview, gate_always)],
             Stage::Plan => &[
@@ -231,7 +231,8 @@ impl StageRegistry {
                 (StageId::FinalValidation, gate_always),
                 (StageId::Dreaming, gate_dreaming_accepted),
             ],
-            Stage::Done | Stage::Cancelled => &[],
+            Stage::Done | Stage::Cancelled | Stage::Blocked => &[],
+            _ => &[],
         };
 
         for (id, gate) in candidates {

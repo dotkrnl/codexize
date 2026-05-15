@@ -325,9 +325,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
     }
     let in_recovery_stage = matches!(
         state.current_stage,
-        Stage::BuilderRecovery(_)
-            | Stage::BuilderRecoveryPlanReview(_)
-            | Stage::BuilderRecoverySharding(_)
+        Stage::Implementation(_) | Stage::Implementation(_) | Stage::Implementation(_)
     );
     if in_recovery_stage
         || !recovery_runs.is_empty()
@@ -448,7 +446,7 @@ pub(super) fn build_dreaming_stage(state: &SessionState) -> Node {
     } else {
         match state.current_stage {
             Stage::DreamingPending => NodeStatus::WaitingUser,
-            Stage::Dreaming(_) => {
+            Stage::Dreaming(_) | Stage::Finalization => {
                 if state.agent_error.is_some() {
                     NodeStatus::Failed
                 } else if latest.is_empty() {

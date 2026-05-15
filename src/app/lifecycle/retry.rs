@@ -158,11 +158,11 @@ pub(crate) fn lifecycle_stage_for_task_retry(
         .map(|run| run.round)
         .max();
     let stage_round = match state.current_stage {
-        Stage::ImplementationRound(r)
-        | Stage::ReviewRound(r)
-        | Stage::BuilderRecovery(r)
-        | Stage::BuilderRecoveryPlanReview(r)
-        | Stage::BuilderRecoverySharding(r) => Some(r),
+        Stage::Implementation(r)
+        | Stage::Review(r)
+        | Stage::Implementation(r)
+        | Stage::Implementation(r)
+        | Stage::Implementation(r) => Some(r),
         _ => None,
     };
     let round = max_round.or(stage_round).unwrap_or(1);

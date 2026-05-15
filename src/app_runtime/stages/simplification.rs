@@ -15,7 +15,7 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Stage::Simplification(round) = self.state.current_stage else {
+        let Stage::Review(round) = self.state.current_stage else {
             return false;
         };
         let session_id = self.state.session_id.clone();
@@ -186,7 +186,7 @@ impl App {
             }
         }
     }
-    /// Co-located success-finalization for `Stage::Simplification(round)`.
+    /// Co-located success-finalization for `Stage::Review(round)`.
     ///
     /// The artifact-validation gate above has already accepted the
     /// simplification TOML; on success we hand control to FinalValidation.

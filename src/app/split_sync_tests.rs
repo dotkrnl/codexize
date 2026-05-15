@@ -6,7 +6,7 @@ use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState, Stage};
 #[test]
 fn synchronize_split_target_force_opens_interactive_prompt() {
     let mut state = SessionState::new("force-open".to_string());
-    state.current_stage = Stage::ImplementationRound(1);
+    state.current_stage = Stage::Implementation(1);
     let run = RunRecord {
         id: 42,
         stage: "coder".to_string(),
@@ -87,7 +87,7 @@ fn esc_in_idea_input_closes_split_but_sync_reopens() {
 #[test]
 fn esc_in_interactive_prompt_closes_split_but_sync_reopens() {
     let mut state = SessionState::new("esc-interactive".to_string());
-    state.current_stage = Stage::ImplementationRound(1);
+    state.current_stage = Stage::Implementation(1);
     let run = RunRecord {
         id: 42,
         stage: "coder".to_string(),
@@ -135,7 +135,7 @@ fn esc_in_interactive_prompt_closes_split_but_sync_reopens() {
 #[test]
 fn interactive_split_input_routes_leading_colon_into_command_mode() {
     let mut state = SessionState::new("interactive-colon-text".to_string());
-    state.current_stage = Stage::ImplementationRound(1);
+    state.current_stage = Stage::Implementation(1);
     let run = RunRecord {
         id: 42,
         stage: "coder".to_string(),

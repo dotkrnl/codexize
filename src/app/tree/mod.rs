@@ -466,10 +466,10 @@ fn stage_status_from_runs(
                 Stage::PlanReviewRunning | Stage::PlanReviewPaused
             )
             | ("sharding", Stage::ShardingRunning)
-            | ("coder", Stage::ImplementationRound(_))
-            | ("reviewer", Stage::ReviewRound(_))
-            | ("simplifier", Stage::Simplification(_))
-            | ("final-validation", Stage::FinalValidation(_))
+            | ("coder", Stage::Implementation(_))
+            | ("reviewer", Stage::Review(_))
+            | ("simplifier", Stage::Review(_))
+            | ("final-validation", Stage::Finalization)
     );
     if stage_matches && state.agent_error.is_some() {
         return NodeStatus::Failed;
@@ -589,11 +589,11 @@ fn builder_status(
         return NodeStatus::Running;
     }
     match state.current_stage {
-        Stage::ImplementationRound(_)
-        | Stage::ReviewRound(_)
-        | Stage::BuilderRecovery(_)
-        | Stage::BuilderRecoveryPlanReview(_)
-        | Stage::BuilderRecoverySharding(_) => {
+        Stage::Implementation(_)
+        | Stage::Review(_)
+        | Stage::Implementation(_)
+        | Stage::Implementation(_)
+        | Stage::Implementation(_) => {
             if state.agent_error.is_some() {
                 NodeStatus::Failed
             } else {
@@ -607,8 +607,9 @@ fn builder_status(
         // `is_expandable`, which would hide the loop's prior messages).
         Stage::Simplification(_)
         | Stage::FinalValidation(_)
-        | Stage::DreamingPending
         | Stage::Dreaming(_)
+        | Stage::Finalization
+        | Stage::DreamingPending
         | Stage::Done => NodeStatus::Done,
         _ => NodeStatus::Pending,
     }
@@ -638,16 +639,14 @@ fn recovery_rounds_for_stage(state: &SessionState, stage: &str) -> BTreeSet<u32>
 fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String {
     if matches!(
         state.current_stage,
-        Stage::BuilderRecovery(_)
-            | Stage::BuilderRecoveryPlanReview(_)
-            | Stage::BuilderRecoverySharding(_)
+        Stage::Implementation(_) | Stage::Implementation(_) | Stage::Implementation(_)
     ) {
         return "builder recovery in progress".to_string();
     }
     if !recovery_runs.is_empty()
         && matches!(
             state.current_stage,
-            Stage::ImplementationRound(_) | Stage::ReviewRound(_)
+            Stage::Implementation(_) | Stage::Review(_)
         )
     {
         return "builder resumed after recovery".to_string();

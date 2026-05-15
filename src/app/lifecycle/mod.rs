@@ -98,18 +98,22 @@ fn retry_target_for_run(run: &crate::state::RunRecord) -> Option<RetryTarget> {
 /// guessing across the lifecycle's broader stages.
 fn stage_error_target_for_stage(stage: Stage) -> Option<StageId> {
     Some(match stage {
+        Stage::Idea => StageId::Brainstorm,
+        Stage::Spec => StageId::SpecReview,
+        Stage::Plan => StageId::Planning,
         Stage::BrainstormRunning => StageId::Brainstorm,
         Stage::SpecReviewRunning => StageId::SpecReview,
         Stage::PlanningRunning => StageId::Planning,
         Stage::PlanReviewRunning => StageId::PlanReview,
         Stage::RepoStateUpdateRunning => StageId::RepoStateUpdate,
         Stage::ShardingRunning => StageId::Sharding,
-        Stage::ImplementationRound(_) => StageId::Implementation,
+        Stage::Implementation(_) => StageId::Implementation,
         Stage::BuilderRecovery(_) => StageId::Recovery,
         Stage::BuilderRecoveryPlanReview(_) => StageId::RecoveryPlanReview,
         Stage::BuilderRecoverySharding(_) => StageId::RecoverySharding,
-        Stage::ReviewRound(_) => StageId::Review,
+        Stage::Review(_) => StageId::Review,
         Stage::Simplification(_) => StageId::Simplification,
+        Stage::Finalization => StageId::FinalValidation,
         Stage::FinalValidation(_) => StageId::FinalValidation,
         Stage::Dreaming(_) => StageId::Dreaming,
         Stage::IdeaInput
@@ -121,6 +125,7 @@ fn stage_error_target_for_stage(stage: Stage) -> Option<StageId> {
         | Stage::DreamingPending
         | Stage::Done
         | Stage::Cancelled
+        | Stage::Blocked
         | Stage::BlockedNeedsUser => return None,
     })
 }
@@ -565,7 +570,13 @@ impl App {
                     | Stage::BuilderRecoverySharding(_)
             ),
             simplification_requested: matches!(self.state.current_stage, Stage::Simplification(_)),
-            dreaming_accepted: matches!(self.state.current_stage, Stage::Dreaming(_)),
+            dreaming_accepted: self
+                .state
+                .dreaming_decision
+                .as_ref()
+                .is_some_and(|decision| {
+                    decision.kind == crate::state::DreamingDecisionKind::OperatorAccepted
+                }),
         }
     }
 
@@ -860,7 +871,7 @@ impl App {
         self.live_summary_cached_mtime = None;
         // The validated path captures the round base at Implementation(r)
         // entry; mirror that so the simplifier still sees a fresh base_sha.
-        if let Stage::ImplementationRound(round) = persisted {
+        if let Stage::Implementation(round) = persisted {
             let round_dir = self
                 .session_dir()
                 .join("rounds")
@@ -1147,7 +1158,7 @@ impl App {
         // that create a fresh implementation round — so the simplifier can
         // consistently use `base_sha..HEAD`. `capture_round_base` is
         // idempotent on resume.
-        if let Stage::ImplementationRound(round) = next_stage {
+        if let Stage::Implementation(round) = next_stage {
             let round_dir = self
                 .session_dir()
                 .join("rounds")
@@ -1230,7 +1241,7 @@ impl App {
                 .iter()
                 .map(|task| (task.id, task.title.clone())),
         );
-        self.transition_to_stage(Stage::ImplementationRound(1))?;
+        self.transition_to_stage(Stage::Implementation(1))?;
         self.state.save()?; // Persist state after transition and builder setup
         Ok(())
     }
@@ -1319,7 +1330,7 @@ impl App {
         let originating = match decision.stage.as_str() {
             "brainstorm" => Stage::BrainstormRunning,
             "planning" => Stage::PlanningRunning,
-            "recovery" => Stage::BuilderRecovery(decision.round),
+            "recovery" => Stage::Implementation(decision.round),
             other => anyhow::bail!("accept_guard_keep: unexpected stage '{other}'"),
         };
         session_state::restore_guard_originating_stage(&mut self.state, originating);
@@ -1341,24 +1352,28 @@ impl App {
             }
             Stage::BuilderRecovery(_) => artifacts.join("tasks.toml"),
             Stage::BuilderRecoveryPlanReview(_) => artifacts.join("plan_review.toml"),
-            Stage::ImplementationRound(r) | Stage::ReviewRound(r) => session_dir
+            Stage::Implementation(r) | Stage::Review(r) => session_dir
                 .join("rounds")
                 .join(format!("{r:03}"))
                 .join("task.toml"),
-            Stage::IdeaInput
+            Stage::Idea
+            | Stage::Spec
+            | Stage::Plan
+            | Stage::IdeaInput
             | Stage::Done
+            | Stage::Blocked
             | Stage::BlockedNeedsUser
             | Stage::WaitingToImplement
             | Stage::RepoStateUpdateRunning
             | Stage::SkipToImplPending
             | Stage::GitGuardPending
-            | Stage::FinalValidation(_)
+            | Stage::Finalization
             | Stage::DreamingPending
-            | Stage::Dreaming(_)
-            | Stage::Simplification(_)
+            | Stage::Review(_)
             | Stage::Cancelled => {
                 return None;
             }
+            _ => return None,
         };
         if path.exists() { Some(path) } else { None }
     }
@@ -1445,7 +1460,7 @@ mod tests {
     #[test]
     fn lifecycle_projection_names_stage_gate_flags_from_persisted_stage() {
         let mut state = SessionState::new("stage-gates".to_string());
-        state.current_stage = Stage::BuilderRecoveryPlanReview(2);
+        state.current_stage = Stage::BuilderRecovery(2);
         let app = mk_app(state);
 
         let projection = app.lifecycle_stage_projection(crate::lifecycle::Stage::Implementation(2));
@@ -1468,7 +1483,7 @@ mod tests {
     #[test]
     fn lifecycle_projection_builds_stage_ctx_with_owned_snapshots() {
         let mut state = SessionState::new("projection-context".to_string());
-        state.current_stage = Stage::ImplementationRound(4);
+        state.current_stage = Stage::Implementation(4);
         state.builder.pipeline_items = vec![
             item(10, PipelineItemStatus::Pending),
             item(20, PipelineItemStatus::Running),
@@ -1526,7 +1541,7 @@ mod tests {
     #[test]
     fn scheduler_sees_builder_tasks_for_coder_dispatch() {
         let mut state = SessionState::new("coder-dispatch".to_string());
-        state.current_stage = Stage::ImplementationRound(1);
+        state.current_stage = Stage::Implementation(1);
         state.builder.pipeline_items = vec![item(10, PipelineItemStatus::Pending)];
         let app = mk_app(state);
 
@@ -1553,7 +1568,7 @@ mod tests {
     #[test]
     fn scheduler_sees_current_task_for_reviewer_dispatch() {
         let mut state = SessionState::new("reviewer-dispatch".to_string());
-        state.current_stage = Stage::ReviewRound(1);
+        state.current_stage = Stage::Review(1);
         state.builder.pipeline_items = vec![item(20, PipelineItemStatus::Running)];
         let app = mk_app(state);
 

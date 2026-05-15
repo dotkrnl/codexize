@@ -17,8 +17,17 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Stage::FinalValidation(round) = self.state.current_stage else {
-            return false;
+        let round = match self.state.current_stage {
+            Stage::FinalValidation(round) => round,
+            Stage::Finalization => self
+                .state
+                .builder
+                .pipeline_items
+                .iter()
+                .filter_map(|item| item.round)
+                .max()
+                .unwrap_or(1),
+            _ => return false,
         };
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);
@@ -208,7 +217,7 @@ impl App {
                     &verdict_artifact,
                 );
                 self.append_goal_gap_tasks(&session_dir, &new_tasks)?;
-                self.transition_to_stage(Stage::ImplementationRound(round + 1))?;
+                self.transition_to_stage(Stage::Implementation(round + 1))?;
             }
             ValidationStatus::NeedsHuman => {
                 self.transition_to_blocked(crate::state::BlockOrigin::FinalValidation)?;

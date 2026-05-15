@@ -35,19 +35,23 @@ impl App {
             return;
         }
         let stage_id = match self.state.current_stage {
+            Stage::Idea => StageId::Brainstorm,
+            Stage::Spec => StageId::SpecReview,
+            Stage::Plan => StageId::Planning,
             Stage::BrainstormRunning => StageId::Brainstorm,
             Stage::SpecReviewRunning => StageId::SpecReview,
             Stage::PlanningRunning => StageId::Planning,
             Stage::PlanReviewRunning => StageId::PlanReview,
             Stage::RepoStateUpdateRunning => StageId::RepoStateUpdate,
             Stage::ShardingRunning => StageId::Sharding,
-            Stage::ImplementationRound(_) => StageId::Coder,
-            Stage::ReviewRound(_) => StageId::Reviewer,
+            Stage::Implementation(_) => StageId::Coder,
             Stage::BuilderRecovery(_) => StageId::Recovery,
             Stage::BuilderRecoveryPlanReview(_) => StageId::RecoveryPlanReview,
             Stage::BuilderRecoverySharding(_) => StageId::RecoverySharding,
-            Stage::FinalValidation(_) => StageId::FinalValidation,
+            Stage::Review(_) => StageId::Reviewer,
             Stage::Simplification(_) => StageId::Simplification,
+            Stage::Finalization => StageId::FinalValidation,
+            Stage::FinalValidation(_) => StageId::FinalValidation,
             Stage::Dreaming(_) => StageId::Dreaming,
             // Operator/modal/queue states are intentionally idle here. In
             // particular, WaitingToImplement is driven by the shell-level
@@ -60,6 +64,7 @@ impl App {
             | Stage::SkipToImplPending
             | Stage::GitGuardPending
             | Stage::DreamingPending
+            | Stage::Blocked
             | Stage::BlockedNeedsUser
             | Stage::Done
             | Stage::Cancelled => return,

@@ -13,7 +13,7 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Stage::BuilderRecoveryPlanReview(round) = self.state.current_stage else {
+        let Stage::Implementation(round) = self.state.current_stage else {
             return false;
         };
         let session_dir = session_state::session_dir(&self.state.session_id);

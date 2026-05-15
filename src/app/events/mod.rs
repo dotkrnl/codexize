@@ -72,14 +72,13 @@ impl App {
                     | crate::state::Stage::WaitingToImplement
                     | crate::state::Stage::RepoStateUpdateRunning
                     | crate::state::Stage::ShardingRunning
-                    | crate::state::Stage::ImplementationRound(_)
-                    | crate::state::Stage::ReviewRound(_)
-                    | crate::state::Stage::BuilderRecovery(_)
-                    | crate::state::Stage::BuilderRecoveryPlanReview(_)
-                    | crate::state::Stage::BuilderRecoverySharding(_)
-                    | crate::state::Stage::Simplification(_)
-                    | crate::state::Stage::FinalValidation(_)
-                    | crate::state::Stage::Dreaming(_)
+                    | crate::state::Stage::Implementation(_)
+                    | crate::state::Stage::Review(_)
+                    | crate::state::Stage::Implementation(_)
+                    | crate::state::Stage::Implementation(_)
+                    | crate::state::Stage::Implementation(_)
+                    | crate::state::Stage::Review(_)
+                    | crate::state::Stage::Finalization
             )
     }
 

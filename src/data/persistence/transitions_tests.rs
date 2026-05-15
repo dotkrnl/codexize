@@ -6,7 +6,7 @@ use crate::state::{LaunchModes, PipelineItem, PipelineItemStatus, SectionPart};
 #[test]
 fn coder_run_captures_iteration_loop_task_round_stage_path() {
     let mut state = SessionState::new("path-capture".to_string());
-    state.current_stage = Stage::ImplementationRound(9);
+    state.current_stage = Stage::Implementation(9);
     state.builder.pipeline_items.push(PipelineItem {
         id: 1,
         stage: "coder".to_string(),
@@ -53,7 +53,7 @@ fn coder_run_captures_iteration_loop_task_round_stage_path() {
 #[test]
 fn simplifier_run_captures_iteration_simplification_round_stage_path() {
     let mut state = SessionState::new("simpl-capture".to_string());
-    state.current_stage = Stage::Simplification(9);
+    state.current_stage = Stage::Review(9);
     state.builder.pipeline_items.push(PipelineItem {
         id: 1,
         stage: "coder".to_string(),
@@ -194,8 +194,8 @@ fn leaving_block_clears_origin() {
 fn final_validation_round_trip_through_execute_transition() {
     with_temp_root(|| {
         let mut state = SessionState::new("fv-round-trip".to_string());
-        state.current_stage = Stage::ReviewRound(2);
-        execute_transition(&mut state, Stage::Simplification(2)).unwrap();
+        state.current_stage = Stage::Review(2);
+        execute_transition(&mut state, Stage::Review(2)).unwrap();
         execute_transition(&mut state, Stage::FinalValidation(2)).unwrap();
         assert_eq!(state.current_stage, Stage::FinalValidation(2));
         execute_transition(&mut state, Stage::Done).unwrap();
@@ -209,23 +209,23 @@ fn enter_final_validation_increments_attempts_for_first_three_entries() {
         let mut state = SessionState::new("fv-cap-increment".to_string());
         assert_eq!(state.validation_attempts, 0);
 
-        state.current_stage = Stage::ReviewRound(1);
-        execute_transition(&mut state, Stage::Simplification(1)).unwrap();
+        state.current_stage = Stage::Review(1);
+        execute_transition(&mut state, Stage::Review(1)).unwrap();
         let outcome = enter_final_validation(&mut state, 1).unwrap();
         assert_eq!(outcome, FinalValidationEntry::Entered { attempt: 1 });
         assert_eq!(state.current_stage, Stage::FinalValidation(1));
         assert_eq!(state.validation_attempts, 1);
 
-        execute_transition(&mut state, Stage::ImplementationRound(2)).unwrap();
-        execute_transition(&mut state, Stage::ReviewRound(2)).unwrap();
-        execute_transition(&mut state, Stage::Simplification(2)).unwrap();
+        execute_transition(&mut state, Stage::Implementation(2)).unwrap();
+        execute_transition(&mut state, Stage::Review(2)).unwrap();
+        execute_transition(&mut state, Stage::Review(2)).unwrap();
         let outcome = enter_final_validation(&mut state, 2).unwrap();
         assert_eq!(outcome, FinalValidationEntry::Entered { attempt: 2 });
         assert_eq!(state.validation_attempts, 2);
 
-        execute_transition(&mut state, Stage::ImplementationRound(3)).unwrap();
-        execute_transition(&mut state, Stage::ReviewRound(3)).unwrap();
-        execute_transition(&mut state, Stage::Simplification(3)).unwrap();
+        execute_transition(&mut state, Stage::Implementation(3)).unwrap();
+        execute_transition(&mut state, Stage::Review(3)).unwrap();
+        execute_transition(&mut state, Stage::Review(3)).unwrap();
         let outcome = enter_final_validation(&mut state, 3).unwrap();
         assert_eq!(outcome, FinalValidationEntry::Entered { attempt: 3 });
         assert_eq!(state.validation_attempts, 3);
@@ -238,7 +238,7 @@ fn enter_final_validation_caps_fourth_entry_into_blocked() {
     with_temp_root(|| {
         let mut state = SessionState::new("fv-cap-block".to_string());
         state.validation_attempts = VALIDATION_ATTEMPT_CAP;
-        state.current_stage = Stage::Simplification(4);
+        state.current_stage = Stage::Review(4);
 
         let outcome = enter_final_validation(&mut state, 4).unwrap();
 
@@ -265,20 +265,20 @@ fn block_origin_simplification_does_not_unlock_force_ship() {
 fn enter_simplification_increments_per_round_counter() {
     with_temp_root(|| {
         let mut state = SessionState::new("simplify-counter".to_string());
-        state.current_stage = Stage::ReviewRound(1);
+        state.current_stage = Stage::Review(1);
         let outcome = enter_simplification(&mut state, 1).unwrap();
         assert_eq!(outcome, SimplificationEntry::Entered { attempt: 1 });
         assert_eq!(state.current_stage, Stage::Simplification(1));
         assert_eq!(state.simplification_attempts.get(&1).copied(), Some(1));
 
-        execute_transition(&mut state, Stage::ReviewRound(1)).unwrap();
+        execute_transition(&mut state, Stage::Review(1)).unwrap();
         let outcome = enter_simplification(&mut state, 1).unwrap();
         assert_eq!(outcome, SimplificationEntry::Entered { attempt: 2 });
         assert_eq!(state.simplification_attempts.get(&1).copied(), Some(2));
 
         execute_transition(&mut state, Stage::FinalValidation(1)).unwrap();
-        execute_transition(&mut state, Stage::ImplementationRound(2)).unwrap();
-        execute_transition(&mut state, Stage::ReviewRound(2)).unwrap();
+        execute_transition(&mut state, Stage::Implementation(2)).unwrap();
+        execute_transition(&mut state, Stage::Review(2)).unwrap();
         let outcome = enter_simplification(&mut state, 2).unwrap();
         assert_eq!(outcome, SimplificationEntry::Entered { attempt: 1 });
         assert_eq!(state.simplification_attempts.get(&2).copied(), Some(1));
@@ -292,7 +292,7 @@ fn enter_simplification_caps_fourth_entry_into_blocked() {
         state
             .simplification_attempts
             .insert(4, SIMPLIFICATION_ATTEMPT_CAP);
-        state.current_stage = Stage::ReviewRound(4);
+        state.current_stage = Stage::Review(4);
 
         let outcome = enter_simplification(&mut state, 4).unwrap();
 

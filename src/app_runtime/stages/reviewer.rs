@@ -41,7 +41,7 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Stage::ReviewRound(r) = self.state.current_stage else {
+        let Stage::Review(r) = self.state.current_stage else {
             return false;
         };
         let Some(task_id) = self.state.builder.current_task_id() else {
@@ -197,7 +197,7 @@ impl App {
             }
         }
     }
-    /// Co-located success-finalization for `Stage::ReviewRound(round)`.
+    /// Co-located success-finalization for `Stage::Review(round)`.
     pub(crate) fn finalize_reviewer_success(
         &mut self,
         run: &crate::state::RunRecord,
@@ -326,7 +326,7 @@ impl App {
                         );
                     }
                 }
-                self.transition_to_stage(Stage::ImplementationRound(round + 1))?;
+                self.transition_to_stage(Stage::Implementation(round + 1))?;
             }
             review::ReviewStatus::HumanBlocked | review::ReviewStatus::AgentPivot => {
                 let (verdict_status, trigger_str) =
@@ -366,7 +366,7 @@ impl App {
             );
         }
         if self.state.builder.has_unfinished_tasks() {
-            self.transition_to_stage(Stage::ImplementationRound(round + 1))?;
+            self.transition_to_stage(Stage::Implementation(round + 1))?;
         } else {
             self.enter_simplification_or_done(round, yolo)?;
         }
@@ -593,7 +593,7 @@ feedback = []
             std::fs::create_dir_all(&session_dir).unwrap();
 
             let mut state = SessionState::new(session_id);
-            state.current_stage = Stage::ReviewRound(5);
+            state.current_stage = Stage::Review(5);
             state.builder = builder_with_running_task(1);
             write_round_artifacts(&session_dir, 5, 1);
 
@@ -641,7 +641,7 @@ feedback = []
             std::fs::create_dir_all(&session_dir).unwrap();
 
             let mut state = SessionState::new(session_id);
-            state.current_stage = Stage::ReviewRound(3);
+            state.current_stage = Stage::Review(3);
             state.builder = builder_with_running_task(1);
             write_round_artifacts(&session_dir, 3, 1);
 
@@ -681,7 +681,7 @@ feedback = []
             std::fs::create_dir_all(&session_dir).unwrap();
 
             let mut state = SessionState::new(session_id);
-            state.current_stage = Stage::ReviewRound(10);
+            state.current_stage = Stage::Review(10);
             state.builder = builder_with_running_task(1);
             write_round_artifacts(&session_dir, 10, 1);
 

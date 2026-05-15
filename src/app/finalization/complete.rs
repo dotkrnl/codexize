@@ -42,7 +42,7 @@ impl App {
                 self.finalize_repo_state_update_success(run)?
             }
             Some(crate::lifecycle::StageId::Sharding) => {
-                if matches!(self.state.current_stage, Stage::BuilderRecoverySharding(_)) {
+                if matches!(self.state.current_stage, Stage::Implementation(_)) {
                     self.handle_recovery_sharding_completed(run, run.round)?;
                 } else {
                     self.finalize_sharding_success(run)?;

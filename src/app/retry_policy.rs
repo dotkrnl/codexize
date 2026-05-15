@@ -162,7 +162,7 @@ impl App {
             let sharding_pause = matches!(failed_run.stage.as_str(), "sharding")
                 && !matches!(
                     self.state.current_stage,
-                    crate::state::Stage::BuilderRecoverySharding(_),
+                    crate::state::Stage::Implementation(_),
                 );
             if sharding_pause {
                 self.clear_agent_error();

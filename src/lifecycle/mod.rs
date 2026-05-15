@@ -36,5 +36,5 @@ pub use spec::{ActiveRun, StageSpec};
 pub use stage::{RunHistoryEntry, StageCtx, StageDriver, StageRegistry, SuccessOutcome, WorkUnit};
 pub use stage_id::StageId;
 pub use stage_id::stage_id_for_run;
-pub use stage_state::Stage;
+pub use stage_state::{Stage, StageLane};
 pub use stages::default_registry;

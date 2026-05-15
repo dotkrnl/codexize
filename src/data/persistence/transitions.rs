@@ -77,6 +77,12 @@ pub fn enter_final_validation(
         block_with_origin(state, BlockOrigin::FinalValidation)?;
         return Ok(FinalValidationEntry::CapExceeded);
     }
+    if state.current_stage.to_lifecycle_stage() != Stage::Review(round).to_lifecycle_stage() {
+        anyhow::bail!(
+            "Cannot transition from {:?} to FinalValidation({round})",
+            state.current_stage
+        );
+    }
     let target = Stage::FinalValidation(round);
     // Validate before incrementing so an illegal source stage cannot leak a
     // stale attempt count into the persisted state.
@@ -112,6 +118,12 @@ pub fn enter_simplification(state: &mut SessionState, round: u32) -> Result<Simp
     if attempts >= SIMPLIFICATION_ATTEMPT_CAP {
         block_with_origin(state, BlockOrigin::Simplification)?;
         return Ok(SimplificationEntry::CapExceeded);
+    }
+    if state.current_stage.to_lifecycle_stage() != Stage::Review(round).to_lifecycle_stage() {
+        anyhow::bail!(
+            "Cannot transition from {:?} to Simplification({round})",
+            state.current_stage
+        );
     }
     let target = Stage::Simplification(round);
     // Validate before incrementing so an illegal source stage cannot leak a

@@ -13,7 +13,7 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Stage::BuilderRecovery(round) = self.state.current_stage else {
+        let Stage::Implementation(round) = self.state.current_stage else {
             return false;
         };
         let session_dir = session_state::session_dir(&self.state.session_id);
@@ -165,7 +165,7 @@ impl App {
             }
         }
     }
-    /// Co-located success-finalization for `Stage::BuilderRecovery(round)`.
+    /// Co-located success-finalization for `Stage::Implementation(round)`.
     ///
     /// Runs `reconcile_builder_recovery` and then either advances to recovery
     /// plan-review (or sharding under yolo) or surfaces the failure and lets
@@ -184,12 +184,12 @@ impl App {
                     // delegates the review gate, not the artifact validation step.
                     self.log_yolo_auto_approved("recovery_plan_review_skipped");
                     self.queue_recovery_sharding_pipeline_item(round);
-                    self.transition_to_stage(Stage::BuilderRecoverySharding(round))?;
+                    self.transition_to_stage(Stage::Implementation(round))?;
                 } else {
                     // Insert the recovery-mode plan review pipeline item before
                     // transitioning so the UI shows it as the next pending stage.
                     session_state::queue_recovery_plan_review(&mut self.state, round);
-                    self.transition_to_stage(Stage::BuilderRecoveryPlanReview(round))?;
+                    self.transition_to_stage(Stage::Implementation(round))?;
                 }
             }
             Err(err) => {

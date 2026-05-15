@@ -51,7 +51,7 @@ fn go_back_from_plan_rewinds_to_spec_and_deletes_plan_artifact() {
 #[test]
 fn go_back_from_implementation_one_with_skip_to_impl_rewinds_to_idea() {
     with_temp_root(|| {
-        let mut state = fresh_state(Stage::ImplementationRound(1));
+        let mut state = fresh_state(Stage::Implementation(1));
         state.skip_to_impl_rationale = Some("operator picked the shortcut".to_string());
         state.save().unwrap();
         let mut app = mk_app(state);
@@ -68,7 +68,7 @@ fn go_back_from_implementation_one_with_skip_to_impl_rewinds_to_idea() {
 #[test]
 fn go_back_from_implementation_one_without_skip_to_impl_resets_builder_and_rewinds_to_plan() {
     with_temp_root(|| {
-        let mut state = fresh_state(Stage::ImplementationRound(1));
+        let mut state = fresh_state(Stage::Implementation(1));
         state.skip_to_impl_rationale = None;
         // Seed a pipeline item so `reset_builder_after_rewind` has something
         // to clear — its post-state mutates the builder.
@@ -132,7 +132,7 @@ fn retry_selected_target_for_task_row_rewinds_to_implementation_round() {
         // Park the App past the round where task 7 last ran, so the
         // operator's "retry task 7" maps to a backwards rewind that
         // LifecycleOps::rewind accepts.
-        let mut state = fresh_state(Stage::ImplementationRound(7));
+        let mut state = fresh_state(Stage::Implementation(7));
         state.builder.task_titles.insert(7, "task 7".to_string());
         let started_at = chrono::Utc::now();
         state.agent_runs.push(crate::state::RunRecord {

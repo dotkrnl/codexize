@@ -290,7 +290,7 @@ fn test_retry_success_collapses_to_done_for_simple_stage() {
 #[test]
 fn test_retry_success_collapses_round_status_in_builder() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::ImplementationRound(1);
+    state.current_stage = Stage::Implementation(1);
     set_builder_tasks(&mut state, &[], Some(1), &[]);
     state.agent_runs.push(RunRecord {
         id: 1,
@@ -359,7 +359,7 @@ fn test_retry_success_collapses_round_status_in_builder() {
 #[test]
 fn failed_unverified_run_maps_to_distinct_node_status() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::ImplementationRound(1);
+    state.current_stage = Stage::Implementation(1);
     set_builder_tasks(&mut state, &[], Some(1), &[]);
     state.agent_runs.push(RunRecord {
         id: 1,
@@ -412,7 +412,7 @@ fn test_collapsed_stage_leaf_run_id() {
 #[test]
 fn builder_stage_orders_done_recovery_current_pending() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::BuilderRecovery(4);
+    state.current_stage = Stage::Implementation(4);
     set_builder_tasks(&mut state, &[3, 1], Some(9), &[8, 7]);
     state.agent_runs.push(RunRecord {
         id: 99,
@@ -465,7 +465,7 @@ fn builder_stage_orders_done_recovery_current_pending() {
 #[test]
 fn builder_recovery_uses_trigger_task_for_position() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::BuilderRecovery(4);
+    state.current_stage = Stage::Implementation(4);
     set_builder_tasks(&mut state, &[1], Some(2), &[3]);
     state.builder.iteration = 4;
     state.builder.recovery_trigger_task_id = Some(2);
@@ -502,7 +502,7 @@ fn builder_recovery_uses_trigger_task_for_position() {
 #[test]
 fn builder_recovery_sits_between_blocked_round_and_new_round_inside_task() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::ImplementationRound(5);
+    state.current_stage = Stage::Implementation(5);
     set_builder_tasks(&mut state, &[], Some(2), &[]);
     state.builder.recovery_trigger_task_id = Some(2);
 
@@ -541,7 +541,7 @@ fn builder_recovery_sits_between_blocked_round_and_new_round_inside_task() {
 #[test]
 fn recovery_rounds_include_sharding_run_sharing_recovery_round_without_pipeline_mode() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::BuilderRecoverySharding(6);
+    state.current_stage = Stage::Implementation(6);
     set_builder_tasks(&mut state, &[1, 2], None, &[3]);
 
     let mut recovery = run(3, "recovery", RunStatus::Done);
@@ -588,7 +588,7 @@ fn recovery_rounds_include_sharding_run_sharing_recovery_round_without_pipeline_
 fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
     use crate::state::PipelineItem;
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::BuilderRecoverySharding(6);
+    state.current_stage = Stage::Implementation(6);
     set_builder_tasks(&mut state, &[1, 2], None, &[3]);
     state.builder.iteration = 6;
     // Original (round 1) plan-review and sharding runs.
@@ -773,7 +773,7 @@ fn final_validation_gap_tasks_render_under_new_iteration_trio() {
     // not before it.
     use crate::state::PipelineItem;
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::ImplementationRound(2);
+    state.current_stage = Stage::Implementation(2);
     state.builder.task_titles.insert(1, "original".to_string());
     state
         .builder
@@ -985,7 +985,7 @@ fn test_collapse_mode_multiple_attempts_preserved() {
 #[test]
 fn node_keys_distinguish_duplicate_mode_labels_by_ancestry() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::ImplementationRound(2);
+    state.current_stage = Stage::Implementation(2);
     set_builder_tasks(&mut state, &[7], Some(8), &[]);
     state.agent_runs.push(RunRecord {
         id: 1,
@@ -1044,7 +1044,7 @@ fn node_keys_distinguish_duplicate_mode_labels_by_ancestry() {
 #[test]
 fn flatten_visible_rows_hides_collapsed_descendants() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::ReviewRound(1);
+    state.current_stage = Stage::Review(1);
     set_builder_tasks(&mut state, &[], Some(3), &[]);
     state.agent_runs.push(RunRecord {
         id: 1,
@@ -1218,7 +1218,7 @@ fn test_agent_run_node_tough_suffix() {
 #[test]
 fn test_task_node_tough_badge() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::ImplementationRound(1);
+    state.current_stage = Stage::Implementation(1);
     set_builder_tasks(&mut state, &[], Some(1), &[2]);
 
     let normal_run = RunRecord {
@@ -1365,7 +1365,7 @@ fn final_validation_runs_split_across_iteration_trios() {
 #[test]
 fn simplification_running_renders_as_normal_stage() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::Simplification(2);
+    state.current_stage = Stage::Review(2);
     let mut simplifier = run(77, "simplifier", RunStatus::Running);
     simplifier.round = 2;
     simplifier.window_name = "[Simplifier] opus".to_string();
@@ -1385,7 +1385,7 @@ fn simplification_running_renders_as_normal_stage() {
 #[test]
 fn simplification_pending_before_simplification_stage() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::ImplementationRound(1);
+    state.current_stage = Stage::Implementation(1);
     let nodes = build_tree(&state);
     let stage = nodes.iter().find(|n| n.label == "Simplification").unwrap();
     assert_eq!(stage.status, NodeStatus::Pending);
@@ -1549,7 +1549,7 @@ fn simplification_skipped_under_yolo_done() {
 #[test]
 fn simplification_groups_runs_by_round() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::Simplification(2);
+    state.current_stage = Stage::Review(2);
     let mut r1 = run(30, "simplifier", RunStatus::Done);
     r1.round = 1;
     r1.ended_at = Some(chrono::Utc::now());
@@ -1570,7 +1570,7 @@ fn simplification_groups_runs_by_round() {
 #[test]
 fn builder_loop_done_during_simplification_stage() {
     let mut state = SessionState::new("test".to_string());
-    state.current_stage = Stage::Simplification(1);
+    state.current_stage = Stage::Review(1);
     set_builder_tasks(&mut state, &[1], None, &[]);
     let mut coder = run(1, "coder", RunStatus::Done);
     coder.task_id = Some(1);
@@ -1646,7 +1646,7 @@ fn non_contiguous_same_round_runs_emit_sibling_round_nodes() {
     use super::stages::build_builder_stage;
     use crate::state::PipelineItem;
     let mut state = SessionState::new("non-contig".to_string());
-    state.current_stage = Stage::ImplementationRound(1);
+    state.current_stage = Stage::Implementation(1);
     state.builder.task_titles.insert(1, "alpha".to_string());
     state.builder.task_titles.insert(2, "beta".to_string());
     state.builder.pipeline_items.push(PipelineItem {
@@ -1704,7 +1704,7 @@ fn contiguous_same_round_attempts_nest_under_one_round_node() {
     use super::stages::build_builder_stage;
     use crate::state::PipelineItem;
     let mut state = SessionState::new("contig".to_string());
-    state.current_stage = Stage::ImplementationRound(1);
+    state.current_stage = Stage::Implementation(1);
     state.builder.task_titles.insert(1, "alpha".to_string());
     state.builder.pipeline_items.push(PipelineItem {
         id: 100,

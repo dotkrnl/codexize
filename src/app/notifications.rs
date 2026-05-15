@@ -268,15 +268,5 @@ fn stage_carries_live_summary(stage: Stage) -> bool {
 }
 
 fn stage_round(stage: Stage) -> Option<u32> {
-    match stage {
-        Stage::ImplementationRound(round)
-        | Stage::ReviewRound(round)
-        | Stage::BuilderRecovery(round)
-        | Stage::BuilderRecoveryPlanReview(round)
-        | Stage::BuilderRecoverySharding(round)
-        | Stage::FinalValidation(round)
-        | Stage::Dreaming(round)
-        | Stage::Simplification(round) => Some(round),
-        _ => None,
-    }
+    stage.round()
 }

@@ -15,8 +15,23 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Stage::Dreaming(round) = self.state.current_stage else {
-            return false;
+        let round = match self.state.current_stage {
+            Stage::Dreaming(round) => round,
+            Stage::Finalization => self
+                .state
+                .dreaming_decision
+                .as_ref()
+                .map(|decision| decision.round)
+                .or_else(|| {
+                    self.state
+                        .builder
+                        .pipeline_items
+                        .iter()
+                        .filter_map(|item| item.round)
+                        .max()
+                })
+                .unwrap_or(1),
+            _ => return false,
         };
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);

@@ -584,6 +584,9 @@ pub(super) fn format_relative_time(time: SystemTime, now: SystemTime) -> String 
 }
 pub(super) fn stage_badge(stage: Stage) -> (String, Color, &'static str) {
     match stage {
+        Stage::Idea => ("idea".to_string(), Color::DarkGray, "○"),
+        Stage::Spec => ("spec".to_string(), Color::Cyan, "●"),
+        Stage::Plan => ("planning".to_string(), Color::Cyan, "●"),
         Stage::IdeaInput => ("idea".to_string(), Color::DarkGray, "○"),
         Stage::BrainstormRunning => ("brainstorm".to_string(), Color::Cyan, "●"),
         Stage::SpecReviewRunning => ("spec review".to_string(), Color::Cyan, "●"),
@@ -594,22 +597,24 @@ pub(super) fn stage_badge(stage: Stage) -> (String, Color, &'static str) {
         Stage::WaitingToImplement => ("waiting".to_string(), Color::Yellow, "○"),
         Stage::RepoStateUpdateRunning => ("updating plan".to_string(), Color::Cyan, "●"),
         Stage::ShardingRunning => ("sharding".to_string(), Color::Cyan, "●"),
-        Stage::ImplementationRound(n) => (format!("coding r{n}"), Color::Cyan, "●"),
-        Stage::ReviewRound(n) => (format!("review r{n}"), Color::Cyan, "●"),
+        Stage::Implementation(n) => (format!("coding r{n}"), Color::Cyan, "●"),
         Stage::BuilderRecovery(_) => ("builder recovery".to_string(), Color::Cyan, "●"),
         Stage::BuilderRecoveryPlanReview(_) => {
             ("recovery plan review".to_string(), Color::Cyan, "●")
         }
         Stage::BuilderRecoverySharding(_) => ("recovery sharding".to_string(), Color::Cyan, "●"),
-        Stage::BlockedNeedsUser => ("blocked".to_string(), Color::Red, "○"),
-        Stage::Done => ("done".to_string(), Color::Green, "✓"),
-        Stage::Cancelled => ("cancelled".to_string(), Color::DarkGray, "✗"),
-        Stage::SkipToImplPending => ("skip confirm".to_string(), Color::Yellow, "!"),
-        Stage::GitGuardPending => ("guard decision".to_string(), Color::Yellow, "!"),
+        Stage::Review(n) => (format!("review r{n}"), Color::Cyan, "●"),
+        Stage::Simplification(n) => (format!("simplification r{n}"), Color::Cyan, "●"),
+        Stage::Finalization => ("finalization".to_string(), Color::Cyan, "●"),
         Stage::FinalValidation(n) => (format!("final validation r{n}"), Color::Cyan, "●"),
         Stage::DreamingPending => ("dreaming decision".to_string(), Color::Yellow, "!"),
         Stage::Dreaming(n) => (format!("dreaming r{n}"), Color::Cyan, "●"),
-        Stage::Simplification(n) => (format!("simplification r{n}"), Color::Cyan, "●"),
+        Stage::SkipToImplPending => ("skip confirm".to_string(), Color::Yellow, "!"),
+        Stage::GitGuardPending => ("guard decision".to_string(), Color::Yellow, "!"),
+        Stage::Blocked => ("blocked".to_string(), Color::Red, "○"),
+        Stage::BlockedNeedsUser => ("blocked".to_string(), Color::Red, "○"),
+        Stage::Done => ("done".to_string(), Color::Green, "✓"),
+        Stage::Cancelled => ("cancelled".to_string(), Color::DarkGray, "✗"),
     }
 }
 pub(super) fn mode_badge_labels(modes: Modes) -> Vec<&'static str> {

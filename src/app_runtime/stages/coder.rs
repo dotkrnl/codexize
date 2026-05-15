@@ -12,7 +12,7 @@ impl App {
         if !self.guard_models_loaded() {
             return false;
         }
-        let Stage::ImplementationRound(r) = self.state.current_stage else {
+        let Stage::Implementation(r) = self.state.current_stage else {
             return false;
         };
         let Some(task_id) = self.ensure_builder_task_for_round(r) else {
@@ -146,7 +146,7 @@ impl App {
             }
         }
     }
-    /// Co-located success-finalization for `Stage::ImplementationRound(round)`.
+    /// Co-located success-finalization for `Stage::Implementation(round)`.
     pub(crate) fn finalize_coder_success(
         &mut self,
         run: &crate::state::RunRecord,
@@ -161,7 +161,7 @@ impl App {
         if round == 1 && self.state.skip_to_impl_rationale.is_some() {
             self.enter_simplification_or_done(1, run.modes.yolo)?;
         } else {
-            self.transition_to_stage(Stage::ReviewRound(round))?;
+            self.transition_to_stage(Stage::Review(round))?;
         }
         Ok(())
     }

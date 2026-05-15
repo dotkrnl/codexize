@@ -6,11 +6,12 @@
 //! dependencies; the additional `impl` block in `data/persistence` extends it
 //! with load/save/log helpers.
 use crate::data::adapters::EffortLevel;
+use crate::data::artifacts::SkipToImplKind;
 use crate::data::config::schema::EffortMapping;
-use crate::logic::pipeline::stage::Stage;
+use crate::lifecycle::Stage;
 use crate::logic::selection::SelectionStage;
 use crate::state::BuilderState;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{collections::BTreeMap, path::PathBuf};
 /// An event logged to the run's events.toml audit trail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -345,73 +346,30 @@ pub struct PendingGuardDecision {
     pub warnings: Vec<String>,
 }
 /// The persisted state of a single codexize session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SessionState {
     pub session_id: String,
     pub schema_version: u32,
-    #[serde(default)]
     pub modes: Modes,
-    #[serde(default)]
     pub agent_runs: Vec<RunRecord>,
     pub current_stage: Stage,
-    #[serde(default)]
     pub idea_text: Option<String>,
-    /// Operator-facing session title — set by the brainstormer once the spec
-    /// is drafted. Falls back to truncated `idea_text` for display.
-    #[serde(default)]
     pub title: Option<String>,
-    #[serde(default)]
     pub selected_model: Option<String>,
-    #[serde(default)]
     pub show_noninteractive_texts: bool,
-    #[serde(default)]
     pub show_thinking_texts: bool,
-    #[serde(default)]
     pub agent_error: Option<String>,
-    /// Builder loop state (empty until sharding completes)
-    #[serde(default)]
     pub builder: BuilderState,
-    #[serde(default)]
     pub archived: bool,
-    #[serde(default)]
     pub skip_to_impl_rationale: Option<String>,
-    #[serde(default)]
-    pub skip_to_impl_kind: Option<crate::data::artifacts::SkipToImplKind>,
-    #[serde(default)]
+    pub skip_to_impl_kind: Option<SkipToImplKind>,
     pub pending_guard_decision: Option<PendingGuardDecision>,
-    /// Number of `FinalValidation` runs entered in this session. Increments
-    /// on entry; the orchestrator hard-blocks before the 4th run starts.
-    #[serde(default)]
     pub validation_attempts: u32,
-    /// Number of `Simplification(round)` runs entered, keyed by the round
-    /// being simplified. Increments on entry; the orchestrator hard-blocks
-    /// before the 4th run for a given round (`SIMPLIFICATION_ATTEMPT_CAP`).
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub simplification_attempts: BTreeMap<u32, u32>,
-    /// Origin of the most recent `BlockedNeedsUser` transition. Cleared when
-    /// the session moves out of `BlockedNeedsUser`. The force-ship guard reads
-    /// this field to decide whether `BlockedNeedsUser -> Done` is allowed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block_origin: Option<BlockOrigin>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dreaming_decision: Option<DreamingDecision>,
-    /// Session id of the newest earlier `Done` session at the time this session
-    /// was planned (or last repo-state-updated). `None` when no earlier session
-    /// matches the baseline definition.
-    #[serde(default)]
     pub planned_after_session_id: Option<String>,
-    /// Lifecycle stage the agent was paused at when the operator issued
-    /// `:stop`. Persisted so the scheduler doesn't relaunch the same stage
-    /// immediately after a TUI restart. `None` outside `:stop`-then-`Idle`
-    /// transitions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paused_at_stage: Option<crate::lifecycle::Stage>,
-    /// Operator-decision slots used by the lifecycle. Persisted so a
-    /// modal raised by a prior TUI invocation survives a restart.
-    #[serde(
-        default,
-        skip_serializing_if = "crate::lifecycle::PendingDecisions::is_empty"
-    )]
     pub pending_decisions: crate::lifecycle::PendingDecisions,
 }
 impl SessionState {
@@ -421,7 +379,7 @@ impl SessionState {
             schema_version: 4,
             modes: Modes::default(),
             agent_runs: Vec::new(),
-            current_stage: Stage::IdeaInput,
+            current_stage: Stage::Idea,
             idea_text: None,
             title: None,
             selected_model: None,
@@ -537,6 +495,244 @@ impl TestFsLock {
         }
     }
 }
+mod stage_compat {
+    use crate::lifecycle::Stage;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(stage: &Stage, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_some(stage)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Stage, D::Error> {
+        use serde::de::Error;
+
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum LegacyOrNew {
+            New(Stage),
+            String(String),
+            Map(serde_json::Value),
+        }
+
+        let val = LegacyOrNew::deserialize(d)
+            .map_err(|e| D::Error::custom(format!("failed to deserialize current_stage: {e}")))?;
+
+        match val {
+            LegacyOrNew::New(s) => Ok(s),
+            LegacyOrNew::String(s) => migrate_legacy_stage(&s).map_err(D::Error::custom),
+            LegacyOrNew::Map(v) => {
+                if let Some(round) = v.as_object().and_then(|m| {
+                    let (key, val) = m.iter().next()?;
+                    let r = val.as_u64()? as u32;
+                    match key.as_str() {
+                        "Implementation" => Some(Stage::Implementation(r)),
+                        "Review" => Some(Stage::Review(r)),
+                        _ => None,
+                    }
+                }) {
+                    Ok(round)
+                } else {
+                    Ok(Stage::Idea)
+                }
+            }
+        }
+    }
+
+    fn migrate_legacy_stage(s: &str) -> Result<Stage, String> {
+        Ok(match s {
+            "IdeaInput" | "BrainstormRunning" => Stage::Idea,
+            "SpecReviewRunning" | "SpecReviewPaused" => Stage::Spec,
+            "PlanningRunning"
+            | "PlanReviewRunning"
+            | "PlanReviewPaused"
+            | "ShardingRunning"
+            | "RepoStateUpdateRunning"
+            | "WaitingToImplement"
+            | "SkipToImplPending" => Stage::Plan,
+            "ImplementationRound" => Stage::Implementation(1),
+            "ReviewRound" => Stage::Review(1),
+            "BuilderRecovery" | "BuilderRecoveryPlanReview" | "BuilderRecoverySharding" => {
+                Stage::Implementation(1)
+            }
+            "GitGuardPending" => Stage::Plan,
+            "FinalValidation" => Stage::Finalization,
+            "DreamingPending" | "Dreaming" => Stage::Finalization,
+            "Simplification" => Stage::Review(1),
+            "Done" => Stage::Done,
+            "Cancelled" => Stage::Cancelled,
+            "BlockedNeedsUser" => Stage::Blocked,
+            other => {
+                return Err(format!("unknown legacy stage: {other}"));
+            }
+        })
+    }
+}
+
+impl Serialize for SessionState {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        #[derive(Serialize)]
+        struct Fields<'a> {
+            session_id: &'a str,
+            schema_version: u32,
+            #[serde(default)]
+            modes: &'a Modes,
+            #[serde(default)]
+            agent_runs: &'a Vec<RunRecord>,
+            #[serde(with = "stage_compat")]
+            current_stage: Stage,
+            #[serde(default)]
+            idea_text: &'a Option<String>,
+            #[serde(default)]
+            title: &'a Option<String>,
+            #[serde(default)]
+            selected_model: &'a Option<String>,
+            #[serde(default)]
+            show_noninteractive_texts: bool,
+            #[serde(default)]
+            show_thinking_texts: bool,
+            #[serde(default)]
+            agent_error: &'a Option<String>,
+            #[serde(default)]
+            builder: &'a BuilderState,
+            #[serde(default)]
+            archived: bool,
+            #[serde(default)]
+            skip_to_impl_rationale: &'a Option<String>,
+            #[serde(default)]
+            skip_to_impl_kind: &'a Option<SkipToImplKind>,
+            #[serde(default)]
+            pending_guard_decision: &'a Option<PendingGuardDecision>,
+            #[serde(default)]
+            validation_attempts: u32,
+            #[serde(default)]
+            simplification_attempts: &'a BTreeMap<u32, u32>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            block_origin: &'a Option<BlockOrigin>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            dreaming_decision: &'a Option<DreamingDecision>,
+            #[serde(default)]
+            planned_after_session_id: &'a Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            paused_at_stage: &'a Option<Stage>,
+            #[serde(
+                default,
+                skip_serializing_if = "crate::lifecycle::PendingDecisions::is_empty"
+            )]
+            pending_decisions: &'a crate::lifecycle::PendingDecisions,
+        }
+
+        Fields {
+            session_id: &self.session_id,
+            schema_version: self.schema_version,
+            modes: &self.modes,
+            agent_runs: &self.agent_runs,
+            current_stage: self.current_stage,
+            idea_text: &self.idea_text,
+            title: &self.title,
+            selected_model: &self.selected_model,
+            show_noninteractive_texts: self.show_noninteractive_texts,
+            show_thinking_texts: self.show_thinking_texts,
+            agent_error: &self.agent_error,
+            builder: &self.builder,
+            archived: self.archived,
+            skip_to_impl_rationale: &self.skip_to_impl_rationale,
+            skip_to_impl_kind: &self.skip_to_impl_kind,
+            pending_guard_decision: &self.pending_guard_decision,
+            validation_attempts: self.validation_attempts,
+            simplification_attempts: &self.simplification_attempts,
+            block_origin: &self.block_origin,
+            dreaming_decision: &self.dreaming_decision,
+            planned_after_session_id: &self.planned_after_session_id,
+            paused_at_stage: &self.paused_at_stage,
+            pending_decisions: &self.pending_decisions,
+        }
+        .serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for SessionState {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Fields {
+            session_id: String,
+            #[serde(default)]
+            schema_version: u32,
+            #[serde(default)]
+            modes: Modes,
+            #[serde(default)]
+            agent_runs: Vec<RunRecord>,
+            #[serde(with = "stage_compat")]
+            current_stage: Stage,
+            #[serde(default)]
+            idea_text: Option<String>,
+            #[serde(default)]
+            title: Option<String>,
+            #[serde(default)]
+            selected_model: Option<String>,
+            #[serde(default)]
+            show_noninteractive_texts: bool,
+            #[serde(default)]
+            show_thinking_texts: bool,
+            #[serde(default)]
+            agent_error: Option<String>,
+            #[serde(default)]
+            builder: BuilderState,
+            #[serde(default)]
+            archived: bool,
+            #[serde(default)]
+            skip_to_impl_rationale: Option<String>,
+            #[serde(default)]
+            skip_to_impl_kind: Option<SkipToImplKind>,
+            #[serde(default)]
+            pending_guard_decision: Option<PendingGuardDecision>,
+            #[serde(default)]
+            validation_attempts: u32,
+            #[serde(default)]
+            simplification_attempts: BTreeMap<u32, u32>,
+            #[serde(default)]
+            block_origin: Option<BlockOrigin>,
+            #[serde(default)]
+            dreaming_decision: Option<DreamingDecision>,
+            #[serde(default)]
+            planned_after_session_id: Option<String>,
+            #[serde(default)]
+            paused_at_stage: Option<Stage>,
+            #[serde(default)]
+            pending_decisions: crate::lifecycle::PendingDecisions,
+        }
+
+        let f = Fields::deserialize(d)?;
+        Ok(SessionState {
+            session_id: f.session_id,
+            schema_version: f.schema_version,
+            modes: f.modes,
+            agent_runs: f.agent_runs,
+            current_stage: f.current_stage,
+            idea_text: f.idea_text,
+            title: f.title,
+            selected_model: f.selected_model,
+            show_noninteractive_texts: f.show_noninteractive_texts,
+            show_thinking_texts: f.show_thinking_texts,
+            agent_error: f.agent_error,
+            builder: f.builder,
+            archived: f.archived,
+            skip_to_impl_rationale: f.skip_to_impl_rationale,
+            skip_to_impl_kind: f.skip_to_impl_kind,
+            pending_guard_decision: f.pending_guard_decision,
+            validation_attempts: f.validation_attempts,
+            simplification_attempts: f.simplification_attempts,
+            block_origin: f.block_origin,
+            dreaming_decision: f.dreaming_decision,
+            planned_after_session_id: f.planned_after_session_id,
+            paused_at_stage: f.paused_at_stage,
+            pending_decisions: f.pending_decisions,
+        })
+    }
+}
+
 #[cfg(test)]
 impl Drop for TestFsGuard<'_> {
     fn drop(&mut self) {

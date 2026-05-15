@@ -75,7 +75,7 @@ impl App {
             interactive,
         );
         self.clear_agent_error();
-        if let Err(err) = self.transition_to_stage(Stage::BuilderRecovery(triggering_round)) {
+        if let Err(err) = self.transition_to_stage(Stage::Implementation(triggering_round)) {
             self.record_agent_error(format!("failed to enter builder recovery: {err}"));
             tracing::warn!("failed to enter builder recovery, blocking: {err}");
             self.clear_builder_recovery_context();
@@ -115,13 +115,7 @@ impl App {
             .iter()
             .filter_map(|item| item.round)
             .max()
-            .or(match self.state.current_stage {
-                Stage::ImplementationRound(r)
-                | Stage::ReviewRound(r)
-                | Stage::Simplification(r)
-                | Stage::FinalValidation(r) => Some(r),
-                _ => None,
-            })
+            .or(self.state.current_stage.round())
             .unwrap_or(1);
         let trigger_task_id = self.state.builder.current_task_id().or_else(|| {
             self.state
@@ -309,7 +303,7 @@ impl App {
             review::ReviewStatus::Approved | review::ReviewStatus::Refine => {
                 session_state::reset_recovery_cycle_count(&mut self.state);
                 self.queue_recovery_sharding_pipeline_item(round);
-                self.transition_to_stage(Stage::BuilderRecoverySharding(round))?;
+                self.transition_to_stage(Stage::Implementation(round))?;
             }
             review::ReviewStatus::Revise
             | review::ReviewStatus::HumanBlocked
@@ -431,7 +425,7 @@ impl App {
             self.state.builder.pending_task_ids().len()
         );
         self.append_system_message(run.id, MessageKind::Summary, pipeline_msg);
-        self.transition_to_stage(Stage::ImplementationRound(round + 1))?;
+        self.transition_to_stage(Stage::Implementation(round + 1))?;
         Ok(())
     }
 }

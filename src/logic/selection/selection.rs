@@ -367,7 +367,14 @@ fn sample_seed() -> u64 {
     #[cfg(not(test))]
     {
         let mut buf = [0u8; 8];
-        getrandom::fill(&mut buf).expect("getrandom failed");
+        if getrandom::fill(&mut buf).is_err() {
+            // Fallback to a hash of the current instant so the selection
+            // pipeline never panics on entropy exhaustion.
+            return std::hash::BuildHasher::hash_one(
+                &std::collections::hash_map::RandomState::new(),
+                std::time::Instant::now(),
+            );
+        }
         u64::from_ne_bytes(buf)
     }
 }

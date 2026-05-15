@@ -129,6 +129,7 @@ pub fn load_str(text: &str) -> Result<Config, LoadError> {
         .map_err(|e: toml_edit::TomlError| LoadError::Parse(format!("{e}")))?;
 
     let mut config = Config::baked_defaults();
+    let mut saw_meta = false;
     let known_top: &[&str] = &[
         "meta",
         "ntfy",
@@ -143,7 +144,10 @@ pub fn load_str(text: &str) -> Result<Config, LoadError> {
 
     for (key, item) in doc.iter() {
         match key {
-            "meta" => decode_meta(item, &mut config.meta, key)?,
+            "meta" => {
+                saw_meta = true;
+                decode_meta(item, &mut config.meta, key)?;
+            }
             "ntfy" => decode_ntfy(item, &mut config.ntfy, key)?,
             "acp" => decode_acp(item, &mut config.acp, key)?,
             "runner" => decode_runner(item, &mut config.runner, key)?,
@@ -163,12 +167,19 @@ pub fn load_str(text: &str) -> Result<Config, LoadError> {
         }
     }
 
+    if !saw_meta {
+        return Err(LoadError::Validation(
+            "missing required [meta] section".to_string(),
+        ));
+    }
+
     config.validate().map_err(LoadError::Validation)?;
     Ok(config)
 }
 
 fn decode_meta(item: &Item, out: &mut MetaSection, parent: &str) -> Result<(), LoadError> {
     let table = require_table(item, parent)?;
+    let mut saw_version = false;
     for (k, v) in table.iter() {
         match k {
             "version" => {
@@ -177,11 +188,17 @@ fn decode_meta(item: &Item, out: &mut MetaSection, parent: &str) -> Result<(), L
                     return Err(LoadError::UnsupportedVersion { found: n });
                 }
                 out.version = SUPPORTED_VERSION;
+                saw_version = true;
             }
             other => {
                 return unknown(parent, other, v, &["version"]);
             }
         }
+    }
+    if !saw_version {
+        return Err(LoadError::Validation(
+            "meta.version is required".to_string(),
+        ));
     }
     Ok(())
 }
@@ -1254,10 +1271,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn missing_meta_section_treated_as_v1() {
-        let cfg = load_str("[ntfy]\nenabled = false\n").unwrap();
-        assert_eq!(cfg.meta.version, SUPPORTED_VERSION);
-        assert!(!*cfg.ntfy.enabled.value());
+    fn missing_meta_section_rejected() {
+        let err = load_str("[ntfy]\nenabled = false\n").unwrap_err();
+        match err {
+            LoadError::Validation(msg) => assert!(msg.contains("[meta]"), "{msg}"),
+            other => panic!("wrong error: {other:?}"),
+        }
     }
 
     #[test]
@@ -1357,7 +1376,7 @@ mod tests {
 
     #[test]
     fn type_mismatch_returns_structured_error() {
-        let err = load_str("[ntfy]\nenabled = \"yes\"\n").unwrap_err();
+        let err = load_str("[meta]\nversion = 1\n\n[ntfy]\nenabled = \"yes\"\n").unwrap_err();
         match err {
             LoadError::TypeMismatch { path, expected, .. } => {
                 assert_eq!(path, "ntfy.enabled");
@@ -1369,7 +1388,8 @@ mod tests {
 
     #[test]
     fn enum_value_rejected_with_allowed_list() {
-        let err = load_str("[ntfy]\ndetail_mode = \"verbose\"\n").unwrap_err();
+        let err =
+            load_str("[meta]\nversion = 1\n\n[ntfy]\ndetail_mode = \"verbose\"\n").unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("detailed"), "{msg}");
         assert!(msg.contains("minimal"), "{msg}");
@@ -1378,7 +1398,8 @@ mod tests {
     #[test]
     fn validation_runs_after_decode() {
         // retry_attempts = 0 must trip the schema validator.
-        let err = load_str("[ntfy]\nretry_attempts = 0\n").unwrap_err();
+        let err =
+            load_str("[meta]\nversion = 1\n\n[ntfy]\nretry_attempts = 0\n").unwrap_err();
         match err {
             LoadError::Validation(msg) => assert!(msg.contains("retry_attempts"), "{msg}"),
             other => panic!("wrong error: {other:?}"),
@@ -1387,7 +1408,7 @@ mod tests {
 
     #[test]
     fn reserved_env_prefix_rejected() {
-        let toml = "[acp.agents.claude.env]\nCODEXIZE_ACP_FOO = \"x\"\n";
+        let toml = "[meta]\nversion = 1\n\n[acp.agents.claude.env]\nCODEXIZE_ACP_FOO = \"x\"\n";
         let err = load_str(toml).unwrap_err();
         assert!(err.to_string().contains("CODEXIZE_ACP_"), "{err}");
     }
@@ -1404,7 +1425,7 @@ mod tests {
 
     #[test]
     fn env_inline_table_decoded() {
-        let toml = "[acp.agents.claude]\nenv = { FOO = \"bar\" }\n";
+        let toml = "[meta]\nversion = 1\n\n[acp.agents.claude]\nenv = { FOO = \"bar\" }\n";
         let cfg = load_str(toml).unwrap();
         assert_eq!(
             cfg.acp.agents.claude.env.value().get("FOO"),
@@ -1414,7 +1435,7 @@ mod tests {
 
     #[test]
     fn providers_round_trip_minimal() {
-        let toml = "[[providers]]\nlaunch = \"opencode/opencode-go/deepseek-v4-flash\"\nmodel = \"deepseek-v4-flash\"\nsubscription = \"opencode-go\"\n";
+        let toml = "[meta]\nversion = 1\n\n[[providers]]\nlaunch = \"opencode/opencode-go/deepseek-v4-flash\"\nmodel = \"deepseek-v4-flash\"\nsubscription = \"opencode-go\"\n";
         let cfg = load_str(toml).unwrap();
         assert_eq!(cfg.providers.value().len(), 1);
         let p = &cfg.providers.value()[0];
@@ -1429,7 +1450,7 @@ mod tests {
 
     #[test]
     fn providers_cli_subscription_independence() {
-        let toml = "[[providers]]\nlaunch = \"opencode/opencode-go/deepseek-v4-flash\"\nmodel = \"deepseek-v4-flash\"\nsubscription = \"codex\"\nquota_disabled = true\n";
+        let toml = "[meta]\nversion = 1\n\n[[providers]]\nlaunch = \"opencode/opencode-go/deepseek-v4-flash\"\nmodel = \"deepseek-v4-flash\"\nsubscription = \"codex\"\nquota_disabled = true\n";
         let cfg = load_str(toml).unwrap();
         let p = &cfg.providers.value()[0];
         assert_eq!(p.cli, crate::selection::CliKind::Opencode);

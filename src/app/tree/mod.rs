@@ -589,11 +589,7 @@ fn builder_status(
         return NodeStatus::Running;
     }
     match state.current_stage {
-        Stage::Implementation(_)
-        | Stage::Review(_)
-        | Stage::Implementation(_)
-        | Stage::Implementation(_)
-        | Stage::Implementation(_) => {
+        Stage::Implementation(_) | Stage::Review(_) => {
             if state.agent_error.is_some() {
                 NodeStatus::Failed
             } else {
@@ -637,10 +633,7 @@ fn recovery_rounds_for_stage(state: &SessionState, stage: &str) -> BTreeSet<u32>
         .collect()
 }
 fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String {
-    if matches!(
-        state.current_stage,
-        Stage::Implementation(_) | Stage::Implementation(_) | Stage::Implementation(_)
-    ) {
+    if matches!(state.current_stage, Stage::Implementation(_)) {
         return "builder recovery in progress".to_string();
     }
     if !recovery_runs.is_empty()

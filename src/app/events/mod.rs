@@ -74,10 +74,6 @@ impl App {
                     | crate::state::Stage::ShardingRunning
                     | crate::state::Stage::Implementation(_)
                     | crate::state::Stage::Review(_)
-                    | crate::state::Stage::Implementation(_)
-                    | crate::state::Stage::Implementation(_)
-                    | crate::state::Stage::Implementation(_)
-                    | crate::state::Stage::Review(_)
                     | crate::state::Stage::Finalization
             )
     }

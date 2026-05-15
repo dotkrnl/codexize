@@ -1369,7 +1369,6 @@ impl App {
             | Stage::GitGuardPending
             | Stage::Finalization
             | Stage::DreamingPending
-            | Stage::Review(_)
             | Stage::Cancelled => {
                 return None;
             }

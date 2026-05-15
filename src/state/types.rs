@@ -499,11 +499,11 @@ mod stage_compat {
     use crate::lifecycle::Stage;
     use serde::{Deserialize, Deserializer, Serializer};
 
-    pub fn serialize<S: Serializer>(stage: &Stage, s: S) -> Result<S::Ok, S::Error> {
+    pub(super) fn serialize<S: Serializer>(stage: &Stage, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_some(stage)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Stage, D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Stage, D::Error> {
         use serde::de::Error;
 
         #[derive(Deserialize)]
@@ -569,10 +569,7 @@ mod stage_compat {
 }
 
 impl Serialize for SessionState {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         #[derive(Serialize)]
         struct Fields<'a> {
             session_id: &'a str,

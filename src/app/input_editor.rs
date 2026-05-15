@@ -1,7 +1,7 @@
 fn char_to_byte(s: &str, char_idx: usize) -> usize {
     s.char_indices().nth(char_idx).map_or(s.len(), |(i, _)| i)
 }
-pub fn apply(buffer: &mut String, cursor: &mut usize, key: crate::app::keys::UiKey) -> bool {
+pub(crate) fn apply(buffer: &mut String, cursor: &mut usize, key: crate::app::keys::UiKey) -> bool {
     let len = buffer.chars().count();
     if *cursor > len {
         *cursor = len;
@@ -149,7 +149,7 @@ fn delete_word_forward(buffer: &mut String, cursor: &mut usize) {
 
 /// Apply a typed [`InputCommand`] to a buffer/cursor pair. Returns true
 /// when the command mutated the buffer or moved the cursor.
-pub fn apply_input_command(
+pub(crate) fn apply_input_command(
     buffer: &mut String,
     cursor: &mut usize,
     cmd: &crate::app_runtime::InputCommand,

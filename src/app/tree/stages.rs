@@ -323,10 +323,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
         };
         children.push(node(label, NodeKind::Task, task_status, "", round_nodes));
     }
-    let in_recovery_stage = matches!(
-        state.current_stage,
-        Stage::Implementation(_) | Stage::Implementation(_) | Stage::Implementation(_)
-    );
+    let in_recovery_stage = matches!(state.current_stage, Stage::Implementation(_));
     if in_recovery_stage
         || !recovery_runs.is_empty()
         || !recovery_pr_runs.is_empty()

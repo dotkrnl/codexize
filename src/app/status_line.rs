@@ -18,14 +18,14 @@ impl StatusMessage {
     }
 }
 #[derive(Debug)]
-pub struct StatusLine {
+pub(crate) struct StatusLine {
     current: Option<StatusMessage>,
 }
 impl StatusLine {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { current: None }
     }
-    pub fn push(&mut self, message: String, severity: Severity, ttl: Duration) {
+    pub(crate) fn push(&mut self, message: String, severity: Severity, ttl: Duration) {
         let now = Instant::now();
         let should_replace = match &self.current {
             None => true,
@@ -41,7 +41,7 @@ impl StatusLine {
             });
         }
     }
-    pub fn tick(&mut self) {
+    pub(crate) fn tick(&mut self) {
         let expired = self
             .current
             .as_ref()
@@ -50,10 +50,10 @@ impl StatusLine {
             self.current = None;
         }
     }
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.current = None;
     }
-    pub fn current_message(&self) -> Option<&StatusMessage> {
+    pub(crate) fn current_message(&self) -> Option<&StatusMessage> {
         self.current.as_ref()
     }
 }

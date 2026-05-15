@@ -16,7 +16,11 @@ impl UiKey {
     /// Synthetic key with no modifiers (the common case for command-to-key
     /// bridging in the transitional typed-command handlers).
     pub(crate) fn new(code: UiKeyCode) -> Self {
-        Self { code, ctrl: false, alt: false }
+        Self {
+            code,
+            ctrl: false,
+            alt: false,
+        }
     }
 }
 

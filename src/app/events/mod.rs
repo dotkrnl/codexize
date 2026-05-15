@@ -561,29 +561,41 @@ impl App {
                 _ => false,
             },
             ModalKind::CancelSession => match cmd {
-                ModalCommand::Confirm => self.handle_cancel_session_modal_key(UiKey::new(UiKeyCode::Enter)),
-                ModalCommand::Cancel => self.handle_cancel_session_modal_key(UiKey::new(UiKeyCode::Esc)),
+                ModalCommand::Confirm => {
+                    self.handle_cancel_session_modal_key(UiKey::new(UiKeyCode::Enter))
+                }
+                ModalCommand::Cancel => {
+                    self.handle_cancel_session_modal_key(UiKey::new(UiKeyCode::Esc))
+                }
                 _ => false,
             },
             ModalKind::InteractiveExitPrompt => match cmd {
-                ModalCommand::Confirm => self.handle_interactive_exit_prompt_modal_key(UiKey::new(UiKeyCode::Enter)),
-                ModalCommand::Cancel => self.handle_interactive_exit_prompt_modal_key(UiKey::new(UiKeyCode::Esc)),
-                ModalCommand::Action(ModalAction::InteractiveExitInsertChar(c)) => self
-                    .handle_interactive_exit_prompt_modal_key(UiKey::new(UiKeyCode::Char(c))),
+                ModalCommand::Confirm => {
+                    self.handle_interactive_exit_prompt_modal_key(UiKey::new(UiKeyCode::Enter))
+                }
+                ModalCommand::Cancel => {
+                    self.handle_interactive_exit_prompt_modal_key(UiKey::new(UiKeyCode::Esc))
+                }
+                ModalCommand::Action(ModalAction::InteractiveExitInsertChar(c)) => {
+                    self.handle_interactive_exit_prompt_modal_key(UiKey::new(UiKeyCode::Char(c)))
+                }
                 _ => false,
             },
             ModalKind::SkipToImpl => match cmd {
                 ModalCommand::Cancel => true,
-                ModalCommand::Confirm | ModalCommand::Action(ModalAction::AcceptSkipToImpl) => self
-                    .handle_skip_to_impl_modal_key(UiKey::new(UiKeyCode::Char('y'))),
-                ModalCommand::Action(ModalAction::DeclineSkipToImpl) => self
-                    .handle_skip_to_impl_modal_key(UiKey::new(UiKeyCode::Char('n'))),
+                ModalCommand::Confirm | ModalCommand::Action(ModalAction::AcceptSkipToImpl) => {
+                    self.handle_skip_to_impl_modal_key(UiKey::new(UiKeyCode::Char('y')))
+                }
+                ModalCommand::Action(ModalAction::DeclineSkipToImpl) => {
+                    self.handle_skip_to_impl_modal_key(UiKey::new(UiKeyCode::Char('n')))
+                }
                 _ => false,
             },
             ModalKind::GitGuard => match cmd {
                 ModalCommand::Cancel => true,
-                ModalCommand::Confirm | ModalCommand::Action(ModalAction::GuardReset) => self
-                    .handle_guard_modal_key(UiKey::new(UiKeyCode::Char('r'))),
+                ModalCommand::Confirm | ModalCommand::Action(ModalAction::GuardReset) => {
+                    self.handle_guard_modal_key(UiKey::new(UiKeyCode::Char('r')))
+                }
                 ModalCommand::Action(ModalAction::GuardKeep) => {
                     self.handle_guard_modal_key(UiKey::new(UiKeyCode::Char('k')))
                 }
@@ -591,35 +603,34 @@ impl App {
             },
             ModalKind::StageError(stage_id) => match cmd {
                 ModalCommand::Cancel => true,
-                ModalCommand::Confirm | ModalCommand::Action(ModalAction::RetryStage(_)) => self
-                    .handle_stage_error_modal_key(
-                        stage_id,
-                        UiKey::new(UiKeyCode::Char('r')),
-                    ),
-                ModalCommand::Action(ModalAction::EditIdea) => self.handle_stage_error_modal_key(
-                    stage_id,
-                    UiKey::new(UiKeyCode::Char('e')),
-                ),
-                ModalCommand::Action(ModalAction::SkipDreaming) => self
-                    .handle_stage_error_modal_key(
-                        stage_id,
-                        UiKey::new(UiKeyCode::Char('s')),
-                    ),
+                ModalCommand::Confirm | ModalCommand::Action(ModalAction::RetryStage(_)) => {
+                    self.handle_stage_error_modal_key(stage_id, UiKey::new(UiKeyCode::Char('r')))
+                }
+                ModalCommand::Action(ModalAction::EditIdea) => {
+                    self.handle_stage_error_modal_key(stage_id, UiKey::new(UiKeyCode::Char('e')))
+                }
+                ModalCommand::Action(ModalAction::SkipDreaming) => {
+                    self.handle_stage_error_modal_key(stage_id, UiKey::new(UiKeyCode::Char('s')))
+                }
                 _ => false,
             },
             ModalKind::FinalValidationBlocked => match cmd {
                 ModalCommand::Cancel => false,
-                ModalCommand::Confirm | ModalCommand::Action(ModalAction::ForceShip) => self
-                    .handle_final_validation_blocked_modal_key(UiKey::new(UiKeyCode::Char('f'))),
-                ModalCommand::Action(ModalAction::RecoverFromBlock) => self
-                    .handle_final_validation_blocked_modal_key(UiKey::new(UiKeyCode::Char('r'))),
+                ModalCommand::Confirm | ModalCommand::Action(ModalAction::ForceShip) => {
+                    self.handle_final_validation_blocked_modal_key(UiKey::new(UiKeyCode::Char('f')))
+                }
+                ModalCommand::Action(ModalAction::RecoverFromBlock) => {
+                    self.handle_final_validation_blocked_modal_key(UiKey::new(UiKeyCode::Char('r')))
+                }
                 _ => false,
             },
             ModalKind::DreamingDecision => match cmd {
-                ModalCommand::Cancel | ModalCommand::Action(ModalAction::SkipDreaming) => self
-                    .handle_dreaming_decision_modal_key(UiKey::new(UiKeyCode::Esc)),
-                ModalCommand::Confirm | ModalCommand::Action(ModalAction::RunDreaming) => self
-                    .handle_dreaming_decision_modal_key(UiKey::new(UiKeyCode::Char('r'))),
+                ModalCommand::Cancel | ModalCommand::Action(ModalAction::SkipDreaming) => {
+                    self.handle_dreaming_decision_modal_key(UiKey::new(UiKeyCode::Esc))
+                }
+                ModalCommand::Confirm | ModalCommand::Action(ModalAction::RunDreaming) => {
+                    self.handle_dreaming_decision_modal_key(UiKey::new(UiKeyCode::Char('r')))
+                }
                 _ => false,
             },
             ModalKind::SpecReviewPaused => self.handle_spec_review_paused_modal_command(cmd),

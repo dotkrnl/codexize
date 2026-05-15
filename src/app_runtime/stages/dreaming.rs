@@ -243,7 +243,7 @@ mod tests {
     }
 
     fn dream_report_body() -> String {
-        r##"schema_version = 1
+        r#"schema_version = 1
 status = "completed"
 summary = "Consolidated memory lessons."
 started_at = "2026-05-06T22:00:00Z"
@@ -254,7 +254,7 @@ inputs = ["index.md", "manifest.toml"]
 kind = "index_updated"
 target = "index.md#memory-lessons"
 reason = "Captured durable session guidance."
-"##
+"#
         .to_string()
     }
 

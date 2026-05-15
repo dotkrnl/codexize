@@ -6,7 +6,7 @@ fn write(path: &std::path::Path, body: &str) {
 }
 
 fn valid_manifest_body() -> String {
-    r##"schema_version = 1
+    r#"schema_version = 1
 
 [[entries]]
 id = "lesson-1"
@@ -24,7 +24,7 @@ salience = 4
 vendors = ["codex"]
 paths = ["src/app/prompt_builders.rs"]
 supersedes = []
-"##
+"#
     .to_string()
 }
 

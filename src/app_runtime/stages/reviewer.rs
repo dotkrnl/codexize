@@ -559,7 +559,7 @@ mod tests {
     fn synthetic_review_with_audit() -> String {
         // Mirrors what a full-alignment reviewer would write: outer artifact
         // shape unchanged, the new section lives inside the `summary` block.
-        r##"status = "approved"
+        r#"status = "approved"
 summary = """Aggregate delta is acceptable.
 
 ## AC Coverage Audit
@@ -568,15 +568,15 @@ Path-Boundary drift: (none)
 Forgotten items in Dependencies and Sequence: (none)
 """
 feedback = []
-"##
+"#
         .to_string()
     }
 
     fn synthetic_review_plain() -> String {
-        r##"status = "approved"
+        r#"status = "approved"
 summary = "Plain review."
 feedback = []
-"##
+"#
         .to_string()
     }
 

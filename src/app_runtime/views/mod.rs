@@ -1,4 +1,5 @@
 //! Per-surface UI-neutral projections.
+pub mod app_tree;
 pub mod chat;
 pub mod clock;
 pub mod config_panel;

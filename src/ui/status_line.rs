@@ -11,11 +11,11 @@ pub enum Severity {
 }
 /// A single transient status message with a TTL.
 #[derive(Debug)]
-struct StatusMessage {
-    text: String,
-    severity: Severity,
-    pushed_at: Instant,
-    ttl: Duration,
+pub(crate) struct StatusMessage {
+    pub(crate) text: String,
+    pub(crate) severity: Severity,
+    pub(crate) pushed_at: Instant,
+    pub(crate) ttl: Duration,
 }
 /// General-purpose transient status queue.
 ///
@@ -44,6 +44,10 @@ impl<C> StatusLine<C>
 where
     C: Clock,
 {
+    pub(crate) fn current_message(&self) -> Option<&StatusMessage> {
+        self.current.as_ref()
+    }
+
     pub fn with_clock(clock: C) -> Self {
         Self {
             current: None,

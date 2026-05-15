@@ -1,4 +1,5 @@
 use crate::{
+    data::config::Config,
     data::session_index,
     scheduler::ScannedSession,
     state::{self, SessionState, Stage},
@@ -6,7 +7,21 @@ use crate::{
 };
 use anyhow::Result;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+pub fn default_sessions_root() -> PathBuf {
+    state::codexize_root().join("sessions")
+}
+
+/// Resolve the sessions directory from a loaded [`Config`]: honor an explicit
+/// `paths.sessions_root` override, otherwise use the project-local default.
+pub fn sessions_root_for(config: &Config) -> PathBuf {
+    if config.paths.sessions_root.is_explicit() {
+        config.paths_view().sessions_root
+    } else {
+        default_sessions_root()
+    }
+}
 
 /// Scan non-archived sessions and return them sorted by session-id creation
 /// order (ascending). The session-id timestamp format makes this a simple

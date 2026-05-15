@@ -344,7 +344,7 @@ impl AppShell {
         config: Arc<Config>,
         app_lock_guard: Option<AppLockGuard>,
     ) -> Result<Self> {
-        let sessions_root = crate::ui::widgets::picker::state::sessions_root_for(&config);
+        let sessions_root = crate::data::picker_io::sessions_root_for(&config);
         let focused_session_id = initial_state.session_id.clone();
         let mut supervisors = BTreeMap::new();
         let initial_supervisor =

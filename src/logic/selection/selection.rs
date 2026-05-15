@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 static TEST_SAMPLE_SEED: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionWarning {
-    CheapFallback {
+    CheapPoolExpansion {
         stage: SelectionStage,
         reason: &'static str,
     },
@@ -143,7 +143,7 @@ pub fn pick_for_stage_with_effort_and_seed<'a>(
         return pick_for_stage_with_seed(models, stage, vendor_filter, sample_seed).map(|model| {
             SelectionOutcome::with_warning(
                 model,
-                SelectionWarning::CheapFallback {
+                SelectionWarning::CheapPoolExpansion {
                     stage,
                     reason: "no_eligible_with_quota",
                 },
@@ -254,7 +254,7 @@ pub fn select_for_review_with_effort_and_seed<'a>(
             |model| {
                 SelectionOutcome::with_warning(
                     model,
-                    SelectionWarning::CheapFallback {
+                    SelectionWarning::CheapPoolExpansion {
                         stage: SelectionStage::Review,
                         reason: "no_eligible_with_quota",
                     },

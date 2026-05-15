@@ -76,14 +76,18 @@ impl SessionPicker {
         Self::new_with_create_modes(Modes::default())
     }
     pub fn new_with_create_modes(create_modes: Modes) -> Result<Self> {
-        Self::new_with_paths(create_modes, default_sessions_root(), None)
+        Self::new_with_paths(
+            create_modes,
+            crate::data::picker_io::default_sessions_root(),
+            None,
+        )
     }
     pub fn new_with_paths(
         create_modes: Modes,
         sessions_root: PathBuf,
         memory_root_override: Option<PathBuf>,
     ) -> Result<Self> {
-        let entries = scan_sessions(&sessions_root)?;
+        let entries = crate::data::picker_io::scan_sessions(&sessions_root)?;
         Ok(Self {
             entries,
             selected: 0,
@@ -104,7 +108,7 @@ impl SessionPicker {
         })
     }
     fn refresh(&mut self) -> Result<()> {
-        self.entries = scan_sessions(&self.sessions_root)?;
+        self.entries = crate::data::picker_io::scan_sessions(&self.sessions_root)?;
         let visible_count = self.visible_entries().len();
         if self.selected >= visible_count && visible_count > 0 {
             self.selected = visible_count - 1;
@@ -428,12 +432,7 @@ impl SessionPicker {
     fn reload_config(&mut self) {
         let path = crate::data::config::paths::config_path();
         if let Ok(config) = crate::data::config::loader::load_from_path(&path) {
-            self.sessions_root = config
-                .paths
-                .sessions_root
-                .value()
-                .parse()
-                .unwrap_or_else(|_| default_sessions_root());
+            self.sessions_root = crate::data::picker_io::sessions_root_for(&config);
             self.memory_root_override = config
                 .paths
                 .memory_root
@@ -499,29 +498,6 @@ impl SessionPicker {
             );
         }
         Ok(KeyAction::Continue)
-    }
-}
-pub fn scan_sessions(sessions_root: &Path) -> Result<Vec<SessionEntry>> {
-    crate::data::picker_io::scan_sessions(sessions_root)
-}
-
-/// Default sessions directory used by callers who haven't loaded the
-/// unified config yet (tests, CLI shims). Production code constructs
-/// the picker with [`SessionPicker::new_with_paths`] and threads
-/// `paths.sessions_root` from the loaded `Config`.
-pub fn default_sessions_root() -> PathBuf {
-    session_state::codexize_root().join("sessions")
-}
-
-/// Resolve the sessions directory from a loaded [`Config`]: honors an
-/// explicit `paths.sessions_root` override; otherwise falls back to
-/// [`default_sessions_root`]. Centralized so the startup entry point and the
-/// app shell agree on the path.
-pub fn sessions_root_for(config: &crate::data::config::Config) -> PathBuf {
-    if config.paths.sessions_root.is_explicit() {
-        config.paths_view().sessions_root
-    } else {
-        default_sessions_root()
     }
 }
 /// Create a new session on disk and emit the standard creation events.

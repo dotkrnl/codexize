@@ -30,16 +30,10 @@ impl App {
     }
 
     /// Resolve the sessions root (`.codexize/sessions`) the App is reading
-    /// against. Mirrors `session_dir` semantics: an explicit
-    /// `paths.sessions_root` config wins; otherwise we follow
-    /// `state::codexize_root()` so tests pinning `CODEXIZE_ROOT` and the
-    /// production app share the same single source of truth.
+    /// against. Shared with picker/shell startup so every entry point uses
+    /// the same config override semantics.
     pub(crate) fn sessions_root(&self) -> std::path::PathBuf {
-        if self.config.paths.sessions_root.is_explicit() {
-            self.paths.sessions_root.clone()
-        } else {
-            session_state::codexize_root().join("sessions")
-        }
+        crate::data::picker_io::sessions_root_for(&self.config)
     }
 
     /// Build a per-call `PromptMeta` from this App's loaded `Config`.
@@ -340,10 +334,13 @@ impl App {
         }
     }
     pub(crate) fn emit_selection_warning(&mut self, warning: Option<SelectionWarning>) {
-        let Some(SelectionWarning::CheapFallback { stage, reason }) = warning else {
+        let Some(SelectionWarning::CheapPoolExpansion { stage, reason }) = warning else {
             return;
         };
-        let message = format!("cheap_fallback: stage={} reason={reason}", stage.name());
+        let message = format!(
+            "cheap_pool_expansion: stage={} reason={reason}",
+            stage.name()
+        );
         let _ = self.state.log_event(message.clone());
         self.push_status(message, status_line::Severity::Warn, Duration::from_secs(8));
     }
@@ -413,7 +410,7 @@ impl App {
         ) {
             let _ = self.fsm.request_stop(crate::lifecycle::AfterStop::GoIdle);
         }
-        let resolution = self.fsm_confirm_dead_mirroring(fsm_outcome).ok();
+        let resolution = self.sync_fsm_confirm_dead(fsm_outcome).ok();
         // If the operator queued a rewind via LifecycleOps::rewind on a live
         // agent, the FSM's resolution carries the spec inside
         // AfterStop::Rewind. Read it back and merge it into the parked

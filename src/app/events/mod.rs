@@ -32,19 +32,19 @@ impl App {
     }
     pub(crate) fn stop_running_agent(&mut self) {
         // Synchronize the FSM with the persisted state before invoking the
-        // op. The mirroring shim normally runs at run launch time
+        // op. The FSM sync normally runs at run launch time
         // (start_run_tracking) and run finalization, but resume-path
         // sessions can hit `:stop` before any new run launches in this
         // process, which means the FSM is still Idle from construction.
         // A desync surfaces as `OpOutcome::NoOp("no agent running")` —
         // the operator sees the same status-line warning they'd see on a
         // genuinely idle session.
-        self.ensure_fsm_running_mirror();
+        self.sync_fsm_running_state();
         let outcome = self.with_lifecycle_ops_ctx(crate::lifecycle::LifecycleOps::stop);
         self.apply_op_outcome(outcome, "stop");
     }
     fn retry_running_agent(&mut self) {
-        self.ensure_fsm_running_mirror();
+        self.sync_fsm_running_state();
         let outcome = self.with_lifecycle_ops_ctx(crate::lifecycle::LifecycleOps::restart);
         self.apply_op_outcome(outcome, "retry");
     }

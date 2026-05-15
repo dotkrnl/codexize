@@ -249,7 +249,7 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
         return Ok(());
     }
     let paths_view = config.paths_view();
-    let sessions_root = picker::sessions_root_for(&config);
+    let sessions_root = codexize::data::picker_io::sessions_root_for(&config);
     let memory_root_override: Option<std::path::PathBuf> = config
         .paths
         .memory_root

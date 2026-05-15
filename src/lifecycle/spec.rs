@@ -6,8 +6,9 @@
 //!
 //! The spec stays intentionally small: launch-side details such as model,
 //! effort, modes, and prompt path are still resolved by the existing launcher
-//! bridge.
+//! path.
 use super::stage_id::StageId;
+use crate::state::RunRecord;
 use serde::{Deserialize, Serialize};
 
 /// Descriptor for a stage attempt the lifecycle wants to launch.
@@ -21,6 +22,16 @@ pub struct StageSpec {
 }
 
 impl StageSpec {
+    pub fn from_run_record(run: &RunRecord) -> Option<Self> {
+        Some(Self {
+            stage_id: super::stage_id::stage_id_for_run(&run.stage, &run.window_name)?,
+            round: run.round,
+            task_id: run.task_id,
+            attempt: run.attempt,
+            window_name: run.window_name.clone(),
+        })
+    }
+
     /// Return a copy of this spec with `attempt` incremented by one.
     ///
     /// Used by [`super::fsm::AfterStop::Restart`] to derive the next attempt's
@@ -43,6 +54,16 @@ pub struct ActiveRun {
     pub run_id: u64,
     pub spec: StageSpec,
     pub started_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl ActiveRun {
+    pub fn from_run_record(run: &RunRecord) -> Option<Self> {
+        Some(Self {
+            run_id: run.id,
+            spec: StageSpec::from_run_record(run)?,
+            started_at: run.started_at,
+        })
+    }
 }
 
 #[cfg(test)]

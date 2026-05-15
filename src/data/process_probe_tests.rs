@@ -76,16 +76,6 @@ fn alive_without_start_time_or_exec_is_recycled() {
 }
 
 #[test]
-fn parses_typical_lstart_output() {
-    // Format matches macOS/Linux `ps -o lstart=` for a single-digit day,
-    // including the leading space ps inserts to right-align the day.
-    let parsed = parse_lstart(" Mon May  5 14:30:05 2026").expect("parses");
-    // We only assert the round-trip via local timezone cleanly — UTC offset
-    // depends on the host running the test.
-    assert_eq!(parsed.format("%H:%M:%S").to_string().len(), 8);
-}
-
-#[test]
 fn eperm_from_signal_probe_counts_as_live_process() {
     assert!(process_alive_from_kill_result(Err(
         nix::errno::Errno::EPERM

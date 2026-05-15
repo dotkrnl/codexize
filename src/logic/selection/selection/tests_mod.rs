@@ -415,7 +415,7 @@ fn pick_with_effort_cheap_filters_to_budget_subset() {
 }
 
 #[test]
-fn pick_with_effort_cheap_fallback_warns_when_eligible_quota_empty() {
+fn pick_with_effort_cheap_pool_expansion_warns_when_eligible_quota_empty() {
     let models = vec![
         sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 0),
         sample_model(SubscriptionKind::Gemini, "gemini-2.5-flash", 0),
@@ -428,7 +428,7 @@ fn pick_with_effort_cheap_fallback_warns_when_eligible_quota_empty() {
     assert_eq!(chosen.model.name, "claude-opus-4.7");
     assert_eq!(
         chosen.warning,
-        Some(SelectionWarning::CheapFallback {
+        Some(SelectionWarning::CheapPoolExpansion {
             stage: SelectionStage::Build,
             reason: "no_eligible_with_quota",
         })
@@ -565,7 +565,7 @@ fn select_for_review_cheap_reuses_used_eligible_before_expensive_fresh_model() {
 }
 
 #[test]
-fn select_for_review_cheap_fallback_warns_when_eligible_quota_empty() {
+fn select_for_review_cheap_pool_expansion_warns_when_eligible_quota_empty() {
     let models = vec![
         sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 0),
         sample_model(SubscriptionKind::Kimi, "kimi-k2", 0),
@@ -577,7 +577,7 @@ fn select_for_review_cheap_fallback_warns_when_eligible_quota_empty() {
     assert_eq!(chosen.model.name, "gemini-2.5-pro");
     assert_eq!(
         chosen.warning,
-        Some(SelectionWarning::CheapFallback {
+        Some(SelectionWarning::CheapPoolExpansion {
             stage: SelectionStage::Review,
             reason: "no_eligible_with_quota",
         })

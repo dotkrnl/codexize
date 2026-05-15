@@ -34,7 +34,7 @@ impl App {
             // before recovery.toml was written) would route through
             // `maybe_auto_retry` and silently relaunch a new agent instead
             // of stopping.
-            self.ensure_fsm_running_mirror();
+            self.sync_fsm_running_state();
             let _ = self.fsm.request_stop(crate::lifecycle::AfterStop::GoIdle);
             // `/exit` is a local codexize control for interactive ACP runs,
             // not agent prompt text, so the runner completes this run by id.

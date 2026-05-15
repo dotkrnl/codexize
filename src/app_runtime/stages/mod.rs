@@ -280,25 +280,13 @@ impl App {
         self.current_run_id = Some(run_id);
         self.input_mode = false;
         self.run_launched = true;
-        // Mirror the launch into the lifecycle FSM so operator paths
+        // Sync the launch into the lifecycle FSM so operator paths
         // (:stop / :restart) observe a Running state. Errors are logged;
         // the persisted stage remains authoritative for persistence.
-        if let Some(stage_id) = crate::lifecycle::stage_id_for_run(stage, &run.window_name) {
-            let spec = crate::lifecycle::StageSpec {
-                stage_id,
-                round: run.round,
-                task_id: run.task_id,
-                attempt: run.attempt,
-                window_name: run.window_name.clone(),
-            };
-            if self.fsm_start_mirroring(spec.clone()).is_ok() {
-                let active = crate::lifecycle::ActiveRun {
-                    run_id: run.id,
-                    spec,
-                    started_at: run.started_at,
-                };
-                let _ = self.fsm_confirm_running_mirroring(active);
-            }
+        if let Some(active) = crate::lifecycle::ActiveRun::from_run_record(&run)
+            && self.sync_fsm_start(active.spec.clone()).is_ok()
+        {
+            let _ = self.sync_fsm_confirm_running(active);
         }
         self.live_summary_path =
             Some(self.live_summary_path_for_run(stage, task_id, round, attempt));

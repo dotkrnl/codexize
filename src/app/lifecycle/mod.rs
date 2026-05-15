@@ -658,7 +658,7 @@ impl App {
     where
         F: FnOnce(&mut crate::lifecycle::OpsCtx<'_>) -> crate::lifecycle::OpOutcome,
     {
-        self.ensure_fsm_running_mirror();
+        self.sync_fsm_running_state();
         let outcome = self.with_lifecycle_ops_ctx(op);
         self.apply_op_outcome(outcome, label);
     }
@@ -728,7 +728,7 @@ impl App {
         }
     }
 
-    /// Bridge a [`crate::lifecycle::StageSpec`] to the matching persisted
+    /// Route a [`crate::lifecycle::StageSpec`] to the matching persisted
     /// `launch_X` entry point. Called by [`Self::apply_op_outcome`] (for
     /// rewind / restart launches) and by [`Self::maybe_auto_launch`] (for
     /// the per-tick scheduler dispatch).
@@ -740,8 +740,9 @@ impl App {
     /// Sharding deferral) simply ignore the override; the slot is cleared
     /// unconditionally so a stale value can't bleed into the next launch.
     ///
-    /// The persisted launchers still derive some details from `state.current_stage`;
-    /// `StageSpec` is the dispatch key while that bridge is in place.
+    /// The persisted launchers still derive some details from
+    /// `state.current_stage`; `StageSpec` is the dispatch key while that
+    /// launch path remains in place.
     pub(crate) fn dispatch_start(&mut self, spec: &crate::lifecycle::StageSpec) {
         use crate::lifecycle::StageId as L;
         let override_model = self.next_run_model_override.take();
@@ -900,9 +901,9 @@ impl App {
     /// reconciles by synthesizing a [`StageSpec`] / [`ActiveRun`] from the
     /// persisted `RunRecord` and pushing the FSM through `start` +
     /// `confirm_running`. Already-Running and Stopping states are no-ops.
-    /// All FSM errors are absorbed: the mirroring shim is best-effort
-    /// until the FSM owns launch persistence end to end.
-    pub(crate) fn ensure_fsm_running_mirror(&mut self) {
+    /// All FSM errors are absorbed: this sync is best-effort until the FSM
+    /// owns launch persistence end to end.
+    pub(crate) fn sync_fsm_running_state(&mut self) {
         use crate::lifecycle::AgentState;
         if !matches!(self.fsm.view(), AgentState::Idle) {
             return;
@@ -919,47 +920,38 @@ impl App {
         let Some(stage_id) = crate::lifecycle::stage_id_for_run(&run.stage, &run.window_name)
         else {
             tracing::warn!(
-                "ensure_fsm_running_mirror: unknown stage '{}' / window '{}'",
+                "sync_fsm_running_state: unknown stage '{}' / window '{}'",
                 run.stage,
                 run.window_name
             );
             return;
         };
-        let spec = crate::lifecycle::StageSpec {
-            stage_id,
-            round: run.round,
-            task_id: run.task_id,
-            attempt: run.attempt,
-            window_name: run.window_name.clone(),
-        };
-        if self.fsm_start_mirroring(spec.clone()).is_err() {
+        let spec = crate::lifecycle::StageSpec::from_run_record(&run)
+            .expect("known stage_id_for_run must build a StageSpec");
+        debug_assert_eq!(spec.stage_id, stage_id);
+        if self.sync_fsm_start(spec.clone()).is_err() {
             return;
         }
-        let active = crate::lifecycle::ActiveRun {
-            run_id: run.id,
-            spec,
-            started_at: run.started_at,
-        };
-        let _ = self.fsm_confirm_running_mirroring(active);
+        let active = crate::lifecycle::ActiveRun::from_run_record(&run)
+            .expect("known stage_id_for_run must build an ActiveRun");
+        let _ = self.sync_fsm_confirm_running(active);
     }
 
     /// Mirror [`crate::lifecycle::Fsm::start`] into persisted fields.
     ///
     /// Does not set `current_run_id`; the run id is known at
-    /// `confirm_running`. Used by the launch-time mirroring shim installed
-    /// in `start_run_tracking`. Errors from the FSM are logged and discarded;
+    /// `confirm_running`. Used by the launch-time sync hook in
+    /// `start_run_tracking`. Errors from the FSM are logged and discarded;
     /// the persisted path is authoritative for persistence, so a misordered
     /// FSM transition isn't fatal.
-    pub(crate) fn fsm_start_mirroring(
+    pub(crate) fn sync_fsm_start(
         &mut self,
         spec: crate::lifecycle::StageSpec,
     ) -> Result<(), crate::lifecycle::FsmError> {
         match self.fsm.start(spec) {
             Ok(()) => Ok(()),
             Err(err) => {
-                tracing::warn!(
-                    "fsm_start_mirroring: legal path desync, FSM rejected start ({err:?})"
-                );
+                tracing::warn!("sync_fsm_start: legal path desync, FSM rejected start ({err:?})");
                 Err(err)
             }
         }
@@ -967,7 +959,7 @@ impl App {
 
     /// Mirror [`crate::lifecycle::Fsm::confirm_running`] and sync the
     /// persisted `current_run_id` field. Errors are logged and discarded.
-    pub(crate) fn fsm_confirm_running_mirroring(
+    pub(crate) fn sync_fsm_confirm_running(
         &mut self,
         run: crate::lifecycle::ActiveRun,
     ) -> Result<(), crate::lifecycle::FsmError> {
@@ -979,7 +971,7 @@ impl App {
             }
             Err(err) => {
                 tracing::warn!(
-                    "fsm_confirm_running_mirroring: legal path desync ({err:?}); \
+                    "sync_fsm_confirm_running: legal path desync ({err:?}); \
                      keeping persisted current_run_id"
                 );
                 Err(err)
@@ -989,7 +981,7 @@ impl App {
 
     /// Mirror [`crate::lifecycle::Fsm::confirm_dead`] and clear the persisted
     /// `current_run_id` / `run_launched` fields.
-    pub(crate) fn fsm_confirm_dead_mirroring(
+    pub(crate) fn sync_fsm_confirm_dead(
         &mut self,
         outcome: crate::lifecycle::Outcome,
     ) -> Result<crate::lifecycle::StopResolution, crate::lifecycle::FsmError> {
@@ -1001,7 +993,7 @@ impl App {
             }
             Err(err) => {
                 tracing::warn!(
-                    "fsm_confirm_dead_mirroring: legal path desync ({err:?}); \
+                    "sync_fsm_confirm_dead: legal path desync ({err:?}); \
                      leaving persisted current_run_id unchanged"
                 );
                 Err(err)

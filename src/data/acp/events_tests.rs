@@ -75,51 +75,32 @@ fn thought_chunks_become_thought_text_events() {
 }
 
 #[test]
-fn tool_call_text_becomes_thought_event_with_paragraph_break() {
-    let event = translate_update(
-        ClientUpdate::Text {
-            kind: ClientTextKind::Tool,
-            text: "tool: read(Cargo.toml)".to_string(),
-            boundary: AcpTextBoundary::StartNewMessage,
-            identity: None,
-        },
-        false,
-    );
+fn tool_text_becomes_thought_event_with_paragraph_break() {
+    for (text, interactive) in [
+        ("tool: read(Cargo.toml)", false),
+        ("result: completed, exit 0, output: ok", true),
+    ] {
+        let event = translate_update(
+            ClientUpdate::Text {
+                kind: ClientTextKind::Tool,
+                text: text.to_string(),
+                boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
+            },
+            interactive,
+        );
 
-    assert_eq!(
-        event,
-        Some(AcpRuntimeEvent::Text(AcpTextEvent {
-            text: "tool: read(Cargo.toml)\n\n".to_string(),
-            interactive: false,
-            thought: true,
-            boundary: AcpTextBoundary::StartNewMessage,
-            identity: None,
-        }))
-    );
-}
-
-#[test]
-fn tool_call_text_appends_paragraph_break_for_result_blocks() {
-    let event = translate_update(
-        ClientUpdate::Text {
-            kind: ClientTextKind::Tool,
-            text: "result: completed, exit 0, output: ok".to_string(),
-            boundary: AcpTextBoundary::StartNewMessage,
-            identity: None,
-        },
-        true,
-    );
-
-    assert_eq!(
-        event,
-        Some(AcpRuntimeEvent::Text(AcpTextEvent {
-            text: "result: completed, exit 0, output: ok\n\n".to_string(),
-            interactive: true,
-            thought: true,
-            boundary: AcpTextBoundary::StartNewMessage,
-            identity: None,
-        }))
-    );
+        assert_eq!(
+            event,
+            Some(AcpRuntimeEvent::Text(AcpTextEvent {
+                text: format!("{text}\n\n"),
+                interactive,
+                thought: true,
+                boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
+            }))
+        );
+    }
 }
 
 #[test]

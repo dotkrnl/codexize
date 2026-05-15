@@ -1,35 +1,65 @@
 use std::collections::VecDeque;
 /// `Continue` appends to the current live block; `StartNewMessage` finalizes first.
-#[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AcpTextBoundary { Continue, StartNewMessage }
-#[rustfmt::skip]
+pub enum AcpTextBoundary {
+    Continue,
+    StartNewMessage,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClientTextKind { Message, Thought, Tool }
-#[rustfmt::skip]
+pub enum ClientTextKind {
+    Message,
+    Thought,
+    Tool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientUpdate {
-    Text { kind: ClientTextKind, text: String, boundary: AcpTextBoundary, identity: Option<String> },
+    Text {
+        kind: ClientTextKind,
+        text: String,
+        boundary: AcpTextBoundary,
+        identity: Option<String>,
+    },
     /// At most one Start/Finish per `tool_call_id`.
-    ToolCallActivity { tool_call_id: String, kind: ToolCallActivityKind },
-    SessionInfoUpdate { title: Option<String> },
+    ToolCallActivity {
+        tool_call_id: String,
+        kind: ToolCallActivityKind,
+    },
+    SessionInfoUpdate {
+        title: Option<String>,
+    },
     PromptTurnFinished,
-    PromptTurnFailed { message: String },
-    Unknown { kind: String },
+    PromptTurnFailed {
+        message: String,
+    },
+    Unknown {
+        kind: String,
+    },
 }
-#[rustfmt::skip]
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolCallActivityKind { Start, Finish }
-#[rustfmt::skip]
+pub enum ToolCallActivityKind {
+    Start,
+    Finish,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcpRuntimeEvent {
-    SessionTitleUpdated { title: String },
+    SessionTitleUpdated {
+        title: String,
+    },
     Text(AcpTextEvent),
     PromptTurnFinished,
-    PromptTurnFailed { message: String },
-    ToolCallActivity { tool_call_id: String, kind: ToolCallActivityKind },
+    PromptTurnFailed {
+        message: String,
+    },
+    ToolCallActivity {
+        tool_call_id: String,
+        kind: ToolCallActivityKind,
+    },
 }
-#[rustfmt::skip]
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpTextEvent {
     pub text: String,
@@ -44,13 +74,22 @@ pub struct AcpTextAccumulator {
     max_chars: usize,
     ready: VecDeque<String>,
 }
-#[rustfmt::skip]
+
 impl AcpTextAccumulator {
     pub const DEFAULT_MAX_CHARS: usize = 8192;
-    pub fn new() -> Self { Self::with_max_chars(Self::DEFAULT_MAX_CHARS) }
-    pub fn with_max_chars(max_chars: usize) -> Self {
-        Self { buffer: String::new(), max_chars: max_chars.max(1), ready: VecDeque::new() }
+
+    pub fn new() -> Self {
+        Self::with_max_chars(Self::DEFAULT_MAX_CHARS)
     }
+
+    pub fn with_max_chars(max_chars: usize) -> Self {
+        Self {
+            buffer: String::new(),
+            max_chars: max_chars.max(1),
+            ready: VecDeque::new(),
+        }
+    }
+
     pub fn push(&mut self, chunk: &str) -> Option<String> {
         if !chunk.is_empty() {
             self.buffer.push_str(chunk);
@@ -61,19 +100,31 @@ impl AcpTextAccumulator {
     pub fn current_text(&self) -> Option<&str> {
         (!self.buffer.is_empty()).then_some(self.buffer.as_str())
     }
-    pub fn next_ready(&mut self) -> Option<String> { self.ready.pop_front() }
-    pub fn finish_prompt_turn(&mut self) -> Option<String> {
+
+    pub fn next_ready(&mut self) -> Option<String> {
         self.ready.pop_front()
+    }
+
+    pub fn finish_prompt_turn(&mut self) -> Option<String> {
+        self.ready
+            .pop_front()
             .or_else(|| (!self.buffer.is_empty()).then(|| std::mem::take(&mut self.buffer)))
     }
+
     fn flush_ready(&mut self) {
         while let Some(at) = self.buffer.find("\n\n") {
             let block = self.buffer[..at].to_string();
             self.buffer = self.buffer[at + 2..].to_string();
-            if !block.is_empty() { self.ready.push_back(block); }
+            if !block.is_empty() {
+                self.ready.push_back(block);
+            }
         }
         while self.buffer.chars().count() >= self.max_chars {
-            let at = self.buffer.char_indices().nth(self.max_chars).map_or(self.buffer.len(), |(i, _)| i);
+            let at = self
+                .buffer
+                .char_indices()
+                .nth(self.max_chars)
+                .map_or(self.buffer.len(), |(i, _)| i);
             let block = self.buffer[..at].to_string();
             self.buffer = self.buffer[at..].to_string();
             self.ready.push_back(block);
@@ -85,19 +136,32 @@ impl Default for AcpTextAccumulator {
         Self::new()
     }
 }
-#[rustfmt::skip]
+
 pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRuntimeEvent> {
     Some(match update {
-        ClientUpdate::Text { kind, mut text, boundary, identity } => {
-            if matches!(kind, ClientTextKind::Tool) { text.push_str("\n\n"); }
+        ClientUpdate::Text {
+            kind,
+            mut text,
+            boundary,
+            identity,
+        } => {
+            if matches!(kind, ClientTextKind::Tool) {
+                text.push_str("\n\n");
+            }
             AcpRuntimeEvent::Text(AcpTextEvent {
-                text, interactive, thought: !matches!(kind, ClientTextKind::Message), boundary, identity,
+                text,
+                interactive,
+                thought: !matches!(kind, ClientTextKind::Message),
+                boundary,
+                identity,
             })
         }
-        ClientUpdate::ToolCallActivity { tool_call_id, kind } =>
-            AcpRuntimeEvent::ToolCallActivity { tool_call_id, kind },
-        ClientUpdate::SessionInfoUpdate { title } =>
-            return title.map(|title| AcpRuntimeEvent::SessionTitleUpdated { title }),
+        ClientUpdate::ToolCallActivity { tool_call_id, kind } => {
+            AcpRuntimeEvent::ToolCallActivity { tool_call_id, kind }
+        }
+        ClientUpdate::SessionInfoUpdate { title } => {
+            return title.map(|title| AcpRuntimeEvent::SessionTitleUpdated { title });
+        }
         ClientUpdate::PromptTurnFinished => AcpRuntimeEvent::PromptTurnFinished,
         ClientUpdate::PromptTurnFailed { message } => AcpRuntimeEvent::PromptTurnFailed { message },
         ClientUpdate::Unknown { .. } => return None,

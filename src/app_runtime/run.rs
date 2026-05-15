@@ -466,11 +466,9 @@ fn upsert_sidebar_row(view: &mut RootView, session_id: &SessionId, stage: Stage)
 /// Build the frontend seam, emit the initial `Snapshot`, then hand off to
 /// `frontend.run(connector)`.
 ///
-/// `_publisher` is retained for the duration of the frontend's run so the
-/// command receiver and snapshot writer stay alive even though no
-/// background runtime loop is wired in this task yet. Without keeping it
-/// alive, dropping the receiver would close the command channel and any
-/// `commands.send(..)` from the frontend would fail spuriously.
+/// The command loop is spawned in the background and joined after the
+/// frontend exits, ensuring that the command receiver and snapshot writer
+/// stay alive for the duration of the run.
 pub fn run_frontend<F: Frontend>(frontend: F) -> Result<()> {
     let (connector, publisher) = build_connector();
     // Exactly one initial Snapshot before any granular delta (spec §

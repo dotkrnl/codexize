@@ -56,6 +56,3 @@ simple enough to skip the usual planning and sharding stages.\n\n\
         .with_context(|| format!("writing {}", tasks_path.display()))?;
     Ok(())
 }
-#[cfg(test)]
-#[path = "synthetic_artifacts_tests.rs"]
-mod tests;

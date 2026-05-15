@@ -268,7 +268,7 @@ impl App {
                 &dir,
                 &format!(
                     "{stage}-{}-r{round}-a{attempt}",
-                    task_id.map_or_else(|| "stage".to_string(), |id| format!("task{id}"))
+                    task_id.map_or_else(|| "stage".to_string(), |id| format!("task-{id}"))
                 ),
                 mode,
                 false,

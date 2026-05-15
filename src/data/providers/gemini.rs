@@ -13,7 +13,7 @@ struct OAuthCreds {
     access_token: Option<String>,
 }
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
-    dummy_invoke()?;
+    warmup_provider_cli()?;
     let token = resolve_access_token()?;
     let project_id = resolve_project_id()?;
     let payload = fetch_usage_payload(&token, &project_id).await?;
@@ -66,7 +66,7 @@ struct BucketQuota {
     quota_percent: Option<u8>,
     quota_resets_at: Option<DateTime<Utc>>,
 }
-fn dummy_invoke() -> Result<()> {
+fn warmup_provider_cli() -> Result<()> {
     run_provider_warmup("Gemini", "gemini", &["--yolo"], "/stats\n/exit\n", &[])
 }
 fn resolve_access_token() -> Result<String> {

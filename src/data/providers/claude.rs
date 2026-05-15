@@ -7,7 +7,7 @@ const BASE_URL: &str = "https://api.anthropic.com";
 const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 const BETA_HEADER: &str = "oauth-2025-04-20";
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
-    dummy_invoke()?;
+    warmup_provider_cli()?;
     let token = resolve_access_token()?;
     let org_id = resolve_org_id()?;
     let payload = fetch_usage_payload(&token, &org_id).await?;
@@ -51,7 +51,7 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
         quota_resets_at: reset,
     }])
 }
-fn dummy_invoke() -> Result<()> {
+fn warmup_provider_cli() -> Result<()> {
     run_provider_warmup(
         "Claude",
         "claude",

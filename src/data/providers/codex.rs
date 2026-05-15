@@ -33,7 +33,7 @@ struct ModelQuota {
     resets_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
-    dummy_invoke()?;
+    warmup_provider_cli()?;
     let config = read_config().unwrap_or_default();
     let default_model = config
         .model
@@ -84,7 +84,7 @@ pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
 #[cfg(test)]
 #[path = "codex_tests.rs"]
 mod tests;
-fn dummy_invoke() -> Result<()> {
+fn warmup_provider_cli() -> Result<()> {
     run_provider_warmup("Codex", "codex", &[], "/status\n/exit\n", &[])
 }
 fn read_config() -> Result<CodexConfig> {

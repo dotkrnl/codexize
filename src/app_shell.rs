@@ -451,7 +451,9 @@ impl AppShell {
             // map under a single code path, so the tick no longer needs
             // to borrow the focused `App` (spec §4.7, §4.8 line 280).
             self.return_app_to_supervisor(app);
-            let _ = self.run_scheduler_tick();
+            if let Err(err) = self.run_scheduler_tick() {
+                tracing::warn!("scheduler tick failed: {err}");
+            }
             app = self.take_focused_app();
             if let Some(path) = app.take_pending_view_path() {
                 input.shutdown_blocking();

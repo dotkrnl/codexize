@@ -620,12 +620,7 @@ impl AppShell {
             seq: 0, // Managed by RuntimePublisher
             shell: ShellView {
                 visible: self.sidebar.visible,
-                focus: match self.sidebar.focus {
-                    ShellFocus::Workspace => {
-                        crate::app_runtime::views::shell::ShellFocus::Workspace
-                    }
-                    ShellFocus::Sidebar => crate::app_runtime::views::shell::ShellFocus::Sidebar,
-                },
+                focus: self.sidebar.focus,
                 selected_index: self.sidebar.selected_index,
                 rows: self
                     .sidebar
